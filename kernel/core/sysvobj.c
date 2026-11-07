@@ -156,6 +156,8 @@ struct Vusbep {
 
 typedef struct Vdevice Vdevice;
 struct Vdevice {
+    int family;
+    Veth *ether;
     QLock lk;              /* serialize one complete request/completion */
     Ep *ep;
     int opened;
@@ -397,6 +399,8 @@ vobjput(Vobj *o)
         Vdevice *d = o->priv;
 
         o->priv = nil;
+        if(d->ether != nil)
+            vetherclose(d->ether);
         if(d->reply != nil)
             vobjput(d->reply);
         if(d->ep != nil){
@@ -1109,46 +1113,25 @@ vobjfifosub(int fifoh, uvlong rights, long capacity)
 }
 
 int
-vobjfifosend(int fifoh, int objh, void *env, long envlen)
+vobjfifopublish(Vobj *fifo, Vobj *object, int rights, void *env, long envlen)
 {
-	Vhand *fh, *oh;
-	Vfifo *f;
-	Vsub *s;
-	Vmsg *nodes[Vfifosubsmax];
-	int n, i, active;
-	uchar envbuf[Venvmax];
+    Vfifo *f;
+    Vsub *s;
+    Vmsg *nodes[Vfifosubsmax];
+    int n, i, active;
+    uchar envbuf[Venvmax];
 
-	if(envlen < 0 || envlen > Venvmax || (envlen > 0 && env == nil))
-		error(Ebadarg);
-	if(envlen > 0){
-		validaddr((uintptr)env, envlen, 0);
-		memmove(envbuf, env, envlen);
-	}
-	fh = vlookup(fifoh, Vsend);
-	f = vgetfifo(fh);
-	if(f == nil){
-		vhandput(fh);
-		error(Ebadarg);
-	}
-	if(waserror()){vhandput(fh);nexterror();}
-	oh = vlookup(objh, Vdelegate);
- poperror();
-	if(oh->obj == fh->obj){
-		vhandput(fh);
-		vhandput(oh);
-		error(Ebadarg);		/* no self-reference cycle */
-	}
-	if(oh->obj->kind == VkindFifo){
-		vhandput(fh);
-		vhandput(oh);
-		error("vobj: FIFO references are not transferable");
-	}
+    if(fifo == nil || fifo->kind != VkindFifo || fifo->fifo == nil
+    || object == nil || object->kind == VkindFifo || envlen < 0
+    || envlen > Venvmax || (envlen != 0 && env == nil))
+        error(Ebadarg);
+    f = fifo->fifo;
+    if(envlen != 0)
+        memmove(envbuf, env, envlen);
 	/* Reserve all message nodes before publishing anything. */
 	qlock(&f->lk);
 	if(f->closed){
 		qunlock(&f->lk);
-		vhandput(fh);
-		vhandput(oh);
 		error("vobj: FIFO is closed");
 	}
 	active = f->nsubs;
@@ -1161,14 +1144,12 @@ vobjfifosend(int fifoh, int objh, void *env, long envlen)
     vobjput(nodes[i]->obj);free(nodes[i]);
    }
 			qunlock(&f->lk);
-			vhandput(fh);
-			vhandput(oh);
 			error(Enomem);
 		}
 		nodes[n]->next = nil;
-		nodes[n]->obj = oh->obj;
- nodes[n]->rights = oh->rights;
-		incref(&oh->obj->ref);
+		nodes[n]->obj = object;
+ nodes[n]->rights = rights;
+		incref(&object->ref);
 		nodes[n]->envlen = (ulong)envlen;
 		if(envlen > 0)
 			memmove(nodes[n]->env, envbuf, envlen);
@@ -1177,8 +1158,6 @@ vobjfifosend(int fifoh, int objh, void *env, long envlen)
 		for(i = 0; i < active; i++)
 			vobjput(nodes[i]->obj), free(nodes[i]);
 		qunlock(&f->lk);
-		vhandput(fh);
-		vhandput(oh);
 		error(Enomem);
 	}
 	f->sends++;
@@ -1224,9 +1203,43 @@ vobjfifosend(int fifoh, int objh, void *env, long envlen)
 		vmsgrelease(1);
 	}
 	qunlock(&f->lk);
-	vhandput(fh);
-	vhandput(oh);
 	return 0;
+}
+
+int
+vobjfifosend(int fifoh, int objh, void *env, long envlen)
+{
+    Vhand *fh, *oh;
+    uchar envelope[Venvmax];
+
+    if(envlen < 0 || envlen > Venvmax || (envlen != 0 && env == nil))
+        error(Ebadarg);
+    if(envlen != 0){
+        validaddr((uintptr)env, envlen, 0);
+        memmove(envelope, env, envlen);
+    }
+    fh = vlookup(fifoh, Vsend);
+    if(waserror()){
+        vhandput(fh);
+        nexterror();
+    }
+    if(vgetfifo(fh) == nil)
+        error(Ebadarg);
+    oh = vlookup(objh, Vdelegate);
+    if(waserror()){
+        vhandput(oh);
+        nexterror();
+    }
+    if(oh->obj == fh->obj)
+        error(Ebadarg);
+    if(oh->obj->kind == VkindFifo)
+        error("vobj: FIFO references are not transferable");
+    vobjfifopublish(fh->obj, oh->obj, oh->rights, envelope, envlen);
+    poperror();
+    vhandput(oh);
+    poperror();
+    vhandput(fh);
+    return 0;
 }
 
 static int
@@ -1398,41 +1411,56 @@ vobjgrant(int handle, uvlong rights)
 	return result;
 }
 
+static void
+vfifoclose(Vobj *o, int strict)
+{
+    Vfifo *f;
+    Vsub *s, *next;
+
+    if(o == nil || o->kind != VkindFifo || o->fifo == nil)
+        error(Ebadarg);
+    f = o->fifo;
+    qlock(&f->lk);
+    if(f->closed){
+        qunlock(&f->lk);
+        if(strict) error("vobj: FIFO is already closed");
+        return;
+    }
+    f->closed = 1;
+    s = f->subs;
+    f->subs = nil;
+    f->nsubs = 0;
+    qunlock(&f->lk);
+    for(; s != nil; s = next){
+        next = s->next;
+        s->next = nil;
+        vsubshutd(s);
+        vsubput(s);
+    }
+}
+
+void
+vobjfifoclose(Vobj *o)
+{
+    vfifoclose(o, 0);
+}
+
 int
 vobjrevoke(int handle)
 {
-	Vhand *h;
-	Vfifo *f;
-	Vsub *s, *next;
+    Vhand *h;
+    Vfifo *f;
 
-	h = vlookup(handle, Vcontrol);
-	f = vgetfifo(h);
-	if(f == nil){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	qlock(&f->lk);
-	if(f->closed){
-		qunlock(&f->lk);
-		vhandput(h);
-		error("vobj: FIFO is already closed");
-	}
-	f->closed = 1;
-	s = f->subs;
-	f->subs = nil;
-	f->nsubs = 0;
- 
-	qunlock(&f->lk);
-	for(; s != nil; s = next){
-		next = s->next;
-		s->next = nil;
-
-		/* The fifo list reference keeps s alive through the wakeup. */
-		vsubshutd(s);
-		vsubput(s);
-	}
-	vhandput(h);
-	return 0;
+    h = vlookup(handle, Vcontrol);
+    if(waserror()){vhandput(h);nexterror();}
+    f = vgetfifo(h);
+    if(f == nil)
+        error(Ebadarg);
+    /* Preserve the existing user-visible duplicate-revoke error. */
+    vfifoclose(h->obj, 1);
+    poperror();
+    vhandput(h);
+    return 0;
 }
 
 /* Drop only a Handle that still names the expected provider kind. */
@@ -2327,6 +2355,7 @@ vobjdevicesopen(uvlong rights, VobjId *id)
 	if(vobjhandlesbykind(up, VkindDevices) >= Vusbslotmax)
 		error("too many device catalog handles");
 	usbcore_init();
+    vetherlist(nil, 0); /* initialize the existing NIC registry once */
 	o = vobjnewkind(VkindDevices, 0);
 	if(o == nil)
 		error(Enomem);
@@ -2390,6 +2419,8 @@ vobjdevicelist(int handle, void *out, long bytes)
 			memmove((uchar*)out + total*sizeof e, &e, sizeof e);
 		total++;
 	}
+    total += vetherlist(total < cap ? (ObjDeviceEntry*)((uchar*)out+total*sizeof e) : nil,
+        total < cap ? cap-total : 0);
 	poperror();
 	free(entries);
 	vhandput(h);
@@ -2410,11 +2441,15 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	validaddr((uintptr)req, sizeof r, 0);
 	memmove(&r, req, sizeof r);
 	if(r.version != OBJ_DEVICE_ABI_VERSION || r.reserved != 0
-	|| r.family != ObjDeviceUsbControl || r.selector0 < 0 || r.selector1 < 0)
+    || (r.family != ObjDeviceUsbControl && r.family != ObjDeviceEthernet)
+    || r.selector0 < 0 || r.selector1 < 0
+    || (r.family == ObjDeviceEthernet && r.selector1 != 0))
 		error(Ebadarg);
 	if(id != nil)
 		validaddr((uintptr)id, sizeof *id, 1);
 	max = Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate;
+    if(r.family == ObjDeviceEthernet)
+        max |= Vsubscribe;
 	if(rights == 0)
 		rights = max;
 	if(rights & ~(uvlong)max)
@@ -2440,6 +2475,10 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	if(d == nil)
 		error(Enomem);
 	o->priv = d;
+    d->family = r.family;
+    if(r.family == ObjDeviceEthernet){
+        d->ether = vetheropen(r.selector0);
+    }else{
 	d->ep = usbcore_getep(r.selector0, r.selector1);
 	if(d->ep == nil || d->ep->ttype != Tctl)
 		error(Ebadarg);
@@ -2447,6 +2486,7 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	 * CTL metadata handles cannot perform data I/O and do not share it. */
 	usbcore_dataopen(d->ep, ORDWR);
 	d->opened = 1;
+    }
 	h = vobjinstallobj(o, (int)rights);
 	poperror();
 	if(id != nil){
@@ -2505,6 +2545,18 @@ vobjdevicesend(int handle, void *in, long len)
 	int n, incoming;
 	long got;
 	uvlong seq;
+
+    h = vlookup(handle, Vsend);
+    if(waserror()){vhandput(h);nexterror();}
+    d = vdevice(h);
+    if(d->family == ObjDeviceEthernet){
+        got = vethersend(d->ether, in, len);
+        poperror();
+        vhandput(h);
+        return got;
+    }
+    poperror();
+    vhandput(h);
 
 	if(in == nil || len < Rsetuplen || len > Rsetuplen+OBJ_DEVICE_MAXPAYLOAD)
 		error(Ebadarg);
@@ -2604,6 +2656,22 @@ vobjdevicerecv(int handle, void *out)
 		nexterror();
 	}
 	d = vdevice(h);
+    if(d->family == ObjDeviceEthernet){
+        int rights;
+        if(!(h->rights & Vsubscribe))
+            error(Eperm);
+        rights = Vsubscribe|Vmeta;
+        rights |= h->rights & (Vdelegate|Vcontrol);
+        result = vobjinstallobj(vetherfifo(d->ether), rights);
+        r.sequence = 0;
+        r.family = ObjDeviceEthernet;
+        r.length = 0;
+        memmove(out, &r, sizeof r);
+        poperror();
+        vhandput(h);
+        return result;
+    }
+
 	qlock(&d->lk);
 	if(waserror()){
 		qunlock(&d->lk);
@@ -2627,34 +2695,43 @@ vobjdevicerecv(int handle, void *out)
 }
 
 int
-vobjdevicectl(int handle, uvlong op)
+vobjdevicectl(int handle, uvlong op, void *out, long len)
 {
-	Vhand *h;
-	Vdevice *d;
+    Vhand *h;
+    Vdevice *d;
 
-	if(op != ObjDeviceUsbClearHalt)
-		error(Ebadctl);
-	h = vlookup(handle, Vcontrol);
-	if(waserror()){
-		vhandput(h);
-		nexterror();
-	}
-	d = vdevice(h);
-	qlock(&d->lk);
-	if(waserror()){
-		qunlock(&d->lk);
-		nexterror();
-	}
-    if(d->failed)
-        error("device: transfer failed; close and reopen");
-	if(d->reply != nil)
-		error(Einuse);
-	usbcore_ioctl(d->ep, USBclrhalt, nil, 0);
-	poperror();
-	qunlock(&d->lk);
-	poperror();
-	vhandput(h);
-	return 0;
+    h = vlookup(handle, 0);
+    if(waserror()){vhandput(h);nexterror();}
+    d = vdevice(h);
+    if(d->family == ObjDeviceEthernet){
+        if(op == ObjDeviceEtherStatus){
+            ObjEtherStatus status;
+            if(!(h->rights & Vmeta)) error(Eperm);
+            if(out == nil || len != sizeof status) error(Ebadarg);
+            validaddr((uintptr)out, sizeof status, 1);
+            vetherstatus(d->ether, &status);
+            memmove(out, &status, sizeof status);
+        }else if(op == ObjDeviceEtherDetach){
+            if(!(h->rights & Vcontrol)) error(Eperm);
+            if(out != nil || len != 0) error(Ebadarg);
+            vetherdetach(d->ether);
+        }else
+            error(Ebadctl);
+    }else{
+        if(op != ObjDeviceUsbClearHalt) error(Ebadctl);
+        if(!(h->rights & Vcontrol)) error(Eperm);
+        if(out != nil || len != 0) error(Ebadarg);
+        qlock(&d->lk);
+        if(waserror()){qunlock(&d->lk);nexterror();}
+        if(d->failed) error("device: transfer failed; close and reopen");
+        if(d->reply != nil) error(Einuse);
+        usbcore_ioctl(d->ep, USBclrhalt, nil, 0);
+        poperror();
+        qunlock(&d->lk);
+    }
+    poperror();
+    vhandput(h);
+    return 0;
 }
 
 /*

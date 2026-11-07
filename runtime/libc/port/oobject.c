@@ -610,3 +610,14 @@ obj_device_ctl(int device, unsigned int operation)
 	c.arg0 = operation;
 	return obj_invoke(device, &c, sizeof c);
 }
+
+long
+obj_device_ether_status(int device, ObjEtherStatus *status)
+{
+    ObjCall c;
+    callinit(&c, ObjOpDeviceCtl);
+    c.arg0 = ObjDeviceEtherStatus;
+    c.out = status;
+    c.outlen = sizeof *status;
+    return obj_invoke(device, &c, sizeof c);
+}

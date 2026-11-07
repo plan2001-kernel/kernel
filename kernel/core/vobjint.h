@@ -17,6 +17,7 @@ enum {
 };
 
 typedef struct Vobj Vobj;
+typedef struct Veth Veth;
 
 struct Vobj {
 	Ref	ref;
@@ -128,7 +129,19 @@ long vobjdevicelist(int handle, void *out, long bytes);
 int vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id);
 long vobjdevicesend(int handle, void *in, long len);
 int vobjdevicerecv(int handle, void *out);
-int vobjdevicectl(int handle, uvlong op);
+int vobjdevicectl(int handle, uvlong op, void *out, long len);
+/* Kernel-owned references and envelope, process context only.  This is the
+ * same ObjectFIFO publisher used by user Handle sends, without ambient
+ * process Handle lookup.  Caller pins fifo/object throughout the call. */
+int vobjfifopublish(Vobj *fifo, Vobj *object, int rights, void *env, long len);
+void vobjfifoclose(Vobj *fifo);
+int vetherlist(ObjDeviceEntry *out, int capacity);
+Veth *vetheropen(int controller);
+void vetherclose(Veth*);
+void vetherdetach(Veth*);
+Vobj *vetherfifo(Veth*);
+long vethersend(Veth*, void*, long);
+void vetherstatus(Veth*, ObjEtherStatus*);
 
 /* CLOSE only when the Handle still names the expected provider kind. */
 int	vobjclosekind(int handle, int kind);

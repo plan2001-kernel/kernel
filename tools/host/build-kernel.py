@@ -197,6 +197,7 @@ KERNEL_SOURCES = {
     "sysuart": "kernel/core/sysuart.c",
     "sysusb": "kernel/core/sysusb.c",
     "sysvobj": "kernel/core/sysvobj.c",
+    "sysdevether": "kernel/core/sysdevether.c",
     "taslock": "kernel/core/taslock.c",
     "tod": "kernel/core/tod.c",
     "trap": "kernel/amd64/trap.c",

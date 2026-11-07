@@ -453,7 +453,11 @@ changing GE/O format, or implementing userspace protocol stacks.
 
 **Depends on:** T12 device ABI and T11 FIFO validation.
 
-**Scope (PLANNED):**
+**Status (2026-11-07): emulated integration gate PASS.** See
+[T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md): 55 T13 assertions and a fresh
+66-check USB regression; physical and fault-injection limits remain explicit.
+
+**Scope (implemented):**
 
 Use the current Ethernet core (`ethercore.c`: `ethercore_lookup`,
 `ethercore_byindex`, `ethercore_attach`, `ethercore_tx`,
@@ -477,14 +481,16 @@ a sleeping allocation or blocking lock from the interrupt path.
 - Overflow, close, revocation and teardown have defined, tested outcomes.
 - The RX interrupt path performs only the bounded handoff; blocking/sleeping
   work runs in a safe context.
-- The existing working kernel network service continues to work, or any
-  temporary change is documented as transitional and does not silently weaken
-  security.
+- The later T13 task explicitly overrides native-network preservation:
+  disable/remove obsolete kernel networking after assessing actual boot, MPY
+  and driver dependencies. This implementation disables its startup and OBJ
+  TCP/UDP opens; the result documents remaining linked legacy code.
 - No per-protocol/network-frame FIFO variant is added.
 - The report distinguishes raw-frame transport from any protocol parsing.
 
 **NOT in scope:** userspace IPv6 implementation, TCP/UDP migration, changing
-the GE/O format, or deleting the native kernel network stack prematurely.
+the GE/O format, or implementing T14–T16. Native network disabling is authorized by the
+later T13 task and is documented in its result.
 
 ### T14 — Minimal userspace IPv6 service (only after T13 passes)
 

@@ -118,13 +118,50 @@ enum {
  * Wi-Fi have their own payload/metadata contracts in future integrations.
  */
 #define OBJ_DEVICE_ABI_VERSION 1
-#define OBJ_DEVICE_LISTMAX 64
+#define OBJ_DEVICE_LISTMAX 128
 #define OBJ_DEVICE_MAXPAYLOAD 4096
+#define OBJ_DEVICE_MAXMESSAGE 16384
 
 enum {
     ObjDeviceUsbControl = 1,
+    ObjDeviceEthernet = 2,
     ObjDeviceUsbClearHalt = 1,
+    ObjDeviceEtherStatus = 2,
+    ObjDeviceEtherDetach = 3,
 };
+
+/* Ethernet: complete L2 octets, including MACs/EtherType, excluding FCS.
+ * SEND returns accepted bytes, not wire/DMA completion. RECV obtains the
+ * existing ObjectFIFO capability; subscribe/receive use the ordinary OBJ
+ * operations. No USB setup or synchronous USB completion is implied. */
+typedef struct ObjEtherRxMeta {
+    unsigned int version;
+    unsigned int controller;
+    unsigned int length;
+    unsigned int reserved;
+    unsigned long long sequence;
+} ObjEtherRxMeta;
+
+typedef struct ObjEtherStatus {
+    unsigned int version;
+    unsigned int controller;
+    unsigned int minframe;
+    unsigned int maxframe;
+    unsigned char mac[6];
+    unsigned char reserved[2];
+    int link;
+    unsigned int closed;
+    unsigned long long arrivals;
+    unsigned long long published;
+    unsigned long long handoff_drops;
+    unsigned long long publish_drops;
+    unsigned long long tx_accepted;
+    unsigned long long highwater;
+    unsigned int handoff_capacity;
+    unsigned int handoff_queued;
+} ObjEtherStatus;
+
+long obj_device_ether_status(int device, ObjEtherStatus *status);
 
 typedef struct ObjDeviceEntry {
     unsigned int version;

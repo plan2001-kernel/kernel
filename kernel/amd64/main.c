@@ -18,7 +18,6 @@ extern void uartnreset(void);
 extern void usbcore_reset(void);
 extern void usbcore_shutdown(void);
 extern void sysgefsshutdown(void);
-extern int ipv6native_boot_start(void);
 
 extern void (*i8237alloc)(void);
 
@@ -196,13 +195,10 @@ main(void)
 	 * sddevtab.reset path a no-op in profiles that have it.
 	 */
 	sdinitcontrollers();
-	/*
-	 * Native IPv6 networking starts in kernel process context before the
-	 * O-server handoff.
-	 */
-	/* Initialize boot identity here, outside the native network service. */
+    /* T13 raw-device profile: no kernel protocol service owns the NIC.
+     * Drivers/registry are initialized by the device catalog on demand.
+     * Boot/MPY storage and console need no kernel IPv6/TCP/UDP service. */
 	kstrdup(&eve, "");
-	ipv6native_boot_start();
 	bootmark(BMDevs);
 	preallocpages();
 	pageinit();

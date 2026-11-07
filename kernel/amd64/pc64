@@ -1,8 +1,9 @@
-# pc64 - canonical O-only storage/boot plus native IPv6-only networking.
+# pc64 - canonical O-only storage/boot plus raw Ethernet devices.
 #
 # Combines native O storage and boot with the E7.7 native Ethernet/IPv6
-# components.  The legacy #l/#I/#W registrations and
-# compiled IPv4 paths are omitted.  Native IPv6 starts during kernel boot.
+# components still present in the link closure. The legacy #l/#I/#W
+# registrations and compiled IPv4 paths are omitted. T13 does not start
+# native IPv6; the common Device ABI exclusively claims raw NIC RX on open.
 # There is no Dev registry and no swap Dev: Plan2001-O has no swap
 # partition, file, device or anonymous pageout, and no legacy Dev front
 # doors.  The native framebuffer text console and the raw PS/2 keyboard
