@@ -8,9 +8,64 @@ päätös ovat ensisijaisia. Historialliset raportit säilyvät sellaisinaan; ni
 ei kirjoiteta uudelleen, mutta niiden julkaisukäytäntöä koskevat lauseet eivät
 enää ohjaa tulevaa työtä.
 
-## Omistajan normatiivinen päätös (2026-11-04)
+## Nykyinen työnkulku (2026-11-07)
 
-Seuraava päätös on kirjattu sellaisenaan ja se on sitova:
+Omistajan myöhempi päätös siirtää **nykyisen lähdekoodin GitHubiin**:
+[plan2001-kernel/kernel, main](https://github.com/plan2001-kernel/kernel/tree/main).
+Plan2001.comin MCP on **tehtävien ohjaus-, jono- ja tilakanava**. Tämä luku on
+ensisijainen alla säilytettyihin vuoden 2026-11-04 kuha- ja
+MCP-lähdejulkaisumääräyksiin nähden. Aiemmat päätökset ja toteutuskuvaukset
+säilytetään historiallisena näyttönä, eikä vanhoja tuloksia kirjoiteta uusiksi.
+
+1. Nouda työ `task_claim`-kutsulla. Tarkista tehtävän rajaus, todellinen
+   suoritusympäristö, työkopion polku/haara ja paikalliset muutokset. Älä oleta
+   kuhaa, tiettyä käyttöjärjestelmää tai agenttia. Käyttäjän ChatGPT:hen liittämä
+   GitHub-tili ei yksin todista tämän ajon oikeuksia: tarkista käytettävissä
+   olevan GitHub-liittimen tai CLI:n luku- ja kirjoitusoikeudet.
+2. Lue ajantasainen GitHub `main` ja kirjaa sen **tarkka lähtö-SHA**. Lue sen
+   `AGENTS.md` ja tämä dokumentti ennen muutoksia. Käytä tarvittaessa erillistä
+   työkopiota ja säilytä muiden työ. Tarkista uuden tehtävän alussa HEAD uudelleen;
+   aiemman tehtävän tai tämän dokumentin SHA ei ole pysyvä main-osoitin.
+3. Tee rajattu muutos omaan haaraan ja ehdota sitä PR:llä `main`-haaraan.
+   GitHub-liittimen haara-/commit-operaatiot tai toimiva Git push ovat
+   hyväksyttäviä lähteensiirtotapoja. Tarkista diffi ennen kirjoitusta, ja lue
+   kirjoitettu haara/commit sekä tiedostot riippumattomalla GitHub-haulla takaisin.
+   Varmista **tulos-SHA**, tiedostojen sisältö ja muutosten rajaus. Älä ylikirjoita
+   etämuutoksia, yhdistä PR:ää tai muuta `main`-haaraa ilman erillistä tehtävää.
+4. Raportoi tarkistukset toteutuneen näytön mukaan: PASS, PARTIAL, BLOCKED tai
+   NOT RUN, tarkat komennot/rajapintakutsut, tulokset ja niiden rajat. Kernelin
+   käännös tai QEMU-testi ei ole PASS pelkän lähdekoodin tai aiemman raportin
+   perusteella. Dokumentaatiotehtävässä ajamatta jätetyt kernel/QEMU-testit
+   merkitään NOT RUN; työnkulun yhteystesti ei ole kernelin regressiotesti.
+5. Päätä työ `task_report`-kutsulla ja varmista tila `task_status`-kutsulla.
+   Sisällytä lähtö- ja tulos-SHA, todelliset GitHub-commit- ja PR-linkit sekä
+   tarkistusten tulokset. Erottele MCP-jono, GitHub-luku, haarakirjoitus,
+   takaisinluku, PR ja valmistumisraportti. Jos kirjoitus tai PR estyy, ilmoita
+   täsmällinen este ja toimita patch/teksti; älä ilmoita toteutumatonta onnistumista.
+
+**Lähdeversioiden ero:** 2026-11-07 tarkistettu GitHub main oli
+`cc731287974e6c19936abdf8f4076aedc6bd76e5`, ja T12:n tuonticommit oli
+`7dd9e3ae532938a69b7a1bcce4d111768bbbfadc`. Tuolloin GitHubissa olivat
+`docs/DEVICE-ABI.md`, `docs/T12-DEVICE-RESULT.md`, `kernel/core/sysvobj.c` ja
+`tools/host/t12/device-checks.py`. MCP:n `kernel_status` palautti edelleen T11:n
+`524417426c965e0a57655ece6a0c3fbcd9cac98f299a055b85828cba6ffb2b0d`.
+Se on historiallinen lähdevedos, ei uusien tehtävien koodipohja. Tarkista nämä
+viitteet aina uudelleen; **GitHub push/PR tai MCP:n task_report ei päivitä
+MCP-lähdesnapshotia**. Älä korvaa GitHubin T12-lähdettä vanhalla MCP-vedoksella.
+
+Alla säilytetyt `make pub`, MCP-julkaisija ja automaattiset OpenCode-kytkennät
+kuvaavat entistä lähdejakelua. Niitä ei käynnistetä tämän GitHub-työnkulun
+nojalla; mahdollinen MCP-lähdevedoksen synkronointi on erillinen tehtävä ja
+vaatii erillisen takaisinluvun. Vanha `check-public-text.py` kuuluu aiemman
+MCP-julkaisun portteihin, ei uuden GitHub-PR:n hyväksyntäporttiin. Tämä
+päätös ei muuta julkaisutyökaluja, automaatiota eikä laite-/levyoperaatioiden
+olemassa olevia valtuutusrajoja.
+
+## Historiallinen omistajan päätös (2026-11-04)
+
+Seuraava päätös on kirjattu sellaisenaan. Sen lähteensiirtokäytäntö oli
+sitova tuolloin; yllä oleva myöhempi päätös ohjaa nykyisiä töitä. Seuraavat
+lähdejulkaisun toteutusluvut säilyttävät aiemman MCP-mallin kuvauksen:
 
 > "tuotantokerneliä ei ole. Kernel on PoC tason kernel joka sijaitsee kuha
 > koneella. Kernelin koodi sijaitsee kuha koneella ja plan2001.com
