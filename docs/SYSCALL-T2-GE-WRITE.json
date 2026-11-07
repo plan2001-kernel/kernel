@@ -1,0 +1,370 @@
+{
+  "task": "T2",
+  "title": "MicroPythonin pysyvän GE/O-tilan kirjoitus ja commit OBJ-rajapintaan",
+  "generated_utc": "2026-11-05T20:45:34Z",
+  "host": "kuha",
+  "base_snapshot": "9952e8ef96e9f5a4837cecb386f4ba170184b253bea7fc45970be0b7eb7ece60",
+  "scope": "Normaalin MicroPythonin REPL/pysyvän tilan GE/O-kirjoitus, luonti ja commit OBJ-rajapintaan. Ei uusia/poistettuja syscall-numeroita, ei boot-loaderin/prosessien/verkon/USB:n muutoksia, ei space.h*-API:n siirtoa (T2b).",
+  "source_changes": [
+    "runtime/abi/obj.h",
+    "runtime/libc/port/oobject.c",
+    "kernel/core/sysobj.c",
+    "kernel/core/sysvobj.c",
+    "kernel/core/vobjint.h",
+    "micropython/p9space.c",
+    "micropython/modplan9.c"
+  ],
+  "contract": {
+    "put_oid": "OBJINVOKE(ObjOpPutOid=25) VkindSpace-handlella; arg0=OID, in/inlen=bounded bytes; kayttaa oswritehand/onativeput Owrite-valtuutusta; EI committaa; 64 MiB raja.",
+    "create_persist": "OBJINVOKE(ObjOpCreatePersist=12) Space-handlella; atomiminen allocate+payload+sync (ospacecreate-semantiikka); 1 MiB suoran Python-tavuobjektin PoC-raja.",
+    "commit": "OBJINVOKE(ObjOpCommit=13) samalla Space-handlella; yksi commit per entinen ospacecommit.",
+    "space_handle": "Kaikki kolme kayttavat T1:n auktorisoitua spread-VkindSpace-handlea; ei pelkkaa OID:ta. Ohand- ja Vhand-identiteetit sailyvat erillisina.",
+    "transaction": "ObjOpPutOid ei committaa, joten saman commitin kirjoitukset pysyvat samassa Space-transaktiossa lopulliseen ObjOpCommitiin asti.",
+    "first_boot": "Nimetyn OID:n (OID_GRAPH/OID_ENV/koodi) kirjoitus toimii myos ennen julkaisua ensimmaisessa bootissa.",
+    "unchanged": "Viiden OBJ-syscallin numerot, OID_GRAPH V7 -sisalto, Environment/moduulikoodi, REPL-funktioiden tallennus, OID:n ainutkertaisuus, tallennusformaatti.",
+    "legacy": "OSPACEOPEN(55)/OVOLOPEN(54), space.hput/hcommit/hcreate ja space.open_handle sailyvat; OSPACEPUT/COMMIT/CREATE-stubit ovat vain space.h*-polulla (T2b)."
+  },
+  "measurement": {
+    "tool": "python3 tools/host/syscall-t0-measure.py --run --out build/syscall-t2/t0-tool-measurement.json --summary",
+    "report": "build/syscall-t2/t0-tool-measurement.json",
+    "t0_baseline": "docs/SYSCALL-T0-MEASUREMENT.json (muuttumaton); build/syscall-t2/t0-baseline-before/ sisaltaa T0-lokien kopiot",
+    "validation": {
+      "instrumented_boot": "PASS",
+      "instrumented_persist": "PASS",
+      "normal_smoke_boot": "PASS",
+      "normal_persist": "PASS",
+      "normal_rebuild": "PASS"
+    },
+    "run_exit_status": {
+      "boot": 0,
+      "persist": 0,
+      "normal-smoke": 0,
+      "normal-persist": 0
+    },
+    "per_run_phase": {
+      "boot/boot-loader": {
+        "total_t2": 3,
+        "ospaceut_t0": 0,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 0,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 0,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 0,
+        "obj_commit_t2": 0,
+        "objinvoke_total_t2": 0
+      },
+      "boot/micropython-init-and-commit": {
+        "total_t2": 47,
+        "ospaceut_t0": 3,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 1,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 9,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 3,
+        "obj_commit_t2": 1,
+        "objinvoke_total_t2": 21
+      },
+      "boot/micropython-repl": {
+        "total_t2": 597,
+        "ospaceut_t0": 18,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 6,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 24,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 18,
+        "obj_commit_t2": 6,
+        "objinvoke_total_t2": 558
+      },
+      "persist-boot1/boot-loader": {
+        "total_t2": 3,
+        "ospaceut_t0": 0,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 0,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 0,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 0,
+        "obj_commit_t2": 0,
+        "objinvoke_total_t2": 0
+      },
+      "persist-boot1/micropython-init-and-commit": {
+        "total_t2": 47,
+        "ospaceut_t0": 3,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 1,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 9,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 3,
+        "obj_commit_t2": 1,
+        "objinvoke_total_t2": 21
+      },
+      "persist-boot2/boot-loader": {
+        "total_t2": 3,
+        "ospaceut_t0": 0,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 0,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 0,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 0,
+        "obj_commit_t2": 0,
+        "objinvoke_total_t2": 0
+      },
+      "persist-boot2/micropython-init-and-commit": {
+        "total_t2": 50,
+        "ospaceut_t0": 3,
+        "ospaceut_t2": 0,
+        "ospacecommit_t0": 1,
+        "ospacecommit_t2": 0,
+        "ospacecreate_t0": 0,
+        "ospacecreate_t2": 0,
+        "ospaceget_t0": 10,
+        "ospaceget_t2": 0,
+        "obj_put_oid_t2": 3,
+        "obj_commit_t2": 1,
+        "objinvoke_total_t2": 22
+      }
+    },
+    "totals": {
+      "ospaceut_t0": 27,
+      "ospaceut_t2": 0,
+      "ospacecommit_t0": 9,
+      "ospacecommit_t2": 0,
+      "ospacecreate_t0": 0,
+      "ospacecreate_t2": 0,
+      "ospaceget_t0": 52,
+      "ospaceget_t2": 0,
+      "obj_put_oid_t2": 27,
+      "obj_commit_t2": 9
+    },
+    "commit_count_not_increased": "T0 OSPACECOMMIT 1+6+1+1=9 == T2 obj_commit 1+6+1+1=9; T0 OSPACEPUT 3+18+3+3=27 == T2 obj_put_oid 27.",
+    "version_semantics": "build/syscall-t0/normal-persist/report.txt: boot1_final_commit_version=1, boot2_restore_version=1, boot2_final_commit_version=2, boot2_restored_version_matches=PASS; Counter n 1 -> n 2.",
+    "instrumented_binaries": {
+      "measured_micropython": {
+        "path": "build/syscall-t0/binaries/micropython.elf",
+        "sha256": "fb1e1dd4f0b6652c9f8df6ffb187492f5f0564c5e113def52e898fdf343f8ee1",
+        "size": 538168
+      },
+      "measured_obootoid": {
+        "path": "build/syscall-t0/binaries/obootoid.elf",
+        "sha256": "10c63c33b13f31fe10c401a639aeca36a97af1700e3f1e4dac409cff48a13769",
+        "size": 5456
+      },
+      "measured_kernel": {
+        "path": "build/syscall-t0/binaries/9pc64.elf",
+        "sha256": "c8662c591e5304f981be418f22e8d7b385b3f89ad787b9728ec7dace170608c9",
+        "size": 1154568
+      },
+      "normal_artifacts_restored": true
+    }
+  },
+  "static_call_sites": {
+    "method": "objdump -d build/gcc/micropython.elf; suorat call-kohteet",
+    "ospaceput": {
+      "nr": 57,
+      "callers": [
+        "space_hput"
+      ]
+    },
+    "ospacecreate": {
+      "nr": 61,
+      "callers": [
+        "space_hcreate"
+      ]
+    },
+    "ospacecommit": {
+      "nr": 58,
+      "callers": [
+        "space_hcommit"
+      ]
+    },
+    "ospaceopen": {
+      "nr": 55,
+      "callers": [
+        "space_open_handle",
+        "ospace_open.isra.0"
+      ]
+    },
+    "ovolopen": {
+      "nr": 54,
+      "callers": [
+        "p9_space_o"
+      ]
+    },
+    "ospaceget": {
+      "nr": 56,
+      "callers": []
+    },
+    "note": "Normaali space.oput/oregister/ocommit ei kutsu namia; legacy-stubit ovat vain eksplisiittisen space.h*-API:n takia. obootoid.elf:n omat boot-loader-trapit ovat T10-totea."
+  },
+  "tests": [
+    {
+      "name": "kanoninen kernel build",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/logs/build-kernel.log"
+    },
+    {
+      "name": "kanoninen MicroPython build",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/logs/build-mpy.log; 246 unit, 0 FAIL, ei undefined-symboleita"
+    },
+    {
+      "name": "EFI- ja host-build",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/logs/build-efi.log, build/syscall-t2/logs/build-host.log"
+    },
+    {
+      "name": "O-boot -> REPL -> 6*7=42 + T0-OBJ-OK",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/instrumented/normal-smoke/serial-boot.log, report.txt"
+    },
+    {
+      "name": "init -> commit -> REPL normaali",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/instrumented/normal-smoke/report.txt"
+    },
+    {
+      "name": "kahden bootin persistence/restore (norepl)",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/instrumented/normal-persist/report.txt; versio 1 -> restore 1 -> commit 2; Counter n 1 -> n 2"
+    },
+    {
+      "name": "REPL:n kahden bootin persistence",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/persist-repl-final/report.txt; g1, t2fun(2)=102, t2oid=65 T2-REPLACED, t2eoid=66 tyhja; restore 33 -> commit 49"
+    },
+    {
+      "name": "persistentti byte-objekti + OID + tavut",
+      "result": "PASS",
+      "evidence": "T2-BOOT1-OID 65; T2-BOOT2-PERSIST 65 66"
+    },
+    {
+      "name": "space.oput-korvaus + luku + uudelleenkaynnistys",
+      "result": "PASS",
+      "evidence": "T2-BOOT1-OPUT 65; boot2 t2oid sisalto sailyi"
+    },
+    {
+      "name": "tyhja payload",
+      "result": "PASS",
+      "evidence": "T2-BOOT1-EMPTY 66; boot2 space.oget(t2eoid)==b''"
+    },
+    {
+      "name": "virheellinen OID",
+      "result": "PASS",
+      "evidence": "ValueError: space.oput: OID is reserved or is REPL function code"
+    },
+    {
+      "name": "puuttuva OID luku",
+      "result": "PASS",
+      "evidence": "OSError: space.oget: no such O object"
+    },
+    {
+      "name": "oikeuksien esto uudella operaatiolla",
+      "result": "PASS",
+      "evidence": "read-only Space-handle + OBJ_OP_PUT_OID -> OSError: permission denied"
+    },
+    {
+      "name": "T0-instrumentointimittaus uudella koodilla",
+      "result": "PASS",
+      "evidence": "build/syscall-t2/t0-tool-measurement.json; kaikki validation PASS; OSPACE*-kirjoitukset 0"
+    },
+    {
+      "name": "staattinen kutsupaikka-analyysi",
+      "result": "PASS",
+      "evidence": "objdump suorat call-kohteet; ks. static_call_sites"
+    },
+    {
+      "name": ">1 MiB suora Python-tavuobjekti",
+      "result": "NOT RUN",
+      "evidence": "1 MiB PoC-raja sailytetty; ylitys antaa virheen"
+    },
+    {
+      "name": "fyysinen rauta, TCG, laaja regressio",
+      "result": "NOT RUN",
+      "evidence": "tehtavan rajauksen ulkopuolella"
+    },
+    {
+      "name": "space.h*-API:n siirto",
+      "result": "NOT RUN",
+      "evidence": "T2b-kohde; legacy-stubit jaljella"
+    }
+  ],
+  "artifacts": {
+    "normal_kernel": {
+      "path": "build/gcc/9pc64.elf",
+      "sha256": "484c2f1e8749f82805d5630c689f757623048c9481e49aabc64621f9a33bb23f",
+      "size": 1154192
+    },
+    "normal_micropython": {
+      "path": "build/gcc/micropython.elf",
+      "sha256": "1f06da54f713f36de88dae50266241cc91e9fd9f132d6a0d98d4bea6e98b25e6",
+      "size": 538168
+    },
+    "normal_obootoid": {
+      "path": "build/gcc/gen/obootoid.elf",
+      "sha256": "10c63c33b13f31fe10c401a639aeca36a97af1700e3f1e4dac409cff48a13769",
+      "size": 5456
+    },
+    "normal_loader": {
+      "path": "build/gcc/bootx64.efi",
+      "sha256": "6a33df3a8386f17e3bc70d0d94295ae71629f8607d53d10f29bf34caa2dddc1e",
+      "size": 22016
+    },
+    "measured_kernel": {
+      "path": "build/syscall-t2/instrumented/binaries/9pc64.elf",
+      "sha256": "c8662c591e5304f981be418f22e8d7b385b3f89ad787b9728ec7dace170608c9",
+      "size": 1154568
+    },
+    "measured_micropython": {
+      "path": "build/syscall-t2/instrumented/binaries/micropython.elf",
+      "sha256": "fb1e1dd4f0b6652c9f8df6ffb187492f5f0564c5e113def52e898fdf343f8ee1",
+      "size": 538168
+    },
+    "measured_obootoid": {
+      "path": "build/syscall-t2/instrumented/binaries/obootoid.elf",
+      "sha256": "10c63c33b13f31fe10c401a639aeca36a97af1700e3f1e4dac409cff48a13769",
+      "size": 5456
+    }
+  },
+  "log_paths": {
+    "boot": "build/syscall-t2/boot/",
+    "repl_persist": "build/syscall-t2/persist-repl-final/",
+    "instrumented": "build/syscall-t2/instrumented/",
+    "measurement": "build/syscall-t2/t0-tool-measurement.json",
+    "repl_inputs": [
+      "build/syscall-t2/inputs/repl-t2-boot1.py",
+      "build/syscall-t2/inputs/repl-t2-boot2.py"
+    ]
+  },
+  "limitations": [
+    "space.hput/hcommit/hcreate ja space.open_handle kayttavat edelleen vanhoja syscalleja; siirto on T2b.",
+    "OSPACEOPEN(55)/OVOLOPEN(54) ja boot-lataimen omat trapit sailyvat; OSPAWN/OEXECUTE/namespace/boot-loader ovat tulevia tehtavia.",
+    "Mittaus ja testit koskevat vain amd64/PoC/QEMU-KVM-konfiguraatiota; fyysinen rauta, TCG ja laaja regressio ovat NOT RUN.",
+    "REPL-syotteiden viimeisen rivin PS/2-injektiossa oli ajoittainen merkkihairio; kaikki vaitteet ja commitit oli jo suoritettu ja testi raportoi PASS."
+  ],
+  "reproduction": [
+    "tools/build-gcc.sh --kernel -j 8",
+    "tools/build-mpy-gcc.sh -j 8",
+    "tools/build-efi-gcc.sh -j 8",
+    "tools/build.sh",
+    "tools/qemu-o-boot.sh --no-build --output-dir build/syscall-t2/boot --timeout 240 --obootexec 0x4f45584543000003 --repl-input build/syscall-t2/inputs/repl-t2-boot1.py --expect \"T2-BOOT1 OK\"",
+    "QOB_INI_BOOTEXEC=0x4f45584543000003 tools/qemu-o-persist.sh --no-build --output-dir build/syscall-t2/persist-repl-final --timeout 300 --repl --boot1-input build/syscall-t2/inputs/repl-t2-boot1.py --boot2-input build/syscall-t2/inputs/repl-t2-boot2.py --boot1-expect \"T2-BOOT1 OK\" --boot2-expect \"T2-BOOT2 OK\"",
+    "python3 tools/host/syscall-t0-measure.py --run --out build/syscall-t2/t0-tool-measurement.json --summary"
+  ]
+}

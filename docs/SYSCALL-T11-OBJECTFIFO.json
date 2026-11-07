@@ -1,0 +1,609 @@
+{
+  "stage": "T11",
+  "title": "Validate the existing general ObjectFIFO",
+  "date_utc": "2026-11-06",
+  "result": "PASS",
+  "host": {
+    "name": "kuha",
+    "kernel": "Linux 6.12.111+deb13-amd64",
+    "arch": "x86_64",
+    "gcc": "14.2.0",
+    "qemu": "10.0.13",
+    "acceleration": "KVM",
+    "boot_a_cpus": 1,
+    "boot_b_cpus": 1,
+    "boot_c_cpus": 2,
+    "boot_c_kernel_ncpu": 2
+  },
+  "base_snapshot": {
+    "snapshot_id": "f1e1d180094266542b16883d7fa38af9aefda057332ebf025586e754e888edca",
+    "source_date": "2026-11-06T19:49:27Z",
+    "file_count": 870,
+    "pre_change_manifest_match": "870/870 files matched by size and SHA-256"
+  },
+  "tested_artifacts": {
+    "kernel_elf": "build/gcc/9pc64.elf",
+    "kernel_elf_sha256": "5b2dd2e1df2e7dd1b7f55c9261a9976b6123a0b1068ed23ef4330784901ee391",
+    "micropython_elf": "build/gcc/micropython.elf",
+    "micropython_elf_sha256": "589a048560c3952671e5ffdf6dc6d5b65337ba78619de821fe1667128840b6aa",
+    "efi": "build/gcc/bootx64.efi",
+    "efi_sha256": "37e78845d2b555bc6bac95b9c05eb4ec49e350332fa24b612f6a413d02eb78b0",
+    "format_o_sha256": "64df144d46371833f14b2056b8d4265cd69f57fb07058dfa00c5b926e5bf2732",
+    "mpy_cross_sha256": "8cd838fd6314157541d80e7fb8eaf5524a1899816cdbb866ac2037b58993f6e0"
+  },
+  "kernel_change": {
+    "file": "kernel/core/sysobj.c",
+    "operation": "ObjOpRecv",
+    "defect": "The MicroPython adapter default timeout -1 becomes 0xffffffffffffffff in unsigned ObjCall.arg0; bounded(...,0x7fffffff) rejected it with Ebadarg instead of an infinite wait.",
+    "fix": "Treat 0xffffffffffffffff and 0xffffffff as -1 before vobjfiforecv(); keep finite waits bounded to 0x7fffffff ms.",
+    "abi_or_syscall_change": "none",
+    "dispatch_table": "135 named / 62 active / 73 reserved"
+  },
+  "test_inputs": {
+    "generator": "tools/host/t11/mk-boot-input.py",
+    "generator_sha256": "1c1627c027e19e8f03b136a6c66ad748fac9c2d2a236fe479e11ddb72b98e642",
+    "boot_a_orchestrator": "tools/host/t11/boot-a-orch.py",
+    "boot_a_orchestrator_sha256": "7aca30da98da194089c7504eb4552f3b3da25bdb7f3ba42cc06f78f630c4200d",
+    "boot_b_orchestrator": "tools/host/t11/boot-b-orch.py",
+    "boot_b_orchestrator_sha256": "55dad399216918580876ce12e241834c569f0d2ad89b43c470ed92173ef377c8",
+    "boot_c_orchestrator": "tools/host/t11/boot-c-orch.py",
+    "boot_c_orchestrator_sha256": "ab8afe38b7217155837415bcd27b3d1add2162094bda3d74502b1a2325325bcb"
+  },
+  "runs": [
+    {
+      "id": "boot-a-tee",
+      "log_dir": "build/t11/logs/bootA9",
+      "result": "PASS",
+      "checks": 15,
+      "failures": 0,
+      "marker": "T11-A-RESULT PASS 15 0",
+      "covers": "multiprocess TEE, independent queues, drop-oldest, envelope, identity, empty/timeout, wait"
+    },
+    {
+      "id": "boot-b-auth-lifecycle",
+      "log_dir": "build/t11/logs/bootB5",
+      "result": "PASS",
+      "checks": 32,
+      "failures": 0,
+      "marker": "T11-B-RESULT PASS 32 0",
+      "covers": "sender/delegate authority, attenuation, negative cases, revoke wakeup, receiver exit, teardown, repeat"
+    },
+    {
+      "id": "boot-c-ge-quota-smp2",
+      "log_dir": "build/t11/logs/bootC2",
+      "result": "PASS",
+      "checks": 12,
+      "failures": 0,
+      "marker": "T11-C-RESULT PASS 12 0",
+      "covers": "GE/O capability transfer, ambient-authority negative, Handle cap, global message quota, 2-vCPU concurrency"
+    },
+    {
+      "id": "t8-regression",
+      "log_dir": "build/t11/logs/regressT8",
+      "result": "PASS",
+      "marker": "T8-REPL-STILL-ALIVE",
+      "covers": "real child spawn/wait, isolation, failed/missing/bad ELF, denied writer, REPL survival"
+    },
+    {
+      "id": "t10-regression",
+      "log_dir": "build/t11/logs/regressT10",
+      "result": "PASS",
+      "marker": "T10-TIME-DONE",
+      "covers": "direct _NSEC, monotonic 64-bit time"
+    },
+    {
+      "id": "pre-fix-amplification-probe",
+      "log_dir": "build/t11/logs/amp-prefix3",
+      "result": "OBSERVED",
+      "marker": "AMP-FIFO-CLOSED 0",
+      "covers": "requesting Vcontrol in a subscription was already denied with Ebadarg; FIFO stayed open"
+    },
+    {
+      "id": "pre-fix-negative-timeout-evidence",
+      "log_dir": "build/t11/logs/bootB3",
+      "result": "DEFECT-OBSERVED",
+      "covers": "default receive(-1) did not block; receiver subscription disappeared and terminate failed before the fix"
+    }
+  ],
+  "test_cases": [
+    {
+      "id": "tee-subs",
+      "expected": "3 subscribers on one FIFO",
+      "observed": "3",
+      "result": "PASS"
+    },
+    {
+      "id": "env0-env5",
+      "expected": "six envelopes preserved",
+      "observed": "all preserved",
+      "result": "PASS"
+    },
+    {
+      "id": "parent-order",
+      "expected": "A0..A5 in order",
+      "observed": "A0,A1,A2,A3,A4,A5",
+      "result": "PASS"
+    },
+    {
+      "id": "identity",
+      "expected": "identity unchanged across transport",
+      "observed": "equal",
+      "result": "PASS"
+    },
+    {
+      "id": "fast",
+      "expected": "capacity 8, all six, drop 0",
+      "observed": "A0,A1,A2,A3,A4,A5,0",
+      "result": "PASS"
+    },
+    {
+      "id": "slow",
+      "expected": "capacity 2, newest two, drop 4",
+      "observed": "A4,A5,4",
+      "result": "PASS"
+    },
+    {
+      "id": "empty",
+      "expected": "non-blocking empty receive errors",
+      "observed": "vobj: receive would block",
+      "result": "PASS"
+    },
+    {
+      "id": "timeout",
+      "expected": "bounded receive timeout errors",
+      "observed": "vobj: receive timed out",
+      "result": "PASS"
+    },
+    {
+      "id": "waitpids",
+      "expected": "both child PIDs returned",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "waitok",
+      "expected": "both children exit successfully",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "send-vsend",
+      "expected": "publish with Vsend succeeds",
+      "observed": "read b'AUTH'",
+      "result": "PASS"
+    },
+    {
+      "id": "need-vsend",
+      "expected": "publish without Vsend rejected",
+      "observed": "Eperm",
+      "result": "PASS"
+    },
+    {
+      "id": "need-vdelegate",
+      "expected": "publish object without Vdelegate rejected",
+      "observed": "Eperm",
+      "result": "PASS"
+    },
+    {
+      "id": "grant-rights",
+      "expected": "granted rights exactly VSEND+VMETA",
+      "observed": "VSEND+VMETA",
+      "result": "PASS"
+    },
+    {
+      "id": "grant-attenuate",
+      "expected": "adding VCONTROL beyond grant rejected",
+      "observed": "Eperm",
+      "result": "PASS"
+    },
+    {
+      "id": "recv-delegate",
+      "expected": "delegable received object keeps Vdelegate",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "recv-attenuate",
+      "expected": "receiver can attenuate a delegable handle",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "recv-no-add",
+      "expected": "receiver cannot add Vwrite",
+      "observed": "Eperm",
+      "result": "PASS"
+    },
+    {
+      "id": "default-no-delegate",
+      "expected": "default subscription gets no Vdelegate",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "default-grant-deny",
+      "expected": "default received handle cannot grant",
+      "observed": "Eperm",
+      "result": "PASS"
+    },
+    {
+      "id": "no-fifo-ref",
+      "expected": "FIFO reference not transferable",
+      "observed": "error",
+      "result": "PASS"
+    },
+    {
+      "id": "no-self-ref",
+      "expected": "self-publish rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "env-limit",
+      "expected": "65-byte envelope rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "stale-handle",
+      "expected": "read after close rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "double-close",
+      "expected": "second close rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "closed-sub",
+      "expected": "receive on closed subscription rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "bad-cap",
+      "expected": "negative FIFO capacity rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "bad-subcap",
+      "expected": "subscription capacity 1025 rejected",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "no-sub-control",
+      "expected": "Vcontrol not requestable",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "no-sub-subscribe",
+      "expected": "Vsubscribe not requestable",
+      "observed": "Ebadarg",
+      "result": "PASS"
+    },
+    {
+      "id": "no-sub-send-lift",
+      "expected": "Vsend denied when parent lacks it",
+      "observed": "Eperm",
+      "result": "PASS"
+    },
+    {
+      "id": "no-grant-sub",
+      "expected": "subscription handle cannot be granted",
+      "observed": "error",
+      "result": "PASS"
+    },
+    {
+      "id": "pending-sender-close",
+      "expected": "queued message survives sender object-handle close",
+      "observed": "PEND readable",
+      "result": "PASS"
+    },
+    {
+      "id": "blocked-ready",
+      "expected": "receiver blocks with default timeout",
+      "observed": "READY published",
+      "result": "PASS"
+    },
+    {
+      "id": "revoke-wakes",
+      "expected": "revoke wakes blocked receiver with Ehungup",
+      "observed": "HANGUP",
+      "result": "PASS"
+    },
+    {
+      "id": "revoke-wait",
+      "expected": "woken child exits successfully",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "exit-ready",
+      "expected": "receiver subscribes before termination",
+      "observed": "READY",
+      "result": "PASS"
+    },
+    {
+      "id": "exit-subscribed",
+      "expected": "one receiver subscription present",
+      "observed": "1",
+      "result": "PASS"
+    },
+    {
+      "id": "exit-reaped",
+      "expected": "terminated child is reaped",
+      "observed": "micropython 12: terminated",
+      "result": "PASS"
+    },
+    {
+      "id": "exit-teardown",
+      "expected": "receiver exit removes subscription",
+      "observed": "1 to 0",
+      "result": "PASS"
+    },
+    {
+      "id": "sub-close-teardown",
+      "expected": "subscription close removes subscriber",
+      "observed": "0",
+      "result": "PASS"
+    },
+    {
+      "id": "repeat-50",
+      "expected": "50 create/publish/close/revoke cycles",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "ge-create",
+      "expected": "persistent GE capability with matching OID",
+      "observed": "kind VkindGe, OID matches",
+      "result": "PASS"
+    },
+    {
+      "id": "ge-sub",
+      "expected": "child subscriber attached before publication",
+      "observed": "2 subscribers",
+      "result": "PASS"
+    },
+    {
+      "id": "ge-interproc",
+      "expected": "child reads payload and same OID",
+      "observed": "GE-PAYLOAD and same OID",
+      "result": "PASS"
+    },
+    {
+      "id": "ge-wait",
+      "expected": "GE child exits successfully",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "no-ambient-handle",
+      "expected": "child cannot name parent secret by guessing handles",
+      "observed": "NOSECRET",
+      "result": "PASS"
+    },
+    {
+      "id": "ambient-wait",
+      "expected": "ambient child exits successfully",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "handle-bound",
+      "expected": "Handle table bounded",
+      "observed": "90 creates with 6 existing, then vobj: too many handles",
+      "result": "PASS"
+    },
+    {
+      "id": "handle-recover",
+      "expected": "new Handle after closing test Handles",
+      "observed": "PASS",
+      "result": "PASS"
+    },
+    {
+      "id": "quota-subs",
+      "expected": "64 subscribers from 8x8 children",
+      "observed": "64",
+      "result": "PASS"
+    },
+    {
+      "id": "quota-sends",
+      "expected": "1024 sends accepted",
+      "observed": "1024",
+      "result": "PASS"
+    },
+    {
+      "id": "quota-global-limit",
+      "expected": "next send fails before partial publication at 65536 queued",
+      "observed": "kernel allocate failed (Enomem)",
+      "result": "PASS"
+    },
+    {
+      "id": "quota-children",
+      "expected": "release wakes all children with successful status",
+      "observed": "PASS",
+      "result": "PASS"
+    }
+  ],
+  "source_audit": {
+    "fifo_functions": [
+      "vobjfifosub",
+      "vobjfifosend",
+      "vobjfiforecv",
+      "vobjfifostat",
+      "vobjrevoke"
+    ],
+    "protocol_token_hits": [],
+    "conclusion": "FIFO delivery core has no TCP/UDP/IP/IPv6/Ethernet/USB/Wi-Fi/protocol/packet branch; authorization is separate."
+  },
+  "builds": {
+    "kernel": {
+      "status": "PASS",
+      "selected": "132/132",
+      "closure": "134/134",
+      "abi_link": "PASS"
+    },
+    "efi": "PASS",
+    "micropython": {
+      "status": "PASS",
+      "units": 247,
+      "fail": 0,
+      "undefined_symbols": "none"
+    },
+    "host": "PASS"
+  },
+  "regressions": {
+    "T8": "PASS",
+    "T10": "PASS",
+    "syscall_table": "135 named / 62 active / 73 reserved"
+  },
+  "changed_files": [
+    "kernel/core/sysobj.c",
+    "docs/SYSCALL-T11-OBJECTFIFO.md",
+    "docs/SYSCALL-T11-OBJECTFIFO.json",
+    "docs/STATUS.md",
+    "docs/ROADMAP-T8-T16.md",
+    "docs/VOLATILE-OBJECT-OBJECTFIFO.md",
+    "tools/host/t11/boot-a-orch.py",
+    "tools/host/t11/boot-b-orch.py",
+    "tools/host/t11/boot-c-orch.py",
+    "tools/host/t11/mk-boot-input.py"
+  ],
+  "not_run": [
+    "physical hardware",
+    "TCG fallback",
+    "long randomized multi-CPU stress",
+    "individual allocation fault injection",
+    "exhaustive lock-order proof",
+    "long-blocking waits beyond the tested scenarios",
+    "cross-boot volatile Handles",
+    "GE capability revocation semantics beyond Handle close",
+    "all rights/provider combinations for subscription class bits",
+    "queue saturation beyond the exact 65536/64-subscription case",
+    "subscription close while a receive is blocked (NOT RUN; unreachable through the supported process-local, non-transferable subscription contract, see followup_2026_11_07)",
+    "direct observation of kernel sleeper state (not exposed; blocked-settle uses a bounded no-result window plus exact errors)"
+  ],
+  "followup_2026_11_07": {
+    "date_utc": "2026-11-07",
+    "result": "PASS",
+    "scope": "Narrow follow-up to completed T11. Strengthen four weak assertions, test subscription close versus a blocked receive, and change no kernel code unless a reachable defect is demonstrated.",
+    "base_snapshot": "4a14bfa757a78dcea3976b8872495d17f8e9bd589ff659ba4b4be9d572a7a21d",
+    "pre_change_manifest_match": "working tree matched the published snapshot for all inspected files before changes",
+    "no_kernel_change": true,
+    "tested_artifacts": {
+      "kernel_elf": "build/gcc/9pc64.elf",
+      "kernel_elf_sha256": "5b2dd2e1df2e7dd1b7f55c9261a9976b6123a0b1068ed23ef4330784901ee391",
+      "micropython_elf": "build/gcc/micropython.elf",
+      "micropython_elf_sha256": "589a048560c3952671e5ffdf6dc6d5b65337ba78619de821fe1667128840b6aa",
+      "efi": "build/gcc/bootx64.efi",
+      "efi_sha256": "37e78845d2b555bc6bac95b9c05eb4ec49e350332fa24b612f6a413d02eb78b0"
+    },
+    "runs": [
+      {
+        "id": "boot-a-current",
+        "log_dir": "build/t11/logs/bootA10",
+        "result": "PASS",
+        "checks": 15,
+        "failures": 0,
+        "marker": "T11-A-RESULT PASS 15 0",
+        "vm": "1 vCPU, KVM"
+      },
+      {
+        "id": "boot-b-strengthened",
+        "log_dir": "build/t11/logs/bootB7",
+        "result": "PASS",
+        "checks": 35,
+        "failures": 0,
+        "marker": "T11-B-RESULT PASS 35 0",
+        "vm": "1 vCPU, KVM"
+      },
+      {
+        "id": "boot-c-strengthened",
+        "log_dir": "build/t11/logs/bootC4",
+        "result": "PASS",
+        "checks": 20,
+        "failures": 0,
+        "marker": "T11-C-RESULT PASS 20 0",
+        "vm": "2 vCPU, 2 kernel CPUs, KVM"
+      },
+      {
+        "id": "mutation-discrimination",
+        "log_dir": "build/t11/logs/mut1",
+        "result": "EXPECTED-FAILURES-OBSERVED",
+        "marker": "MUT-RESULT 3 6",
+        "expected_pass_checks": [
+          "early-ready",
+          "exit-pid",
+          "ambient-authorized-control"
+        ],
+        "expected_fail_checks": [
+          "blocked-settle",
+          "exit-status",
+          "ambient-denied",
+          "quota-global-limit",
+          "quota-no-partial-send",
+          "quota-wrong-error"
+        ]
+      }
+    ],
+    "strengthened_cases": {
+      "revoke-wakes": {
+        "original_weakness": "READY was published before the worker necessarily blocked; any OSError was accepted.",
+        "strengthened": "Default infinite receive after READY; parent requires the exact vobj: receive timed out in a 300 ms no-result window before revoke; child reports its exact error; parent requires i/o on hungup channel (Ehungup).",
+        "observed": "T11-B blocked-settle PASS; T11-B revoke-err i/o on hungup channel; T11-B revoke-wakes PASS",
+        "limitation": "Kernel sleeper state is not exposed by the API; the window is an observation procedure plus exact error checks, not a direct tsleep probe."
+      },
+      "no-ambient-handle": {
+        "original_weakness": "The child guessed integer handles 1..63; generation-tagged handles made that weak.",
+        "strengthened": "Parent passes its real full-width secret Handle value as child data and delegates an AUTH-CTRL object with Vread+Vmeta. Child must read the control (positive control), get the exact bad arg in system call when using the passed Handle, and find no own Handle with the parent secret OID.",
+        "observed": "ambient-result 110; ambient-control PASS; ambient-denied PASS; ambient-oid-unreachable PASS; no-ambient-handle PASS"
+      },
+      "exit-reaped": {
+        "original_weakness": "ck('exit-reaped', True) was unconditional.",
+        "strengthened": "Assert reaped PID == terminated child and status == micropython <pid>: terminated.",
+        "observed": "T11-B exit-status micropython 12: terminated; exit-pid PASS; exit-status PASS; exit-reaped PASS"
+      },
+      "quota-global-limit": {
+        "original_weakness": "Any OSError was accepted and queue counters were not checked.",
+        "strengthened": "64 subscribers = 8 children x 7 + 8 parent witness subscriptions; 1024 sends queue 65536 messages; next send must fail with exact kernel allocate failed (Enomem); before/after FIFO sends/drops and all witness (capacity, queued, dropped) snapshots must be unchanged.",
+        "observed": "quota-error kernel allocate failed; quota-global-limit PASS; quota-no-partial-send PASS; quota-no-partial-drop PASS; quota-witness-count PASS; quota-witness-full PASS (8 x 1024/1024/0); quota-queues-unchanged PASS"
+      }
+    },
+    "subscription_close_while_blocked": {
+      "status": "NOT RUN",
+      "source_finding": "vobjfiforecv holds a Vhand reference across tsleep; vobjclosehandle removes the slot and calls vhandput, but the receive's reference prevents the final drop, so vsudetach/vsubshutd is not called and a blocked receiver would not be woken by that close.",
+      "reachability": "Unreachable through the supported contract: the Handle table is process-local; OSPAWN starts empty and vobjspawninherit rejects subscriptions ('object: subscriptions cannot cross OSPAWN'); RFORK/newproc starts with an empty native Handle table even when memory is shared. The blocked process cannot close its own Handle while blocked, and no other process/thread can.",
+      "distinctions": "FIFO revocation wakes with Ehungup (tested); receiver termination interrupts the call and tears down the subscription (tested); stale Handle after close gives Ebadarg (tested); close-while-blocked is NOT RUN.",
+      "supported_contract": "A subscription Handle is process-local and non-transferable; close it only when no receive is concurrently blocked on it. Revisit if future work shares the Handle table across threads.",
+      "kernel_change": "none; no reachable defect demonstrated"
+    },
+    "discrimination": {
+      "log_dir": "build/t11/logs/mut1",
+      "marker": "MUT-RESULT 3 6",
+      "purpose": "Show the strengthened assertions fail for intentionally wrong conditions while their positive controls pass.",
+      "observed_fail": "blocked-settle (early revoke), exit-status (normal exit), ambient-denied (authorized self-read), quota-global-limit and quota-no-partial-send (publish succeeds below quota), quota-wrong-error (pub on revoked FIFO gives vobj: FIFO is closed)",
+      "observed_pass": "early-ready, exit-pid, ambient-authorized-control"
+    },
+    "changed_files": [
+      "tools/host/t11/boot-b-orch.py",
+      "tools/host/t11/boot-c-orch.py",
+      "docs/SYSCALL-T11-OBJECTFIFO.md",
+      "docs/SYSCALL-T11-OBJECTFIFO.json",
+      "docs/STATUS.md",
+      "docs/ROADMAP-T8-T16.md"
+    ],
+    "not_run": [
+      "direct close-versus-blocked-receive test (unreachable through the supported process-local, non-transferable subscription contract)",
+      "direct kernel sleeper-state observation (not exposed by the API)",
+      "T8/T10 regression boots (no kernel, ABI or build change in this follow-up)",
+      "canonical rebuilds (no kernel source change; same artifact hashes as tested T11 kernel)",
+      "physical hardware, TCG, long randomized multi-CPU stress, fault injection, exhaustive lock-order proof"
+    ]
+  }
+}

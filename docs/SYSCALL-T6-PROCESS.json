@@ -1,0 +1,303 @@
+{
+  "task": "T6",
+  "title": "Prosessin elinkaari RFORK/OSPAWN/WAIT/OTERMINATE/EXITS OBJ-rajapintaan",
+  "generated_utc": "2026-11-06T15:54:05Z",
+  "result": "incomplete",
+  "host": {
+    "name": "kuha",
+    "tree": "/home/lapere/Src/Plan2001-O",
+    "kernel": "6.12.111+deb13-amd64",
+    "gcc": "14.2.0",
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "accel": "kvm"
+  },
+  "base_snapshot": "a77e5111d51336bd0f94efce058d07075a3b9c45451d8bb3748a234be6410a1d",
+  "scope": {
+    "new_syscall_number": false,
+    "new_objop_codes": [
+      32,
+      33,
+      34,
+      35,
+      36
+    ],
+    "retired": {
+      "RFORK_19": "RESERVED (nil)",
+      "_WAIT_36": "RESERVED (nil)",
+      "AWAIT_47": "RESERVED (nil)",
+      "OSPAWN_92": "RESERVED (nil)",
+      "OTERMINATE_93": "RESERVED (nil)"
+    },
+    "EXITS_8": "ACTIVE: obootoid bootstrap image error path uses its own exits stub (mov $0x8,%rbp)",
+    "boot_loader_changed": false,
+    "OEXECUTE_migration": "T10",
+    "tick_hz_changed": false,
+    "alarm_changed": false,
+    "note_abi_changed": false,
+    "ge_o_format_changed": false,
+    "network_changed": false,
+    "other_syscalls_changed": false
+  },
+  "dependency_table_before": [
+    {
+      "nr": 8,
+      "name": "EXITS",
+      "mpy_callsite": "libc exits -> _exits stub",
+      "boot_loader": "obootoid own exits stub, mov $0x8,%rbp",
+      "t0_runtime": 0,
+      "child_path": "error path only, never taken"
+    },
+    {
+      "nr": 19,
+      "name": "RFORK",
+      "mpy_callsite": "p9_rfork -> rfork stub",
+      "boot_loader": "none",
+      "t0_runtime": 0,
+      "child_path": "not exercised"
+    },
+    {
+      "nr": 36,
+      "name": "_WAIT",
+      "mpy_callsite": "linked, no direct caller",
+      "boot_loader": "none",
+      "t0_runtime": 0,
+      "child_path": "not exercised"
+    },
+    {
+      "nr": 47,
+      "name": "AWAIT",
+      "mpy_callsite": "libc wait -> await stub",
+      "boot_loader": "none",
+      "t0_runtime": 0,
+      "child_path": "not exercised"
+    },
+    {
+      "nr": 92,
+      "name": "OSPAWN",
+      "mpy_callsite": "space_spawn -> ospawn stub",
+      "boot_loader": "none",
+      "t0_runtime": 0,
+      "child_path": "not exercised"
+    },
+    {
+      "nr": 93,
+      "name": "OTERMINATE",
+      "mpy_callsite": "space_terminate -> oterminate stub",
+      "boot_loader": "none",
+      "t0_runtime": 0,
+      "child_path": "not exercised"
+    }
+  ],
+  "bootstrap_dependencies_unchanged": [
+    "OVOLOPEN_54",
+    "OSPACEOPEN_55",
+    "OSPACEGET_56_fallback",
+    "OEXECUTE_60"
+  ],
+  "contract": {
+    "ObjOpRfork_32": {
+      "provider": "VkindProcessSelf",
+      "rights": "Vcontrol",
+      "arg0": "RFORK flags",
+      "buffers": "none",
+      "result": "child 0, parent PID"
+    },
+    "ObjOpOspawn_33": {
+      "provider": "VkindSpace",
+      "rights": "Vexecute",
+      "in": "ObjOspawnReq{oid, argv, argc, flags=0, reserved=0, options}",
+      "result": "child PID",
+      "semantics": "existing Ospawn/Oinherit/Oinheritv layout, limits and inheritance unchanged"
+    },
+    "ObjOpOterminate_34": {
+      "provider": "VkindProcessSelf",
+      "rights": "Vcontrol",
+      "arg0": "direct-child PID",
+      "buffers": "none",
+      "result": 0
+    },
+    "ObjOpWait_35": {
+      "provider": "VkindProcessSelf",
+      "rights": "Vcontrol",
+      "out": "ObjWait",
+      "result": 0,
+      "kernel_core": "pwait()"
+    },
+    "ObjOpExit_36": {
+      "provider": "handle 0 or VkindProcessSelf",
+      "rights": "Vcontrol for nonzero handle",
+      "in": "bounded status text",
+      "return": "no-return pexit(status, 1) on success"
+    }
+  },
+  "rights_change": {
+    "Vexecute": "1<<13",
+    "mapping": "Vexecute <-> Oexecute in vgerights()/vgecaplimit()",
+    "reason": "the old VkindSpace attenuation cleared Oexecute, so an OBJ-path OSPAWN could not pass the existing oauthorize(Oexecute) gate",
+    "amplification": false
+  },
+  "kernel_shared_cores": {
+    "kernrfork": "former sysrfork body; forkchild, RFPROC/group path, rollback and parent link unchanged",
+    "kernospawn": "former sysospawn body; only the Space is now an Ohand from a VkindSpace Handle",
+    "kernoterminate": "former sysoterminate body; same direct-child checks",
+    "vobjwait": "pwait() + typed ObjWait record",
+    "vobjexit": "bounded status validation + pexit(status, 1)"
+  },
+  "userland_changes": {
+    "new": "runtime/libc/9sys/rfork.c",
+    "wait": "runtime/libc/9sys/wait.c over ObjOpWait",
+    "exits": "runtime/libc/port/exits.c: exits -> _onexit once -> _exits -> obj_exit",
+    "oobject": "obj_rfork/obj_wait/obj_ospawn/obj_oterminate/obj_exit",
+    "p9space": "space.spawn uses spread VkindSpace + obj_ospawn; space.terminate uses obj_oterminate",
+    "modplan9": "unchanged; existing plan9.rfork/wait/exits reach the new adapters"
+  },
+  "syscall_table_after": {
+    "named": 135,
+    "active": 58,
+    "reserved": 77,
+    "linked_retired_handlers": 0,
+    "EXITS_handler": "sysexits ACTIVE"
+  },
+  "builds": {
+    "kernel": {
+      "result": "PASS",
+      "selected": "132/132",
+      "closure": "134/134",
+      "abi": "PASS",
+      "link": "PASS",
+      "sha256": "d6f9029fe0e3938298c342ffe043900127ba42180a8cfdc9579a747b1bb2bb20",
+      "size": 1154600
+    },
+    "micropython": {
+      "result": "PASS",
+      "units": 250,
+      "fail": 0,
+      "undefined": "none",
+      "sha256": "ca2e140256896b2ae1a54f46a40bc6f2b5439e7ae2beaad03b894c7ceaefb484",
+      "size": 543128
+    },
+    "efi": {
+      "result": "PASS",
+      "sha256": "8454ba0dc545e9132d03fe843233c6ecef6158ae6301d301abe4070023384c76"
+    },
+    "obootoid": {
+      "result": "unchanged",
+      "sha256": "10c63c33b13f31fe10c401a639aeca36a97af1700e3f1e4dac409cff48a13769",
+      "exits_stub": "mov $0x8,%rbp"
+    }
+  },
+  "verification": {
+    "A_build_boot_persist": {
+      "kernel_build": "PASS",
+      "mpy_build": "PASS",
+      "efi_build": "PASS",
+      "normal_boot_repl_6x7_42": "PASS",
+      "two_boot_persistence_counter_1_to_2_versions_1_to_2": "PASS",
+      "T1_T5b_rerun": "NOT RUN (retained reports unchanged)"
+    },
+    "B_lifecycle": {
+      "rfork_RFPROC_child_0_parent_pid": "PASS",
+      "group_change_without_RFPROC_RFENVG": "PASS (returns 0, process continues)",
+      "child_exit_child_ok_and_parent_wait_status": "PASS",
+      "ospawn_real_oid_mpy_elf_child": "PASS",
+      "parent_reaps_spawned_child": "PASS",
+      "missing_oid": "PASS",
+      "too_large_argv": "PASS",
+      "invalid_space_handle": "PASS",
+      "oterminate_direct_child": "PASS",
+      "wrong_pid_non_child_indirect": "NOT RUN",
+      "explicit_vhandles_and_other_inheritance_options": "NOT RUN",
+      "resource_release_no_panic": "PASS for executed runs"
+    },
+    "C_authorization_edges": {
+      "bad_handle": "PASS (Ebadarg)",
+      "wrong_vkind": "NOT RUN",
+      "missing_rights_readonly_space": "NOT RUN",
+      "forbidden_delegation_no_inherit_nested_pointers": "NOT RUN",
+      "very_long_status_argv": "NOT RUN (Python argv pre-limit only)",
+      "heap_budget_boundaries": "NOT RUN",
+      "synchronization_error_paths": "NOT RUN"
+    },
+    "D_instrumented": {
+      "runs": [
+        {
+          "log": "build/qemu-o/t6-trace/serial-boot.log",
+          "checkpoint4_objops": {
+            "32": 1,
+            "33": 1,
+            "35": 2,
+            "36": 1
+          },
+          "dropped": 0
+        },
+        {
+          "log": "build/qemu-o/t6-trace2/serial-boot.log",
+          "checkpoint4_objops": {
+            "32": 1,
+            "34": 1,
+            "35": 1
+          },
+          "dropped": 0
+        }
+      ],
+      "legacy_counts": {
+        "RFORK_19": 0,
+        "_WAIT_36": 0,
+        "AWAIT_47": 0,
+        "OSPAWN_92": 0,
+        "OTERMINATE_93": 0
+      },
+      "raw_reserved_19_36_47_92_93": "Ebadarg (OSError bad arg in system call), no fatal note, no panic",
+      "EXITS_OEXECUTE_loader_fallback": "NOT RUN; EXITS stays active"
+    },
+    "E_symbols": {
+      "rfork_real_adapter": "PASS",
+      "wait_real_adapter": "PASS",
+      "await_implemented_gc_removed_when_unused": "implemented in runtime/libc/9sys/wait.c; symbol not linked because MPY has no caller",
+      "_exits_obj_exit": "PASS",
+      "obj_ospawn_caller": "PASS (space_spawn)",
+      "obj_oterminate_caller": "PASS (space_terminate)",
+      "retired_stub_numbers_in_mpy": "none",
+      "obootoid_exits_8": "PASS (stub present)"
+    }
+  },
+  "evidence_logs": [
+    "build/qemu-o/t6-final2/serial-boot.log",
+    "build/qemu-o/t6-persist2/report.txt",
+    "build/qemu-o/t6-term/serial-boot.log",
+    "build/qemu-o/t6-spawn2/serial-boot.log",
+    "build/qemu-o/t6-err/serial-boot.log",
+    "build/qemu-o/t6-raw/serial-boot.log",
+    "build/qemu-o/t6-trace/serial-boot.log",
+    "build/qemu-o/t6-trace2/serial-boot.log",
+    "build/gcc/report.txt",
+    "build/gcc/mpy/report.txt"
+  ],
+  "source_changes": [
+    "runtime/abi/vobj.h",
+    "runtime/abi/obj.h",
+    "runtime/abi/sys.h",
+    "kernel/core/vobjint.h",
+    "kernel/core/sysvobj.c",
+    "kernel/core/sysobj.c",
+    "kernel/core/sysproc.c",
+    "ge/storage/sysgefs.c",
+    "runtime/libc/port/oobject.c",
+    "runtime/libc/port/exits.c",
+    "runtime/libc/9sys/wait.c",
+    "runtime/libc/9sys/rfork.c",
+    "micropython/p9space.c",
+    "tools/host/build-kernel.py",
+    "tools/host/build-mpy-gcc.py",
+    "tools/host/mcp-public-files.txt",
+    "docs/SYSCALL-T6-PROCESS.md",
+    "docs/SYSCALL-T6-PROCESS.json"
+  ],
+  "remaining_before_complete": [
+    "explicit OSPAWN vhandles/pipes/view/env/cpu/membudget success and failure paths",
+    "wrong Vkind, missing rights, wrong PID/non-child, forbidden delegation, no-inherit, nested pointer faults",
+    "very long status/argv, heap/budget boundaries, synchronization faults",
+    "fresh full T1-T5b instrumented rerun",
+    "obootoid EXITS/OEXECUTE error fallback remains NOT RUN and EXITS active"
+  ]
+}

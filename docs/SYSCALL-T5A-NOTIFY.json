@@ -1,0 +1,497 @@
+{
+  "task": "T5a",
+  "title": "Siirra MicroPythonin NOTIFY-rekisterointi OBJINVOKE-rajapintaan",
+  "generated_utc": "2026-11-06T13:43:12Z",
+  "host": {
+    "name": "kuha",
+    "tree": "/home/lapere/Src/Plan2001-O",
+    "kernel": "6.12.111+deb13-amd64",
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "accel": "kvm"
+  },
+  "base_snapshot": "86795d7c572b3359d892136681bbe6e9858fb0f5fea96faccac505a09996a5c7",
+  "base_snapshot_note": "The starting published tree already contained the T5a core source changes from an earlier incomplete round. This round verified and tested them, completed the test diagnostics and this report, and published the complete tree. The only source files changed relative to the base snapshot are kernel/amd64/ouser.c, micropython/modplan9.c and tools/host/build-kernel.py (test diagnostics/test-only alarm service), plus these new docs.",
+  "scope": {
+    "new_syscall_number": false,
+    "notify_28_retained": true,
+    "noted_29_changed": false,
+    "alarm_syscall_changed": false,
+    "note_abi_redesigned": false,
+    "ge_o_format_changed": false,
+    "boot_loader_changed": false,
+    "network_changed": false,
+    "other_syscalls_changed": false,
+    "provider": "ObjOpenProcessSelf=14 with Vcontrol",
+    "operation": "OBJINVOKE(ObjOpNotifyRegister=30)"
+  },
+  "source_changes_in_base_snapshot": [
+    {
+      "path": "runtime/abi/obj.h",
+      "change": "ObjOpNotifyRegister=30 and the typed contract; no new syscall number"
+    },
+    {
+      "path": "kernel/core/sysobj.c",
+      "change": "OBJINVOKE dispatch case: ProcessSelf handle, no buffers, arg1 zero; calls vobjnotifyregister()"
+    },
+    {
+      "path": "kernel/core/sysproc.c",
+      "change": "setnotify() shared by sysnotify() and the new operation; same validation and up->notify update"
+    },
+    {
+      "path": "kernel/core/portfns.h",
+      "change": "setnotify() declaration"
+    },
+    {
+      "path": "kernel/core/sysvobj.c",
+      "change": "vobjnotifyregister(): vobjholdobj(handle,Vcontrol), VkindProcessSelf check, setnotify(), vobjput()"
+    },
+    {
+      "path": "kernel/core/vobjint.h",
+      "change": "vobjnotifyregister() declaration"
+    },
+    {
+      "path": "runtime/libc/9sys/notify.c",
+      "change": "new non-syscall notify() over obj_open(ObjOpenProcessSelf,Vcontrol), obj_invoke(ObjOpNotifyRegister), obj_close"
+    },
+    {
+      "path": "tools/host/build-mpy-gcc.py",
+      "change": "gen_stubs() skips only the generated notify stub; 9sys/notify.c added to LIBC_SOURCES"
+    },
+    {
+      "path": "micropython/modplan9.c",
+      "change": "test-only notify_probe_addr() and OBJ_OP_NOTIFY_REGISTER constant"
+    }
+  ],
+  "source_changes_this_round": [
+    {
+      "path": "micropython/modplan9.c",
+      "change": "test diagnostics notify_probe_count/reset/lastnote/framevals and sysraw optional arguments; no kernel entry point and no normal-callback change"
+    },
+    {
+      "path": "kernel/amd64/ouser.c",
+      "change": "test-only #ifdef PLAN2001_ALARM_NOTETEST starts the existing alarmkproc(); normal builds do not define it and alarm.c/ALARM are unchanged"
+    },
+    {
+      "path": "tools/host/build-kernel.py",
+      "change": "accepts PLAN2001_ALARM_NOTETEST=1 for the test build"
+    },
+    {
+      "path": "docs/SYSCALL-T5A-NOTIFY.md",
+      "change": "new report"
+    },
+    {
+      "path": "docs/SYSCALL-T5A-NOTIFY.json",
+      "change": "new machine-readable report"
+    }
+  ],
+  "contract": {
+    "opcode": 30,
+    "opcode_name": "ObjOpNotifyRegister",
+    "handle": "caller's own VkindProcessSelf Handle with Vcontrol; handle 0 is not accepted",
+    "arg0": "user callback address or zero; zero removes the callback",
+    "buffers": "in==NULL, inlen==0, out==NULL, outlen==0, arg1==0",
+    "kernel_implementation": "vobjnotifyregister() -> setnotify(), the same validation and up->notify update used by NOTIFY(28)",
+    "validation": "setnotify() calls validaddr(f,sizeof(void*),0) for nonzero f",
+    "state_change": "only up->notify; no note queue, ureg or NOTED return-context change",
+    "success": "returns 0",
+    "legacy": "NOTIFY(28) and NOTED(29) remain active in the kernel dispatch table",
+    "atnotify_main": "runtime/libc/port/atnotify.c and micropython/main.c are unchanged"
+  },
+  "measurement": {
+    "t0_tool": "tools/host/syscall-t0-measure.py --run",
+    "before_source": "build/syscall-t4b/t0-after.json",
+    "after_source": "build/syscall-t5a/t0-after.json",
+    "after_generated_utc": "2026-11-06T13:33:03Z",
+    "validation": {
+      "instrumented_boot": "PASS",
+      "instrumented_persist": "PASS",
+      "normal_smoke_boot": "PASS",
+      "normal_persist": "PASS",
+      "normal_rebuild": "PASS"
+    },
+    "run_exit_status": {
+      "boot": 0,
+      "persist": 0,
+      "normal-smoke": 0,
+      "normal-persist": 0
+    },
+    "counts_before": {
+      "NOTIFY": 3,
+      "NOTED": 0,
+      "OBJOPEN": 82,
+      "OBJCLOSE": 72,
+      "OBJINVOKE": 666
+    },
+    "counts_after": {
+      "NOTIFY": 0,
+      "NOTED": 0,
+      "OBJOPEN": 85,
+      "OBJCLOSE": 75,
+      "OBJINVOKE": 669
+    },
+    "deltas": {
+      "NOTIFY": -3,
+      "NOTED": 0,
+      "OBJOPEN": 3,
+      "OBJCLOSE": 3,
+      "OBJINVOKE": 3
+    },
+    "per_run_after": {
+      "OBJOPEN": {
+        "boot": 45,
+        "persist-boot1": 19,
+        "persist-boot2": 21
+      },
+      "OBJCLOSE": {
+        "boot": 41,
+        "persist-boot1": 16,
+        "persist-boot2": 18
+      },
+      "OBJINVOKE": {
+        "boot": 602,
+        "persist-boot1": 32,
+        "persist-boot2": 35
+      }
+    },
+    "zero_after": [
+      "_NSEC",
+      "SLEEP",
+      "BRK_",
+      "OSPACEGET",
+      "OSPACEPUT",
+      "OSPACECOMMIT",
+      "OSPACECREATE",
+      "ERRSTR",
+      "_ERRSTR",
+      "NOTIFY",
+      "NOTED"
+    ],
+    "note": "Exactly one OBJOPEN + OBJINVOKE + OBJCLOSE per boot replaced the single NOTIFY(28) per boot. T1-T4b zero results are preserved."
+  },
+  "note_trace": {
+    "log": "build/syscall-t5a/trace4/boot-boot.log",
+    "input": "build/syscall-t5a/inputs/repl-t5a-trace2.py",
+    "build_flags": "PLAN2001_SYSCALL_TRACE=1 PLAN2001_ALARM_NOTETEST=1 kernel; PLAN2001_SYSCALL_TRACE=1 MicroPython",
+    "checkpoints": [
+      {
+        "checkpoint": 1,
+        "label": "boot-loader",
+        "records": 3,
+        "dropped": 0
+      },
+      {
+        "checkpoint": 2,
+        "label": "snapshot",
+        "records": 0,
+        "dropped": 0
+      },
+      {
+        "checkpoint": 3,
+        "label": "snapshot",
+        "records": 69,
+        "dropped": 0
+      },
+      {
+        "checkpoint": 4,
+        "label": "snapshot",
+        "records": 2332,
+        "dropped": 0
+      }
+    ],
+    "checkpoint3_startup": {
+      "ObjOpNotifyRegister_30": 1,
+      "NOTIFY_28": 0,
+      "NOTED_29": 0,
+      "dropped": 0
+    },
+    "checkpoint4_after_repl": {
+      "ObjOpNotifyRegister_30": 1,
+      "ObjOpSleep_28": 1,
+      "NOTED_29": 1,
+      "NOTIFY_28": 0,
+      "dropped": 0,
+      "objop_counts": {
+        "2": 1627,
+        "3": 665,
+        "13": 2,
+        "25": 6,
+        "27": 5,
+        "28": 1,
+        "30": 1
+      }
+    },
+    "note": "NOTED(29) is expected after a note and is not claimed to be generally zero. NOTIFY(28) is zero for the whole run."
+  },
+  "alarm_test": {
+    "log": "build/syscall-t5a/boot-alarm-final/boot-boot.log",
+    "input": "build/syscall-t5a/inputs/repl-t5a-alarm.py",
+    "kernel_build": "PLAN2001_ALARM_NOTETEST=1 tools/build-gcc.sh --kernel",
+    "result": {
+      "register": 0,
+      "sleep_interrupted": "OSError interrupted",
+      "elapsed_ms": 8,
+      "probe_calls": 1,
+      "last_note": "alarm",
+      "repl_alive": "T5A-ALARM-ALIVE",
+      "storage_commit_after_note": "plan9.system() completed in the same run",
+      "done": "T5A-ALARM-DONE"
+    },
+    "note": "The test-only build starts the existing alarmkproc(); alarm.c and the ALARM syscall are unchanged and the normal kernel does not start it. alarm(200) interrupted after about 8 ms because of the pre-existing tick/HZ conversion; T5a does not change ALARM timing."
+  },
+  "registration_test": {
+    "log": "build/syscall-t5a/boot-reg-final2/boot-boot.log",
+    "input": "build/syscall-t5a/inputs/repl-t5a-reg.py",
+    "results": {
+      "set": 0,
+      "clear": 0,
+      "set2": 0,
+      "bad_address": "bad arg in system call",
+      "no_right": "permission denied",
+      "bad_handle": "bad arg in system call",
+      "bad_op": "obj: operation not supported",
+      "sys_note": "bad arg in system call",
+      "probe_calls": 2,
+      "last_note": "sys: bad address in syscall pc=0x24aef1",
+      "legacy_set": 0,
+      "legacy_note": "bad arg in system call",
+      "legacy_probe_calls": 1,
+      "legacy_last_note": "sys: bad address in syscall pc=0x24aef1",
+      "legacy_clear": 0,
+      "clear2": 0,
+      "alive": "T5A-REG-ALIVE",
+      "done": "T5A-REG-DONE"
+    },
+    "frame_diagnostic": "(28, 0, 140737488349192, 140737488349056)",
+    "note": "The diagnostic callback reads the real note text from the existing Plan 9 handler stack frame and calls noted(NCONT). Legacy NOTIFY(28) produces the same delivery, proving both paths reach the same up->notify behavior."
+  },
+  "static_analysis": {
+    "binary": "build/gcc/micropython.elf",
+    "disassembly": "build/syscall-t5a/logs/micropython.disasm.txt",
+    "notify_symbol": {
+      "address": "0x253030",
+      "kind": "T",
+      "body": "obj_open(provider 14, rights 0x40 Vcontrol); obj_invoke; obj_close; no direct syscall trap"
+    },
+    "notify_stub_present": false,
+    "rbp_28_stub_count": 0,
+    "atnotify_notify_call_sites": [
+      "0x24e8b0",
+      "0x24e8c5"
+    ],
+    "noted_symbol": "0x2499e0",
+    "notifier_symbol": "0x24e740",
+    "kernel_dispatch": {
+      "NOTIFY": "ACTIVE sysnotify",
+      "NOTED": "ACTIVE sysnoted"
+    },
+    "normal_kernel_trace_string": "P2K-SYSCALL absent"
+  },
+  "tests": [
+    {
+      "name": "kanoninen kernel-build",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/logs/build-kernel-normal-final.log"
+    },
+    {
+      "name": "kanoninen MicroPython-build",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/logs/build-mpy-normal-final.log",
+      "detail": "248 unit, 0 FAIL, ei undefined-symboleita"
+    },
+    {
+      "name": "EFI- ja host-build",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/logs/build-efi-normal-final.log, build-host-normal-final.log"
+    },
+    {
+      "name": "O-boot -> REPL -> 6*7=42",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/boot-canonical-final/report.txt",
+      "detail": "T5A-MATH 42"
+    },
+    {
+      "name": "kahden bootin GE/O-persistenssi",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/persist-final/report.txt",
+      "detail": "T3P-BOOT1 OK, T3P-BOOT2 OK, t3fun(2)=202"
+    },
+    {
+      "name": "T1-T4b:n vanhat kutsut 0:ssa",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/t0-after.json"
+    },
+    {
+      "name": "T0-instrumentointi ennen/jalkeen",
+      "result": "PASS",
+      "evidence": "build/syscall-t4b/t0-after.json, build/syscall-t5a/t0-after.json"
+    },
+    {
+      "name": "rekisterointi uudella operaatiolla",
+      "result": "PASS",
+      "evidence": "T5A-REG-SET 0, T5A-REG-SET2 0"
+    },
+    {
+      "name": "poisto ja nil",
+      "result": "PASS",
+      "evidence": "T5A-REG-CLEAR 0, T5A-REG-CLEAR2 0"
+    },
+    {
+      "name": "osoitteen validointi",
+      "result": "PASS",
+      "evidence": "T5A-REG-BADADDR bad arg in system call"
+    },
+    {
+      "name": "oikeuspuute",
+      "result": "PASS",
+      "evidence": "T5A-REG-NORIGHT permission denied"
+    },
+    {
+      "name": "vaara handle",
+      "result": "PASS",
+      "evidence": "T5A-REG-BADHANDLE bad arg in system call"
+    },
+    {
+      "name": "vaara op",
+      "result": "PASS",
+      "evidence": "T5A-REG-BADOP obj: operation not supported"
+    },
+    {
+      "name": "uusi operaatio toimittaa noten",
+      "result": "PASS",
+      "evidence": "T5A-REG-SYSNOTE bad arg in system call; T5A-REG-COUNT 2; T5A-REG-LAST sys: bad address in syscall"
+    },
+    {
+      "name": "vanha NOTIFY(28) johtaa samaan tilaan",
+      "result": "PASS",
+      "evidence": "T5A-REG-LEGACY-SET 0; T5A-REG-LEGACY-COUNT 1; T5A-REG-LEGACY-LAST sys: bad address in syscall; T5A-REG-LEGACY-CLEAR 0"
+    },
+    {
+      "name": "alarm-noten todellinen toimitus + NCONT",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/boot-alarm-final/boot-boot.log",
+      "detail": "T5A-ALARM-EXC interrupted; T5A-ALARM-COUNT 1; T5A-ALARM-LAST alarm; T5A-ALARM-ALIVE; T5A-ALARM-DONE"
+    },
+    {
+      "name": "REPL elossa ja tallennus noten jalkeen",
+      "result": "PASS",
+      "evidence": "T5A-ALARM-DONE; plan9.system() commit in the same run"
+    },
+    {
+      "name": "erillinen instrumentoitu note-testi",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/trace4/report.txt, build/syscall-t5a/trace4/boot-boot.log",
+      "detail": "ObjOpNotifyRegister=1+1; NOTED=1; NOTIFY=0; dropped=0"
+    },
+    {
+      "name": "staattinen: notify ei kayta legacy-stubia",
+      "result": "PASS",
+      "evidence": "build/syscall-t5a/logs/micropython.disasm.txt"
+    },
+    {
+      "name": "NOTIFY(28) ja NOTED(29) aktiivina kernelissa",
+      "result": "PASS",
+      "evidence": "build/gcc/gen/systab-gcc.h"
+    },
+    {
+      "name": "MicroPythonin oma onnote-argumenttien kasittely",
+      "result": "NOT RUN",
+      "reason": "pre-existing GCC/Plan9 note-argument ABI; no kernel note-ABI redesign in T5a"
+    },
+    {
+      "name": "interrupt/KeyboardInterrupt",
+      "result": "NOT RUN",
+      "reason": "no interrupt-note source in this QEMU environment"
+    },
+    {
+      "name": "muiden kayttajatilojen ABI-yhteensopivuus",
+      "result": "NOT RUN",
+      "reason": "tehtavan rajaus"
+    },
+    {
+      "name": "fyysinen rauta, TCG, laaja regressio",
+      "result": "NOT RUN",
+      "reason": "tehtavan rajaus"
+    }
+  ],
+  "artifacts_normal": [
+    {
+      "path": "build/gcc/9pc64.elf",
+      "size": 1154448,
+      "sha256": "7e26603e22b11adac2182cfd2f9ff6af7cec25c0b0521f451c4613c0b44b5b0d"
+    },
+    {
+      "path": "build/gcc/micropython.elf",
+      "size": 543224,
+      "sha256": "875110dd2a13482c461f920d5d24b4b4281849607d331a12db3e78601e47c269"
+    },
+    {
+      "path": "build/gcc/gen/obootoid.elf",
+      "size": 5456,
+      "sha256": "10c63c33b13f31fe10c401a639aeca36a97af1700e3f1e4dac409cff48a13769"
+    },
+    {
+      "path": "build/gcc/bootx64.efi",
+      "size": 22016,
+      "sha256": "05e82ad73636a45e620cfa7d3fe5d89523da9ddebaa878476d60403a688f0ada"
+    }
+  ],
+  "artifacts_measured": {
+    "trace_alarm_test": {
+      "kernel_sha256": "39e7f6ff3e44a5fb2e1cc0de8d1bdbe8f8e81454d99caf2cfd929e9de29be47b",
+      "micropython_sha256": "858354737d53d0016840c0f5d9c1bc671dde122273ca931dc1fdd9ce6899f058"
+    },
+    "alarm_test_no_trace": {
+      "kernel_sha256": "d3937705d23d14e48ee3c99156bc60837194edbaceea6d1b4cbfd5f404c37454",
+      "micropython_sha256": "875110dd2a13482c461f920d5d24b4b4281849607d331a12db3e78601e47c269"
+    },
+    "t0_measured_micropython": {
+      "path": "build/syscall-t0/binaries/micropython.elf",
+      "sha256": "858354737d53d0016840c0f5d9c1bc671dde122273ca931dc1fdd9ce6899f058",
+      "size": 543224
+    },
+    "normal_artifacts_restored": true
+  },
+  "log_paths": [
+    "build/syscall-t5a/logs/build-kernel-normal-final.log",
+    "build/syscall-t5a/logs/build-mpy-normal-final.log",
+    "build/syscall-t5a/logs/build-efi-normal-final.log",
+    "build/syscall-t5a/logs/build-host-normal-final.log",
+    "build/syscall-t5a/logs/t0-measure-t5a.log",
+    "build/syscall-t5a/logs/micropython.disasm.txt",
+    "build/syscall-t5a/boot-canonical-final/report.txt",
+    "build/syscall-t5a/persist-final/report.txt",
+    "build/syscall-t5a/boot-reg-final2/boot-boot.log",
+    "build/syscall-t5a/logs/qemu-reg-final.log",
+    "build/syscall-t5a/boot-alarm-final/boot-boot.log",
+    "build/syscall-t5a/logs/qemu-alarm-t5a.log",
+    "build/syscall-t5a/trace4/report.txt",
+    "build/syscall-t5a/trace4/boot-boot.log",
+    "build/syscall-t5a/t0-after.json"
+  ],
+  "limitations": [
+    "Vain amd64 PoC kuha/QEMU-KVM:lla; ei fyysista rautaa eika TCG:ta.",
+    "NOTIFY(28) ja NOTED(29) pysyvat tarkoituksella aktiivina; NOTED=0 ei ole yleinen vaite.",
+    "Normaali kernel ei kaynnista alarmkproc():ia. Alarm-note-testi kayttaa PLAN2001_ALARM_NOTETEST=1-testibuildia, joka ei muuta alarm.c:ta eika ALARM-syscallia. Normaali build ei maarita makroa.",
+    "Olemassa oleva kernelin note-kasittelijan siirtyma valittaa argumentit Plan 9 -stack-kehyksessa, kun GCC-kayttajatila odottaa SysV-rekistereita. Testicallback lukee viestin kehyksesta. Note-argumentti-ABI:a ei muutettu T5a:ssa, koska kernelin note-ABI:n uudelleensuunnittelu on kielletty. MicroPythonin oman onnote-callbackin argumenttien kasittely ja interrupt/KeyboardInterrupt ovat siksi NOT RUN.",
+    "alarm(200) keskeytyi noin 8 ms:ssa olemassa olevan tick-/HZ-muunnoksen vuoksi; T5a ei muuta ALARM-ajoitusta.",
+    "Muiden kayttajatilojen ABI-yhteensopivuutta ei testattu eika vaatita.",
+    "Kernelin SHA vaihtelee build-aikaleiman mukana; lahteet ja MicroPython-SHA ovat deterministisia."
+  ],
+  "reproduction": [
+    "tools/build-gcc.sh --kernel -j 8",
+    "tools/build-mpy-gcc.sh -j 8",
+    "tools/build-efi-gcc.sh -j 8",
+    "tools/build.sh",
+    "bash tools/qemu-o-boot.sh --no-build --output-dir build/syscall-t5a/boot-canonical-final --timeout 360 --obootexec 0x4f45584543000003 --repl-input build/syscall-t5a/inputs/repl-t5a-smoke.py --expect \"T5A-MATH 42\"",
+    "QOB_INI_BOOTEXEC=0x4f45584543000003 bash tools/qemu-o-persist.sh --no-build --output-dir build/syscall-t5a/persist-final --timeout 360 --repl --boot1-input build/syscall-t3/inputs/repl-t3-persist-boot1.py --boot2-input build/syscall-t3/inputs/repl-t3-persist-boot2.py --boot1-expect \"T3P-BOOT1 OK\" --boot2-expect \"T3P-BOOT2 OK\"",
+    "python3 tools/host/syscall-t0-measure.py --run --out build/syscall-t5a/t0-after.json --summary",
+    "bash tools/qemu-o-boot.sh --no-build --output-dir build/syscall-t5a/boot-reg-final2 --timeout 360 --obootexec 0x4f45584543000003 --repl-input build/syscall-t5a/inputs/repl-t5a-reg.py --expect \"T5A-REG-DONE\"",
+    "PLAN2001_ALARM_NOTETEST=1 tools/build-gcc.sh --kernel -j 8",
+    "bash tools/qemu-o-boot.sh --no-build --output-dir build/syscall-t5a/boot-alarm-final --timeout 360 --obootexec 0x4f45584543000003 --repl-input build/syscall-t5a/inputs/repl-t5a-alarm.py --expect \"T5A-ALARM-DONE\"",
+    "PLAN2001_SYSCALL_TRACE=1 PLAN2001_ALARM_NOTETEST=1 tools/build-gcc.sh --kernel -j 8",
+    "PLAN2001_SYSCALL_TRACE=1 tools/build-mpy-gcc.sh -j 8",
+    "bash tools/qemu-o-boot.sh --no-build --output-dir build/syscall-t5a/trace4 --timeout 600 --obootexec 0x4f45584543000003 --repl-input build/syscall-t5a/inputs/repl-t5a-trace2.py --expect \"T5A-TRACE-DONE\"",
+    "tools/build-gcc.sh --kernel -j 8",
+    "tools/build-mpy-gcc.sh -j 8"
+  ]
+}

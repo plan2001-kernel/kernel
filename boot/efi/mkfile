@@ -1,0 +1,32 @@
+TARG=bootx64.efi bootaa64.efi
+HFILES=fns.h mem.h
+IMAGEBASE=0x8000
+CFLAGS=-FTVw
+PEFLAGS=$CFLAGS '-DIMAGEBASE='$IMAGEBASE
+
+# The loader boots only from the UEFI Simple File System volume it was
+# itself launched from (fs.c:fsinit()): 9front's PXE and ISO9660 sources,
+# and its 32-bit (ia32) loader, are not Plan2001's.
+all:V: $TARG
+
+%.6:	%.s
+	6a $PEFLAGS $stem.s
+%.6:	%.c
+	6c $CFLAGS $stem.c
+bootx64.efi:	x64.6 efi.6 fs.6 sub.6 archx64.6
+	6l -l -s -R1 -T0x8200 -o bootx64.out $prereq
+	aux/aout2efi -Z$IMAGEBASE -o $target bootx64.out
+%.6:	$HFILES
+
+%.7:	%.s
+	7a $PEFLAGS $stem.s
+%.7:	%.c
+	7c $CFLAGS $stem.c
+# bootaa64.efi: the same common loader, its ARM64 side in archaa64.c
+bootaa64.efi:	aa64.7 efi.7 fs.7 sub.7 archaa64.7
+	7l -l -s -R1 -T0x8200 -o bootaa64.out $prereq
+	aux/aout2efi -Z$IMAGEBASE -o $target bootaa64.out
+%.7:	$HFILES
+
+clean:V:
+	rm -f *.[678] *.out $TARG

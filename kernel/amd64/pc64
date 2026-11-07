@@ -1,0 +1,67 @@
+# pc64 - canonical O-only storage/boot plus native IPv6-only networking.
+#
+# Combines native O storage and boot with the E7.7 native Ethernet/IPv6
+# components.  The legacy #l/#I/#W registrations and
+# compiled IPv4 paths are omitted.  Native IPv6 starts during kernel boot.
+# There is no Dev registry and no swap Dev: Plan2001-O has no swap
+# partition, file, device or anonymous pageout, and no legacy Dev front
+# doors.  The native framebuffer text console and the raw PS/2 keyboard
+# are direct kernel services.
+link
+	ether8169	pci ethermii
+	ether82563	pci ethermii
+	etheri225	pci ethermii
+	ethersink
+	ethervirtio10	pci virtio10pc
+	loopbackmedium
+	usbehci		pci usbehcipc
+	usbxhcipci	pci usbxhci
+
+misc
+	pci		pcipc
+	archcore
+	envcore
+	pipecore
+	rtccore
+	uartcore
+	nativev6
+	nativeudp6
+	espctl
+	espcontrol
+	esp6
+	sysnet6
+	nativeinh6
+	ethernative
+	ipcore
+	ip6only
+	ipv6
+	ipaux
+	iproute6
+	ipv6only
+	netlog
+	nullmedium
+	arp
+	archgeneric	kbdcore i8259 i8253
+	archacpi	mp apic squidboy ec hpet
+	mtrr
+	bootinfo
+	bootarch
+	bootfb
+	fbconsole
+
+	sdiahci		pci sdscsi led
+	sdvirtio10	pci sdscsi virtio10pc
+	sdnvme		pci
+	sdram
+
+	uarti8250
+	uartpci		pci
+
+ip
+	tcp
+	udp
+	ipifc
+	icmp6
+
+port
+	int cpuserver = 0;

@@ -60,7 +60,7 @@ jobs:
           test -f docs/DEVICE-ABI.md
           test -f tools/host/t12/device-checks.py
           test -f kernel/core/sysvobj.c
-          rm -rf bootstrap .github/workflows/plan2001-import.yml
+          rm -rf bootstrap
           git config user.name "Plan2001-O import"
           git config user.email "plan2001-kernel@users.noreply.github.com"
           git add -A

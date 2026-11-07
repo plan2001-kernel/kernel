@@ -1,0 +1,52 @@
+{
+  "status": "PASS",
+  "production_modules": [
+    "kernel/core/pgrp.c",
+    "kernel/core/proc.c",
+    "kernel/core/portfns.h"
+  ],
+  "namespace_model": "existing Pgrp -> OContext -> Ohand grants; 32 bindings",
+  "host_actual_function_bodies": "NS1 HOST PASS: allocation rollback, kernel-group race, copied/empty masks, shared lifetime, 10500 concurrent copies",
+  "native_vcpus": 4,
+  "native_accelerator": "TCG",
+  "native_ns1_checks": [
+    "SHARED",
+    "COPY",
+    "EMPTY",
+    "REPLACE AND INVALID FLAGS",
+    "REVOCATION",
+    "PARENT EXIT AND FINAL REFERENCES",
+    "LIFETIME STRESS",
+    "CONCURRENT MAP COPY AND LOOKUP",
+    "INTERRUPTED CHILD CLEANUP",
+    "BINDING LIMIT ROLLBACK",
+    "OSPAWN EMPTY COPY SHARE AND FAILURE CLEANUP",
+    "EXEC VIEW SURVIVES HANDLES CLOSED",
+    "PIPE DELEGATION",
+    "PROCESS NAMESPACES"
+  ],
+  "native_n13_original_proof": "PASS",
+  "relations_reboot_result": [
+    64
+  ],
+  "relations_content_sha256": "548f7b279089221a799718327418ca11d91e7b591d26aa5c62fe018120ee94a0",
+  "process_and_pgrp_layouts_changed": false,
+  "syscall_abi_changed": false,
+  "GE_format_changed": false,
+  "artifacts_sha256": {
+    "9pc64.elf": "70f75ba42cf757641fb4858e9bba5930ba0ba1517233ee0ef7281f101cc6a8b7",
+    "micropython.elf": "d4b77cfc3f617903fffc37e1cfad224a4256e947337b26aee680a3ce26ea58c6"
+  },
+  "evidence": {
+    "ns1": "build/ns1-vm.Ukk8iQ",
+    "n13": "build/ns1-vm.6dvUos",
+    "relations": "build/ge-relations-r1.QshoR1"
+  },
+  "not_executed": {
+    "live-kernel allocator fault injection": "No existing user-accessible hook; tested actual functions with host allocation faults instead of adding a debug syscall.",
+    "dedicated returning-kproc stress": "kproc is kernel-only; no new test boot hook. Actual group helper is host-stressed; shared pexit cleanup is audited and native user-process termination is exercised.",
+    "KVM": "/dev/kvm is unavailable; requested TCG execution used.",
+    "physical hardware": "Task requires disposable regular-file VM disks only."
+  },
+  "limits": "Kernel group initialization and allocation rollback use actual bodies with host primitives; native SMP lifecycle tests are separate."
+}

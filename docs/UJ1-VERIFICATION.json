@@ -1,0 +1,561 @@
+{
+  "persistent_case_records": [
+    {
+      "boot": 1,
+      "oid": 80,
+      "cases": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        26
+      ],
+      "sha256": "666e6b5edc909ceb0925593a5b5fec6ff422ca3273ade3dab3003156b37c9d0d"
+    },
+    {
+      "boot": 2,
+      "oid": 80,
+      "cases": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26
+      ],
+      "sha256": "8662985e88e7d751307a2751977c7fbefd7252c7ab0a897b5218a8d043e1170b"
+    }
+  ],
+  "status": "PASS",
+  "generated_utc": "2026-11-01T14:37:54.584034+00:00",
+  "cases": [
+    {
+      "id": "UC01",
+      "name": "Boot",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:94",
+        "build/user-journey.fnd05b/boot-uj2.log:94",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "real Plan2001-O kernel and native GE/O mounted"
+    },
+    {
+      "id": "UC02",
+      "name": "System",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:97",
+        "build/user-journey.fnd05b/boot-uj2.log:97",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "CPUs, physical/user memory and native O partition capacity"
+    },
+    {
+      "id": "UC03",
+      "name": "Workspace",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:117",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "project source, page, release and executable OID objects"
+    },
+    {
+      "id": "UC04",
+      "name": "Namespace",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:146",
+        "build/user-journey.fnd05b/boot-uj1.log:148",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "HTTP process COPY namespace contains only page grant"
+    },
+    {
+      "id": "UC05",
+      "name": "Network",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:102",
+        "build/user-journey.fnd05b/boot-uj2.log:102",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "native NIC IPv6 link-local configuration and UDP regression verified"
+    },
+    {
+      "id": "UC06",
+      "name": "Editor",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:121",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "native editor is a separate OSPAWN process"
+    },
+    {
+      "id": "UC07",
+      "name": "Open",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:123",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "editor opened source OID"
+    },
+    {
+      "id": "UC08",
+      "name": "Save",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:126",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "editor committed updated source at same OID"
+    },
+    {
+      "id": "UC09",
+      "name": "Reopen",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:130",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "fresh editor reopened persisted source"
+    },
+    {
+      "id": "UC10",
+      "name": "Compiler",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:136",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "native TinyCC child uses source/output grants"
+    },
+    {
+      "id": "UC11",
+      "name": "Build",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:138",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "C object compiled to new ELF object"
+    },
+    {
+      "id": "UC12",
+      "name": "Execute",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:142",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "new ELF executed by OID"
+    },
+    {
+      "id": "UC13",
+      "name": "HTTP",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:149",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "compiled native HTTP/1.1 server listening"
+    },
+    {
+      "id": "UC14",
+      "name": "Request",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:153",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "fresh client process completed actual TCP6 HTTP request"
+    },
+    {
+      "id": "UC15",
+      "name": "Update",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:173",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "edited, compiled and published second release"
+    },
+    {
+      "id": "UC16",
+      "name": "Error",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:192",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "compiler rejected syntax error, source fixed and rebuilt"
+    },
+    {
+      "id": "UC17",
+      "name": "Rollback",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:203",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "prior immutable ELF and matching source restored"
+    },
+    {
+      "id": "UC18",
+      "name": "Search",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:206",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "relation AND query found source object"
+    },
+    {
+      "id": "UC19",
+      "name": "Notes",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:212",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "personal note persisted as ordinary OID object"
+    },
+    {
+      "id": "UC20",
+      "name": "Multitasking",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:160",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "editor and HTTP server active concurrently"
+    },
+    {
+      "id": "UC21",
+      "name": "Security",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:214",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "foreign OID denied in unprivileged process"
+    },
+    {
+      "id": "UC22",
+      "name": "Revoke",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:216",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "grant revoked in copied namespace"
+    },
+    {
+      "id": "UC23",
+      "name": "Processes",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:226",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "applications stopped, waited and restarted"
+    },
+    {
+      "id": "UC24",
+      "name": "Reboot",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj2.log:104",
+        "build/user-journey.fnd05b/boot-uj2.log:126",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "second real kernel boot on same GE/O image"
+    },
+    {
+      "id": "UC25",
+      "name": "Restore",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj2.log:127",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "source, both ELFs, note and rolled-back publication restored"
+    },
+    {
+      "id": "UC26",
+      "name": "Shutdown",
+      "status": "PASS",
+      "evidence": [
+        "build/user-journey.fnd05b/boot-uj1.log:231",
+        "build/user-journey.fnd05b/boot-uj2.log:130",
+        "build/user-journey.fnd05b/after1.img: SpaceID 1 OID 80, committed case record",
+        "build/user-journey.fnd05b/after2.img: SpaceID 1 OID 80, committed case record"
+      ],
+      "detail": "all application processes waited, TCP handles closed; normal GE commit"
+    }
+  ],
+  "artifacts": "build/user-journey.fnd05b",
+  "actual_execution": "real amd64 Plan2001-O, 4 CPUs, TCG, native GE/O, virtio NIC",
+  "phases": {
+    "V0": "Current baseline had native GE/namespace/TinyCC tests but no TCP engine, native TCP ABI or interactive editor.",
+    "V1": "Native scripted editor and delegated TinyCC integrated in one running guest.",
+    "V2": "Ported IPv6 TCP engine and compiled HTTP/1.1 service with isolated object view.",
+    "V3": "Publication, compiler-error recovery, rollback, permissions, reboot and restore."
+  },
+  "limitations": [
+    "Scripted byte-oriented editor, not a graphical desktop or login system",
+    "Trusted bootstrap acts as Aino launcher; applications receive explicit restricted grants",
+    "HTTP supports GET and Connection: close only; isolated local IPv6 carrier, no TLS",
+    "Release rollback uses immutable ELF/source snapshot objects, not arbitrary storage time travel",
+    "Shutdown closes applications and commits the session; ACPI poweroff is not claimed",
+    "One pending GE writer per Space remains; no new storage or relation format"
+  ],
+  "network_constraints": {
+    "process_private_handles": true,
+    "global_slots": 64,
+    "per_process_slots": 8,
+    "read_max_bytes": 65536,
+    "write_max_bytes": 4096,
+    "connect_timeout_ms": 5000,
+    "accept_read_timeout_max_ms": 30000
+  },
+  "not_run": {
+    "KVM": "/dev/kvm unavailable",
+    "physical hardware": "Only disposable regular-file disk images authorized",
+    "external TCP interoperability": "UJ1 tests actual guest-to-guest-process IPv6 TCP on the same NIC identity; external peers/loss/fuzz/TLS are not claimed"
+  },
+  "binaries_sha256": {
+    "9pc64.elf": "ffa00e9d4a2373072cef88e7012fb29a76701b028a8fb9d24c3a7831e47b1712",
+    "micropython.elf": "19471faac01a6ddadef45f9cdacda31946ae2283d1892f8572fc71a7c919690f",
+    "tcc.elf": "898f34c9334e8b7b83f37c8b8c9f39c08b0dc99ff3ee6ee4712368c27e6b6d59"
+  },
+  "helper_sha256": "ffa6ec187bd1a9531df551a1c915ea37fc5a3b7463b0167c91a4c20d730808d0",
+  "persistent_identities": [
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 64
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 65
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 66
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 67
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 68
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 69
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 70
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 71
+    },
+    {
+      "Volume": "5f5e18f8-6d99-4f41-aaf2-d9821ed42a1f",
+      "SpaceID": 1,
+      "OID": 78
+    }
+  ],
+  "persistence": {
+    "status": "PASS",
+    "before": {
+      "objects": {
+        "64": "15dac38dfde6ab73ecd0e66676c6ccff7cf85247181d5793fa1187ee389d7955",
+        "65": "08aa02d91b5e1708cd5f0a846f290daacf1def738e52553c28c1a9d8b2339fca",
+        "66": "ab3aeddfe0936642981214e242c77967c53ef87d0f9b66aaf373311b0644cb44",
+        "67": "c413ae7212d30ec46f3cd3b862d29adec1fe18074e98bdc5439fb19d1f9ee6f7",
+        "68": "964d1e2ce69204958b8421c89b60d14b878cf1f0682dddae371f607468d7b82a",
+        "69": "2d8b844743ba245083953063da4c59652b77538f6f95c155ddef99afc3f4a0dc",
+        "70": "15dac38dfde6ab73ecd0e66676c6ccff7cf85247181d5793fa1187ee389d7955",
+        "71": "d3a4ee383b52383944cf0be52bc0c7134328f28deb9e8fe7f20a14290dc348f8",
+        "78": "3234c43913a66c004e5319e1a639c5d260437eeed0db89e38f50c99a6195bba9"
+      },
+      "R1_metadata_sha256": "0409f8bed4590ccbdefea0f93409ae78b15ad9b5880cca2394ce27414b7bd07a"
+    },
+    "after": {
+      "objects": {
+        "64": "15dac38dfde6ab73ecd0e66676c6ccff7cf85247181d5793fa1187ee389d7955",
+        "65": "08aa02d91b5e1708cd5f0a846f290daacf1def738e52553c28c1a9d8b2339fca",
+        "66": "ab3aeddfe0936642981214e242c77967c53ef87d0f9b66aaf373311b0644cb44",
+        "67": "c413ae7212d30ec46f3cd3b862d29adec1fe18074e98bdc5439fb19d1f9ee6f7",
+        "68": "964d1e2ce69204958b8421c89b60d14b878cf1f0682dddae371f607468d7b82a",
+        "69": "2d8b844743ba245083953063da4c59652b77538f6f95c155ddef99afc3f4a0dc",
+        "70": "15dac38dfde6ab73ecd0e66676c6ccff7cf85247181d5793fa1187ee389d7955",
+        "71": "d3a4ee383b52383944cf0be52bc0c7134328f28deb9e8fe7f20a14290dc348f8",
+        "78": "3234c43913a66c004e5319e1a639c5d260437eeed0db89e38f50c99a6195bba9"
+      },
+      "R1_metadata_sha256": "0409f8bed4590ccbdefea0f93409ae78b15ad9b5880cca2394ce27414b7bd07a"
+    }
+  },
+  "system_snapshots": [
+    "(1, 4, 2139222016, 1283530752, 135266304, 0, 1241403392)",
+    "(1, 4, 2139222016, 1283530752, 135266304, 0, 1241219072)"
+  ],
+  "regressions": [
+    {
+      "name": "legacy TinyCC OID graph",
+      "status": "PASS",
+      "artifacts": "build/tcc-space2.sMgn1s"
+    },
+    {
+      "name": "NS1",
+      "status": "PASS",
+      "artifacts": "build/ns1-vm.I0YCxZ"
+    },
+    {
+      "name": "N13",
+      "status": "PASS",
+      "artifacts": "build/ns1-vm.AVyzM9"
+    },
+    {
+      "name": "NS2-NS4",
+      "status": "PASS",
+      "artifacts": "build/ns-complete-vm.bLr8ES"
+    },
+    {
+      "name": "CBOR/O-Envelope",
+      "status": "PASS",
+      "artifacts": "build/cbor-oenv-vm.OmOJyi"
+    },
+    {
+      "name": "R1 relations",
+      "status": "PASS",
+      "artifacts": "build/ge-relations-r1.f0pAR8"
+    },
+    {
+      "name": "Actual NS1/NS3 C bodies with ASAN/UBSAN",
+      "status": "PASS"
+    },
+    {
+      "name": "CBOR host sanitizers, vectors and fuzz",
+      "status": "PASS"
+    }
+  ],
+  "builds": {
+    "kernel": "PASS",
+    "MicroPython": "PASS",
+    "native TinyCC": "PASS",
+    "native editor/client": "PASS"
+  },
+  "preserved_modules_sha256": {
+    "ge/storage/o.c": "86b6769ced8f8fc9b0cab396c9bba8db1041b5b1f0e8d8904f4e5bc4365c4c09",
+    "ge/storage/obj.c": "7ec1bc6eee9e4305efbfe26cf929c3525711b6f6bcd014612435c5fe8cbf2309",
+    "ge/storage/ocontext.c": "50e5c2b4515ddcb74db2e727156633128fe69b79734a05826c230e3edaab85d2",
+    "ge/storage/ocontext.h": "413f655a13d330896e4c4525ce259ecdc1bb566f794a2823cb10e3993349c801",
+    "runtime/ge_relations/relations.c": "aae69c18ce47ab1428a7153e4beda81cda5eeb9f361537667095532838ad16f4",
+    "runtime/ge_relations/relations.h": "2fe44e9f74638036146b7f1e6744bd8d7aa506a618694dfb892be76944be34d6",
+    "micropython/modge.c": "9e2d8084ebe7709e3cee3a1413320e00f66b9118f98764b00efe0244e70c1c80",
+    "micropython/p9space.c": "fd2f31a3925e3ad7c352bb835b667fdfec053a9d09bf0815267e82705a14e7e3",
+    "runtime/cbor/cbor.c": "4a9860863661b7edf3d1b47d86fe10c119d465eda1c1886d8ff455450073440f",
+    "runtime/cbor/oenv.c": "f15616d494f645e28bdc7addeff36a39669edb444b0d12a2dd4bed97573e2c09",
+    "micropython/modcbor.c": "b7ceabdfd2413af94dca95eeb371a10818c0e8069e50b4db6309bdc4b713a2af",
+    "kernel/core/pgrp.c": "9bcb3a7eacb60d43b9af22429d8dc15dde5192c34f06905db22e7aa427ca94d5"
+  },
+  "implementation_sha256": {
+    "kernel/net/tcp.c": "f8320d89f0b1e56c4b5957bd22a9863bf7991a11388ebb75bc32d12e855b7109",
+    "kernel/core/systcp6.c": "7b8ca620fdde96c798b6be55cd8f0373ecc8becb8465dd651476ae8d28ff05a6",
+    "kernel/core/sysinfo.c": "4415c57d4dce5f1f189a1adcf6bc19439dca8ad01717201e5d72fc63d1faab2a",
+    "kernel/core/sysnet6.c": "1ef43e400a17580b252531399e925e93a144e56f00a185330d5e8d1c5916050d",
+    "kernel/net/nativev6.c": "2224dd68b43a99d6eccacff1f46dd3794b39043748bd3282897c8c59252f5c52",
+    "kernel/net/nativev6.h": "4d5a26524bebd5a1ce6af869b5933082142ab7f8659976e67f81fe9e989936b3",
+    "runtime/abi/sys.h": "f4f5e428db78edf5cb64b98ee3749a8837d17d8683d1c9799103849b74d129ef",
+    "runtime/abi/tcp6.h": "7692df41a9bd3c9491bc56c8fdef9c12202dfc9b702b341bf46ba291bd09493b",
+    "micropython/modplan9.c": "a1e5cbeb85a7c22531af1c735f80f41ecfc6f7abcfe37b6f68cd1efa9d618c05",
+    "user/tcc/main.c": "2ba76752397fb851dfaf88f610b55564309bb2ab52a9245b62071a8e1a7def99",
+    "user/tcc/port/libc.c": "d68fb0df5bc40c41a78596353e6d751431ab02a98a16178f16b3bd9077e6d263",
+    "user/uj1/worker.c": "25e03fc3327c350d90e3b01b2bf09bce18556e0f30e6aa570af0a0a3f91f6d2f",
+    "user/uj1/server.c.in": "96eb7921adfcdc35c3ddb86660ea5be671e21b33676bbbb5824c55da564f1517",
+    "tools/host/uj1-demo.py": "8777b17d18cba1f6235d77517c2d755953f3e416da9fb525aba989869509f217"
+  },
+  "source_management": {
+    "branch": "agent/codex/uj1-user-journey",
+    "baseline_commit": "5c79d89388bf79bd6c9ecc7e9bb7ddde7a97b6e9",
+    "remote": null
+  }
+}

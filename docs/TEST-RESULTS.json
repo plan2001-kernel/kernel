@@ -1,0 +1,1043 @@
+{
+  "document": "Plan2001-O universal five-operation object ABI (CREATE/OPEN/CLOSE/BIND/INVOKE), libc wrappers, TCP6/ObjectFIFO/GE and UDP6 provider tests",
+  "date": "2026-11-05",
+  "status": "implemented candidate: VOBJ*/TCP6* and 27 dead pathname/FD slots reserved; persistent GE/O added to the five-call ABI; UDP6 provider candidate; 2026-11-05 Pipe/UART/KBD provider candidate moves the native byte streams and exclusive PS/2 claim under the same five-call ABI without a new syscall; 2026-11-05 USB metadata-service candidate adds ObjOpenUsb/ObjOpUsbList over the existing usbcore_list snapshot without a new syscall or endpoint-handle unification; 2026-11-05 USB endpoint-open candidate adds ObjOpUsbEpOpen=21/VkindUsbEp=10 behind an eve-only Vcreate gate and fixes >256-record direct ObjOpUsbList capacity handling; 2026-11-05 phase-3 retirement removes the 16 Pipe/KBD/UART/PIPEINHERIT handler symbols (71-85,100) leaving them RESERVED with nil dispatch; Pipe/UART/KBD are reached only through OBJCREATE/OPEN/INVOKE/CLOSE with ObjOpPipeInherit=22 and ObjOpUartCount=23; table 135 named / 71 active / 64 reserved; 2026-11-05 phase-4 retirement removes the five NET6* UDP6 handler symbols (116-120) leaving them RESERVED with nil dispatch; address lookup is OBJINVOKE(ObjOpNet6Addr=24) and all UDP6 use is the five OBJ calls; table 135 named / 66 active / 69 reserved",
+  "predecessor_task": "4622c395799f479288362c8b3de0b232",
+  "earlier_tasks": [
+    "f863f7039e7446e38e8374f553350067"
+  ],
+  "source_baseline": {
+    "snapshot_sha256": "eed6f23e502737aa1589b844b25c028fe32d032429cfd711ecbb8b4d0c710ad5",
+    "snapshot_time_utc": "2026-11-02T10:58:59Z",
+    "work_started_from": "actual current working tree containing the prior OpenCode candidates (volatile objects/ObjectFIFO and cross-process unified VOBJ/TCP6/GE); the 2026-11-02 read-only MCP snapshot was not used to overwrite it",
+    "tree_state": "not a version-control repository; no branch operation or publication was performed"
+  },
+  "environment": {
+    "host_os": "Linux",
+    "cc": "gcc (Debian 14.2.0-19) 14.2.0",
+    "target": "amd64",
+    "qemu": "QEMU 10.0.13, TCG, disposable OVMF images"
+  },
+  "kernel_boundary": {
+    "conceptual_operations": [
+      "CREATE",
+      "OPEN",
+      "CLOSE",
+      "BIND",
+      "INVOKE"
+    ],
+    "syscalls": {
+      "136": "OBJCREATE",
+      "137": "OBJOPEN",
+      "138": "OBJCLOSE",
+      "139": "OBJBIND",
+      "140": "OBJINVOKE"
+    },
+    "header": "runtime/abi/obj.h",
+    "handlers": "kernel/core/sysobj.c",
+    "shared_core": "kernel/core/sysvobj.c",
+    "libc": "runtime/libc/port/oobject.c",
+    "abi_version": 1
+  },
+  "identity_scope": {
+    "form": [
+      "incarnation",
+      "space",
+      "oid"
+    ],
+    "volatile": "RAM-only per-boot identity; no GE/O read/write on creation",
+    "persistent": "GE/O v1 identity (VolumeUUID, SpaceID, OID) unchanged",
+    "distinctions": [
+      "identity",
+      "Handle",
+      "capability",
+      "provider backing",
+      "namespace binding"
+    ],
+    "raw_oid_lookup": "not provided; a Handle or an explicit GEnamespace role with an O Space capability is required",
+    "identity_unchanged_by_fifo_handoff": true
+  },
+  "opens": {
+    "ObjOpenTcpListen": 1,
+    "ObjOpenTcpConnect": 2,
+    "ObjOpenGe": 3,
+    "ObjOpenHandle": 4,
+    "ObjOpenBinding": 5,
+    "ObjOpenUdp6": 8
+  },
+  "invoke_operations": [
+    "Info",
+    "Read",
+    "Write",
+    "Stat",
+    "Send",
+    "Recv",
+    "Subscribe",
+    "Accept",
+    "Grant",
+    "Revoke",
+    "List",
+    "SendTo",
+    "RecvFrom"
+  ],
+  "bind": {
+    "modes": {
+      "ObjBindCopy": 0,
+      "ObjBindExclusive": 1,
+      "ObjBindShare": 2,
+      "ObjBindRemove": 256
+    },
+    "role": "bounded ASCII label, never a path or directory component",
+    "effect": "named visibility only; not storage identity, FIFO subscription or packet routing",
+    "ge_mirror": "also installed through octxbindmode in the native O process view, so OLOOKUP and NS1-NS4 copy/share/revocation apply"
+  },
+  "limits": {
+    "handles_per_process": 32,
+    "live_objects": 4096,
+    "payload_bytes_total": 33554432,
+    "payload_bytes_per_invoke": 1048576,
+    "fifos": 256,
+    "subscriptions_per_fifo": 64,
+    "queued_messages_global": 65536,
+    "per_subscription_capacity_min": 1,
+    "per_subscription_capacity_max": 1024,
+    "per_subscription_capacity_default": 64,
+    "envelope_max": 64,
+    "tcp_handles_per_process": 8,
+    "tcp_objects_global": 64,
+    "ospawn_handles_per_child": 8,
+    "bindings_per_process": 32,
+    "udp6_handles_per_process": 8,
+    "udp6_max_payload": 1232
+  },
+  "capability_rights": {
+    "Vread": 1,
+    "Vsend": 2,
+    "Vrecv": 4,
+    "Vmeta": 8,
+    "Vclose": 16,
+    "Vsubscribe": 32,
+    "Vcontrol": 64,
+    "Vdelegate": 128,
+    "Vwrite": 256,
+    "Vaccept": 512,
+    "Vconnect": 1024,
+    "authority_rule": "derived from the Handle; ObjCall.rights must be zero and never widens authority",
+    "delegation": "OBJOPEN(ObjOpenHandle), OBJGRANT/ObjOpGrant, and OSPAWN flags=2 copy only an equal or attenuated subset",
+    "implicit_inheritance": "none; no PID+handle-number shortcut, no rfork/exec inheritance",
+    "oid_possession": "grants no authority",
+    "udp6_rights": "Vread receives, Vwrite sends; default Vread|Vwrite|Vmeta|Vdelegate; subsets only"
+  },
+  "objectfifo": {
+    "message": "one ordered, complete authorized object reference plus optional 0..64 byte opaque envelope",
+    "transferable_kinds": [
+      "RAM bytes",
+      "GE/O capability",
+      "TCP listener/connection"
+    ],
+    "rejected_kind": "VkindFifo (no ambient-authority chain)",
+    "fanout": "independent per-subscription bounded queue and cursor (TEE)",
+    "overflow": "drop oldest per subscription with dropped counter",
+    "receiver": "blocking with timeout, non-blocking option, wake on close/revoke",
+    "not_a_byte_stream": true,
+    "no_protocol_specific_payload": true
+  },
+  "cross_process": {
+    "mechanism": "OSPAWN flags bit 2 + struct Oinheritv, explicit attenuation",
+    "list_limit": 8,
+    "rights_rule": "0 copies parent rights; otherwise requested rights must be a subset",
+    "child_discovery": "plan9.obj_list() (OBJINVOKE List) returns process Handles in slot order",
+    "lifetime": "message/Handle Vobj reference owns the TCP Tendpoint; accepting process may exit before the receiver serves",
+    "evidence": "parent pid 3; worker pid 17 accepted, published GE+TCP through ObjectFIFO, exited (WAIT (17, '')); parent served HTTP 200"
+  },
+  "tcp_provider": {
+    "kind": "VkindTcp",
+    "core": "vtcp_open/vtcp_accept/vtcp_read/vtcp_write in kernel/core/systcp6.c",
+    "legacy_shims": "TCP6LISTEN(108), TCP6CONNECT(109), TCP6ACCEPT(110), TCP6READ(111), TCP6WRITE(112), TCP6CLOSE(113) delegate to the same core",
+    "stream_semantics": "unchanged; ObjectFIFO preserves reference/message boundaries only",
+    "limits_preserved": "8 per process, 64 globally"
+  },
+  "ge_capability": {
+    "kind": "VkindGe",
+    "open": "OBJOPEN(ObjOpenGe) with an existing O Space Handle and OID",
+    "authorization": "oscopycap makes an independent Ohand capability copy with the same SpaceID and rights; oauthorize checks revoked/rights but skips source-process view membership",
+    "identity": "persistent SpaceID/OID and volume UUID in VobjInfo; not remapped to a new volatile OID",
+    "bind": "OBJBIND mirrors an attenuated capability into the native O view",
+    "not_a_clone": "OBJINVOKE read/write resolves through onativeget/onativeput on the persistent provider",
+    "caveat": "a delegated GE capability is closed by its Handles; later namespace/OREVOKE edits do not retroactively revoke it"
+  },
+  "compatibility": {
+    "vobj": "121-135 RETIRED/RESERVED: nil systab entries, sysreserved=1, sysvobj* wrappers removed; Python method names are OBJ* adapters",
+    "tcp6": "108-113 RETIRED/RESERVED: nil systab entries, sysreserved=1, systcp6* wrappers removed; vtcp_* stays internal",
+    "dead_path_fd": "16 pathname/FS and 11 always-failing FD slots RESERVED with nil systab entries and Ebadarg; no sysunsupported special case",
+    "udp6": "116-120 RETIRED/RESERVED: nil systab entries, sysreserved=1, sysnet6* wrappers removed; address lookup is ObjOpNet6Addr=24; endpoints/data use ObjOpenUdp6/SendTo/RecvFrom/CLOSE",
+    "ge": "OVOLOPEN/OSPACE*/OEXECUTE, native namespace and OQUERY unchanged; GE/O v1 bytes and OIDs unchanged"
+  },
+  "tests": [
+    {
+      "name": "canonical kernel build",
+      "command": "tools/build-gcc.sh --kernel",
+      "result": "PASS",
+      "detail": "132/132 selected, 134/134 full closure, ABI check PASS, link PASS",
+      "artifact": "build/gcc/9pc64.elf",
+      "sha256": "2b1c77150b22ec05fb092a80e8ad2490bb6d0d3aa29354708a88a6ba3f4686a9",
+      "logs": [
+        "build/gcc/report.txt",
+        "build/gcc/full-report.txt",
+        "build/gcc/abi-report.txt"
+      ]
+    },
+    {
+      "name": "canonical MicroPython build",
+      "command": "tools/build-mpy-gcc.sh -j 8",
+      "result": "PASS",
+      "detail": "246 units, 0 FAIL; libc archive 69 objects; ABI checks PASS; no undefined symbols; syscall stubs RBP numbers verified",
+      "artifact": "build/gcc/micropython.elf",
+      "sha256": "221c4b02a35be862a7039e55947e32390ed11c59896e3acc4b4bfb6b7d908849",
+      "size": 517904
+    },
+    {
+      "name": "ABI/syscall-table checks",
+      "command": "generated build/gcc/gen/systab-gcc.h plus duplicate-number scan of runtime/abi/sys.h",
+      "result": "PASS",
+      "detail": "135 unique names, numbers 0-140 with historical gaps only (48,49,94,95,114,115); OBJCREATE..OBJINVOKE resolved to sysobj* handlers; no duplicate ABI number",
+      "logs": [
+        "build/gcc/gen/systab-gcc.h",
+        "build/gcc/gen/systab-gcc.unsupported"
+      ]
+    },
+    {
+      "name": "new five-operation ABI self-test",
+      "command": "tools/qemu-o-boot.sh --tcg --no-build --obootexec 0x4f45584543000003 --repl-input build/vobj-test/obj_selftest.txt --expect \"OBJ TEST PASS\"",
+      "result": "PASS",
+      "detail": "OBJ SELFTEST 35 PASS 0 FAIL",
+      "logs": [
+        "build/qemu-o/final-obj-selftest/serial-boot.log",
+        "build/qemu-o/final-obj-selftest/report.txt"
+      ]
+    },
+    {
+      "name": "new single-process IPv6/TCP HTTP",
+      "command": "tcp_peer.py 19410 19411 + tools/qemu-o-boot.sh --tcg --no-build --obootexec 0x4f45584543000003 --udp6-peer 19410:19411 --repl-input build/vobj-test/obj_tcp_repl.txt --expect \"OBJ TCP TEST PASS\"",
+      "result": "PASS",
+      "detail": "only plan9.obj_open_tcp/obj_accept/obj_read/obj_write/obj_close; real IPv6 peer received HTTP/1.1 200 OK; guest printed OBJ TCP SENT 40",
+      "logs": [
+        "build/qemu-o/final-obj-tcp/serial-boot.log",
+        "build/vobj-test/peer-final-obj-tcp.log",
+        "build/qemu-o/final-obj-tcp/report.txt"
+      ]
+    },
+    {
+      "name": "new two-process TCP connection object handoff",
+      "command": "tcp_peer.py 19810 19811 + tools/qemu-o-boot.sh --tcg --no-build --obootexec 0x4f45584543000003 --udp6-peer 19810:19811 --repl-input build/vobj-test/obj_ipc_repl.txt --expect \"OBJ INTERPROC TEST PASS\"",
+      "result": "PASS",
+      "detail": "parent pid 3; worker pid 17 used obj_list/obj_accept/obj_publish, sent GE+TCP through the generic ObjectFIFO, exited; WAIT (17, ''); parent read GE b'persist', read HTTP request, wrote HTTP/1.1 200 OK; peer TCP PEER PASS",
+      "logs": [
+        "build/qemu-o/final-obj-ipc/serial-boot.log",
+        "build/vobj-test/peer-final-obj-ipc.log",
+        "build/qemu-o/final-obj-ipc/report.txt"
+      ]
+    },
+    {
+      "name": "legacy volatile/ObjectFIFO shims",
+      "command": "tools/qemu-o-boot.sh --tcg --no-build --obootexec 0x4f45584543000003 --repl-input build/vobj-test/repl.txt --expect \"OFIFO TEST PASS\"",
+      "result": "PASS",
+      "detail": "OFIFO SELFTEST 20 PASS 0 FAIL",
+      "logs": [
+        "build/qemu-o/final-legacy-fifo/serial-boot.log"
+      ]
+    },
+    {
+      "name": "legacy TCP6 shims",
+      "command": "tcp_peer.py 19710 19711 + tools/qemu-o-boot.sh --tcg --no-build --obootexec 0x4f45584543000003 --udp6-peer 19710:19711 --repl-input build/vobj-test/tcp_repl.txt --expect \"TCP TEST PASS\"",
+      "result": "PASS",
+      "detail": "single-process TCP6LISTEN/ACCEPT/READ/WRITE/CLOSE -> HTTP/1.1 200 OK; peer observed the response",
+      "logs": [
+        "build/qemu-o/final-legacy-tcp/serial-boot.log",
+        "build/vobj-test/peer-final-legacytcp.log"
+      ]
+    },
+    {
+      "name": "two-boot persistence and generic GE reopen",
+      "command": "QOB_INI_BOOTEXEC=0x4f45584543000003 tools/qemu-o-persist.sh --tcg --no-build --repl --boot1-input build/vobj-test/obj_persist1.txt --boot2-input build/vobj-test/obj_persist2.txt --boot1-expect \"OBJ PERSIST WROTE\" --boot2-expect \"OBJ PERSIST GENEW\"",
+      "result": "PASS",
+      "detail": "boot 1 wrote OID 77 = b'newabi'; boot 2 restored b'newabi' via space.oget and via OBJOPEN(ObjOpenGe)+OBJINVOKE read; existing odemo Counter also restored; O partition was not recreated",
+      "logs": [
+        "build/qemu-o/final-obj-persist/report.txt",
+        "build/qemu-o/final-obj-persist/serial-boot1.log",
+        "build/qemu-o/final-obj-persist/serial-boot2.log"
+      ]
+    }
+  ],
+  "selftest_coverage": [
+    "CREATE bytes, empty object, scope tag",
+    "OPEN Handle with rights attenuation",
+    "amplification, write without Vwrite, grant beyond source rights denied",
+    "BIND/OPEN by role; missing binding; remove binding",
+    "GE capability read through OBJINVOKE",
+    "GE binding visible through space.olookup (NS role, OID 42) and removed",
+    "ObjectFIFO TEE, envelope, identity stability, grant",
+    "RAM and GE references through the same FIFO; OID unchanged",
+    "denied subscribe/send/read/accept",
+    "oversized read, unsupported operation, unsupported ABI version",
+    "subscription handle duplication and binding denied",
+    "non-blocking receive",
+    "stale Handle, double close, double message close",
+    "independent fast/slow capacities and drop-oldest overflow",
+    "dead-subscriber publish",
+    "revocation wake and denial"
+  ],
+  "partial_or_blocked": {
+    "native_namespace_binding": "IMPLEMENTED for generic bindings and mirrored into the native O view for GE capabilities; OSPAWN delegation remains Handle-based",
+    "same_identity_volatile_to_ge_promotion": "blocked; no silent identity remap",
+    "standalone_post_spawn_handoff": "not implemented; only explicit OSPAWN flags=2",
+    "rfork_exec_vobj_inheritance": "not implemented; default-deny",
+    "udp6_generic_provider": "not implemented; NET6* compatibility remains, no new UDP syscall",
+    "direct_tcp_readiness_subscription": "not implemented; worker accepts and transfers the real connection",
+    "ge_capability_revocation": "close Handles only; later namespace revocation is not linked to an already delegated GE capability",
+    "performance_measurement": "not run"
+  },
+  "not_run": [
+    "true multi-CPU concurrent send/close/recv stress",
+    "allocation-exhaustion injection",
+    "repeated 1-1000 connection cycles",
+    "PID-reuse and guessed-Handle attack tests",
+    "read-only TEE subscriber for a TCP connection",
+    "optional concurrent third-process (Proc C) TEE subscriber during two-process HTTP",
+    "TCP6 per-process 8 / global 64 endpoint cap regression",
+    "TCP6 listener collision and close-race regression",
+    "UDP6 through a generic object provider",
+    "UDP6 peer smoke (no harness in the canonical tree)",
+    "exec/exit generic binding cleanup and child non-inheritance",
+    "concurrent bind/unbind/open/close race campaign",
+    "external IPv6 connectivity beyond the local UDP-encapsulated peer",
+    "physical hardware boot and physical disk writes"
+  ],
+  "concurrency_audit": {
+    "locks": [
+      "Handle table Lock",
+      "FIFO Lock",
+      "subscription Lock",
+      "subscription receive QLock",
+      "global quota Lock",
+      "identity Lock",
+      "TCP endpoint QLock",
+      "OContext Lock"
+    ],
+    "lock_order": "FIFO Lock -> subscription Lock; receiver never takes FIFO Lock; TCP endpoint gate serializes stream I/O; OContext bind copies refs under its lock and drops old refs after unlock",
+    "allocation_under_fifo_lock": "non-waiting mallocz for pre-reserved message nodes only",
+    "generic_binding_allocation": "the binding Vhand is allocated before the table lock; the old Vhand is released after unlock",
+    "single_receiver_per_subscription": true,
+    "stress_test": "NOT RUN"
+  },
+  "design_exclusions": [
+    "no GE/O v1 format or identity change",
+    "no path/9P/Chan/Qid/Dev hierarchy",
+    "no Python class hierarchy in storage",
+    "no TCP/IP-specific FIFO data structure or payload",
+    "no required legacy TCP6/VOBJ syscall in the new tests",
+    "no mutable shared payload or zero-copy claim",
+    "no unbounded queues",
+    "no swap or new paging",
+    "no global machine-wide OID allocator or remote OID protocol",
+    "no same-identity volatile-to-GE promotion"
+  ],
+  "changed_files": {
+    "new": [
+      "runtime/abi/obj.h",
+      "kernel/core/sysobj.c",
+      "runtime/libc/port/oobject.c",
+      "build/vobj-test/obj_selftest.txt",
+      "build/vobj-test/obj_tcp_repl.txt",
+      "build/vobj-test/obj_ipc_repl.txt",
+      "build/vobj-test/obj_persist1.txt",
+      "build/vobj-test/obj_persist2.txt",
+      "build/qemu-o/abi-inputs/boot1.py",
+      "build/qemu-o/abi-inputs/ge-boot1.py",
+      "build/qemu-o/abi-inputs/ge-boot2.py",
+      "build/qemu-o/abi-static/check.txt"
+    ],
+    "modified": [
+      "runtime/abi/sys.h",
+      "kernel/core/vobjint.h",
+      "kernel/core/sysvobj.c",
+      "micropython/modplan9.c",
+      "tools/host/build-kernel.py",
+      "tools/host/build-mpy-gcc.py",
+      "docs/OBJECT-MODEL.md",
+      "docs/KERNEL-API-ABI.md",
+      "docs/VOLATILE-OBJECT-OBJECTFIFO.md",
+      "docs/STATUS.md",
+      "docs/TEST-RESULTS.json",
+      "runtime/abi/obj.h",
+      "runtime/abi/vobj.h",
+      "kernel/core/sysobj.c",
+      "kernel/core/systcp6.c",
+      "kernel/core/sysfile.c",
+      "kernel/core/sysproc.c",
+      "ge/storage/sysgefs.c",
+      "micropython/p9space.c",
+      "runtime/abi/tcp6.h",
+      "docs/OBJECT-ABI-MIGRATION.md"
+    ],
+    "test_bundle": "build/vobj-test/ (disposable scripts and peer; not canonical build source)"
+  },
+  "task": "af605a1c7d35456690d3a86522475d31",
+  "af605a1c_round": {
+    "date": "2026-11-04",
+    "kernel_sha256": "7ccb34df55036969e462ebc87bbdf073a97f5af8acd7d9f45200a250c965f39f",
+    "micropython_sha256": "d38efa8a76e7cf354b00f863e1de829f2181824ea5e630e6d9835188c242e67b",
+    "tests": [
+      {
+        "name": "canonical kernel build",
+        "result": "PASS",
+        "detail": "132/132 selected, 134/134 full closure, ABI PASS, link PASS",
+        "artifact": "build/gcc/9pc64.elf"
+      },
+      {
+        "name": "canonical MicroPython build",
+        "result": "PASS",
+        "detail": "246 units, 0 FAIL, no undefined symbols",
+        "artifact": "build/gcc/micropython.elf"
+      },
+      {
+        "name": "static retirement check",
+        "result": "PASS",
+        "detail": "48 reserved numbers; all systab entries nil; all sysreserved bits set; no removed sys* wrapper symbols",
+        "logs": [
+          "build/qemu-o/abi-static/check.txt"
+        ]
+      },
+      {
+        "name": "object ABI self-test (OBJ* only)",
+        "result": "PASS",
+        "detail": "11/0 PASS: create/read, size query via compatibility adapter, attenuation/write denial, bind/unbind, ObjectFIFO TEE, envelope, drop-oldest overflow, revocation, retired CLOSE raw call returns Ebadarg",
+        "logs": [
+          "build/qemu-o/abi-selftest-final8/serial-boot.log",
+          "build/qemu-o/abi-selftest-final8/report.txt"
+        ]
+      },
+      {
+        "name": "two-boot OBJ-only GE/O persistence",
+        "result": "PASS",
+        "detail": "boot1 OBJOPEN(ObjOpenSpace)+OBJCREATE(ObjKindGe)+OBJINVOKE Write/Commit; boot2 OBJOPEN(ObjOpenSpace)+OBJOPEN(ObjOpenGeSpace) reads b\"newabi\" from the same OID",
+        "logs": [
+          "build/qemu-o/ge-persist-final3/report.txt"
+        ]
+      }
+    ],
+    "not_run": [
+      "IPv6 TCP HTTP",
+      "two-process TCP/ObjectFIFO handoff",
+      "namespace COPY/SHARE/revocation campaigns",
+      "multi-CPU stress",
+      "allocation-exhaustion injection",
+      "PID-reuse/guessed-Handle attacks",
+      "external IPv6",
+      "physical hardware/disk writes"
+    ],
+    "reserved_numbers": {
+      "tcp6": "108-113",
+      "vobj": "121-135",
+      "path_fs": [
+        2,
+        3,
+        7,
+        13,
+        14,
+        18,
+        22,
+        23,
+        25,
+        26,
+        27,
+        35,
+        42,
+        44,
+        45,
+        46
+      ],
+      "legacy_fd": [
+        4,
+        5,
+        11,
+        15,
+        16,
+        20,
+        21,
+        39,
+        43,
+        50,
+        51
+      ]
+    }
+  },
+  "capability_fix_candidate_2026_11_05": {
+    "document": "Capability attenuation and revocation lineage, ObjectFIFO delivery rights, CreatePersist handle accounting, unified namespace binding",
+    "task_id": "9b85e5c5208a4a3b87ec2f22e12443f7",
+    "predecessor_task": "885009021eb2401398cb6923ac3c59c0",
+    "date": "2026-11-05",
+    "source_baseline_snapshot": "f3daebf4e0cb21ef1ca3e2c05589232f4f9c005738da0b41c44cf0cc2db06838",
+    "candidate_diff_sha256": "78886b5f019c82db6fe59b9a3a0c41e934706b6af1000fed20c59e80ccfcd68f",
+    "environment": {
+      "host": "kuha",
+      "acceleration": "KVM",
+      "qemu": "QEMU 10.0.13",
+      "default_cpus": 4,
+      "persistence_cpus": 1
+    },
+    "syscalls": {
+      "named": 135,
+      "active": 87,
+      "reserved": 48,
+      "obj_active": [
+        136,
+        137,
+        138,
+        139,
+        140
+      ],
+      "source": "build/gcc/gen/systab-gcc.h"
+    },
+    "builds": [
+      {
+        "name": "canonical amd64 GCC kernel",
+        "result": "PASS",
+        "detail": "132/132 selected, 134/134 closure, link PASS, no undefined symbols",
+        "artifact": "build/gcc/9pc64.elf",
+        "sha256": "caf627e99a44272d2a9a72084cd9dbe6a6627b01154bb619679104189b771fbf"
+      },
+      {
+        "name": "canonical MicroPython ELF",
+        "result": "PASS",
+        "detail": "246 units, 0 FAIL, no undefined symbols",
+        "artifact": "build/gcc/micropython.elf",
+        "sha256": "641cf791fb98c9e8dccf075ed761086978744882522818b6723f8a35e16caaa7"
+      }
+    ],
+    "tests": [
+      {
+        "name": "OBJ self-test",
+        "result": "PASS",
+        "detail": "35/35 checks: create/read, attenuation, bind/unbind, TEE, envelope, drop-oldest, revocation, negative operations",
+        "logs": [
+          "build/qemu-o/task-cap-selftest/"
+        ]
+      },
+      {
+        "name": "48 durable GE creates",
+        "result": "PASS",
+        "detail": "1/1: 48 consecutive obj_create_ge operations produced strictly sequential OIDs",
+        "logs": [
+          "build/qemu-o/task-cap-a1/"
+        ]
+      },
+      {
+        "name": "Handle cap and rights",
+        "result": "PASS",
+        "detail": "12/12: 32-slot table rejects the 33rd live Handle; failed durable create allocates no OID; read-only, metadata-only, delegation, amplification denial, COPY, EXCLUSIVE, SHARE, REMOVE",
+        "logs": [
+          "build/qemu-o/task-cap-a2/"
+        ]
+      },
+      {
+        "name": "namespace COPY/SHARE and OSPAWN FIFO handoff",
+        "result": "PASS",
+        "detail": "5/5: COPY and SHARE child views read the persistent object; two-process FIFO handoff delivered object and envelope",
+        "logs": [
+          "build/qemu-o/task-cap-b/"
+        ]
+      },
+      {
+        "name": "two-boot GE/O persistence",
+        "result": "PASS",
+        "detail": "boot 1 committed version 1; boot 2 restored version 1 and committed version 2 from the same O partition",
+        "logs": [
+          "build/qemu-o/task-cap-persist/"
+        ]
+      },
+      {
+        "name": "IPv6 HTTP single-process",
+        "result": "PASS",
+        "detail": "local UDP-encapsulated peer received HTTP/1.1 200 OK and OK",
+        "logs": [
+          "build/qemu-o/task-tcp1/"
+        ]
+      },
+      {
+        "name": "two-process TCP capability handoff through ObjectFIFO",
+        "result": "PASS",
+        "detail": "worker accepted the IPv6 connection, sent the GE object and connection through the FIFO; parent returned HTTP/1.1 200 OK",
+        "logs": [
+          "build/qemu-o/task-tcp2/"
+        ]
+      }
+    ],
+    "additional_fixes": [
+      "FIFO teardown now clears each subscription fifo pointer under the FIFO lock (dangling Vfifo use-after-free).",
+      "sysonmount now checks the shared revocation origin, not only the grant's own revoked flag.",
+      "vobjcreatege and vobjopenbinding fail with Enomem instead of dereferencing a missing Handle table.",
+      "RFNOMNT no longer blocks OBJBIND role removal; it still blocks namespace extension."
+    ],
+    "tcp_investigation": "The earlier claimed Python RFORK worker timeout and sequential same-process TCP stall did not reproduce in the single-process or two-process KVM runs. Both completed. The root cause remains unconfirmed; test sequencing or host peer timing is plausible but not proven.",
+    "not_run": [
+      "allocation fault injection beyond deterministic Handle-table exhaustion",
+      "long fuzz campaigns",
+      "external IPv6 beyond the local UDP-encapsulated peer",
+      "multi-CPU stress beyond 4-vCPU boots",
+      "physical hardware or disk writes",
+      "USB migration",
+      "unrelated syscall reduction"
+    ],
+    "publication": "Source publication follows docs/DEVELOPMENT-WORKFLOW.md; the published snapshot_id is reported by kernel_status after activation and is not asserted locally."
+  },
+  "udp6_object_provider_2026_11_05": {
+    "task": "b91ee58f883e4f14a550e9b6157190e1",
+    "status": "implemented and QEMU-tested candidate; no syscall added, removed or renumbered",
+    "abi": {
+      "open_provider": {
+        "ObjOpenUdp6": 8
+      },
+      "invoke_operations": {
+        "ObjOpSendTo": 14,
+        "ObjOpRecvFrom": 15
+      },
+      "kind": "VkindUdp6",
+      "default_rights": [
+        "Vread",
+        "Vwrite",
+        "Vmeta",
+        "Vdelegate"
+      ],
+      "rights_semantics": "Vread receives; Vwrite sends; subsets allowed; any other bit is Eperm; open/copy/grant cannot amplify",
+      "wire_structs": [
+        "ObjOpenUdp6Req",
+        "ObjUdp6SendReq",
+        "ObjUdp6RecvHdr"
+      ],
+      "max_payload": 1232,
+      "timeout": "arg0 milliseconds; 0xffffffff infinite",
+      "libc": [
+        "obj_udp6_open",
+        "obj_udp6_open_rights",
+        "obj_udp6_sendto",
+        "obj_udp6_recvfrom"
+      ],
+      "micropython": [
+        "obj_open_udp6",
+        "obj_udp6_sendto",
+        "obj_udp6_recvfrom"
+      ]
+    },
+    "compatibility": {
+      "numbers": "NET6ADDR 116, NET6OPEN 117, NET6RECVFROM 118, NET6SENDTO 119, NET6CLOSE 120 remain active",
+      "implementation": "handlers use the same VkindUdp6 provider and process Vhtab; the separate Net6tab is removed",
+      "gate": "every NET6 data call still requires obootstrap/net6permit; OBJ Handles are explicit capabilities not inherited by rfork/exec",
+      "per_process_endpoint_limit": 8
+    },
+    "builds": {
+      "kernel": {
+        "result": "PASS",
+        "selected": "132/132",
+        "closure": "134/134",
+        "abi": "PASS",
+        "link": "PASS",
+        "undefined": 0,
+        "path": "build/gcc/9pc64.elf",
+        "bytes": 1150616,
+        "sha256": "46b61c36ec19c04fb0b2d92f26b0a75230867df4956e17d5e23ee5af8672b0e8"
+      },
+      "micropython": {
+        "result": "PASS",
+        "units": "246/246",
+        "fail": 0,
+        "undefined": 0,
+        "path": "build/gcc/micropython.elf",
+        "bytes": 522808,
+        "sha256": "30fdaa64f85b3c5ee190905fc5c6e0ecfa726535e257b3401086add294d189e9"
+      }
+    },
+    "qemu_tests": [
+      {
+        "name": "UDP6 OBJ and NET6 compatibility peer",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-udp6-obj5",
+        "evidence": [
+          "peer received OBJ-PING on guest port 4444 and replied OBJ-REPLY; guest received it with source port 40000",
+          "peer received NET6-PING on guest port 4445 and replied NET6-REPLY; guest received it with source port 40000",
+          "read-only Handle send denied Eperm",
+          "GRANT rights amplification denied Eperm",
+          "second close of the same Handle returned Ebadarg"
+        ]
+      },
+      {
+        "name": "UDP6 datagram boundary",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-udp6-big",
+        "evidence": [
+          "1232-byte send and 1232-byte receive round trip succeeded",
+          "1233-byte payload rejected by the userland adapter"
+        ]
+      }
+    ],
+    "not_run": [
+      "unprivileged child denial of ObjOpenUdp6 (no OSPAWN/Python harness retained)",
+      "explicit OSPAWN delegation of a UDP6 Handle",
+      "observed exec/exit endpoint release",
+      "raw OBJINVOKE receive-buffer-too-small path",
+      "multi-CPU and allocation-exhaustion campaigns",
+      "physical hardware/disk writes"
+    ],
+    "logs": [
+      "build/qemu-o/task-udp6-obj5/serial-boot.log",
+      "build/qemu-o/task-udp6-obj5/peer.log",
+      "build/qemu-o/task-udp6-big/serial-boot.log",
+      "build/qemu-o/task-udp6-big/peer.log"
+    ]
+  },
+  "pipe_uart_kbd_provider_2026_11_05": {
+    "task": "4900c68069db4b41aab89e4ebca79b3a",
+    "date": "2026-11-05",
+    "status": "implemented and executed candidate; not declared production HEAD",
+    "syscalls": "unchanged: OBJCREATE/OPEN/CLOSE/BIND/INVOKE = 136-140; legacy PIPENEW/PIPEREAD/PIPEWRITE/PIPECLOSE=71-74, KBD*=75-78, UART*=79-85 and PIPEINHERIT=100 unchanged",
+    "abi": {
+      "obj_header": "runtime/abi/obj.h",
+      "vobj_header": "runtime/abi/vobj.h",
+      "kinds": {
+        "VkindPipe": 6,
+        "VkindUart": 7,
+        "VkindKbd": 8
+      },
+      "create_kind": {
+        "ObjKindPipe": 3
+      },
+      "open_providers": {
+        "ObjOpenUart": 10,
+        "ObjOpenKbd": 11,
+        "ObjOpenPipe": "informational tag only"
+      },
+      "invoke_ops": {
+        "ObjOpPipePeer": 16,
+        "ObjOpUartCtl": 17,
+        "ObjOpUartStatus": 18,
+        "ObjOpKbdLeds": 19
+      },
+      "kernel_router": "kernel/core/sysobj.c",
+      "shared_core": "kernel/core/sysvobj.c",
+      "libc": "runtime/libc/port/oobject.c",
+      "micropython": "micropython/modplan9.c",
+      "limits": {
+        "OBJ_STREAM_MAXIO": 65536,
+        "OBJ_KBD_MAXREAD": 4096,
+        "OBJ_UART_STATMAX": 65536,
+        "Vpipeendmax": 32,
+        "Vuartslotmax": 16,
+        "Vkbdslotmax": 4,
+        "Vhandmax": 96
+      },
+      "pipe_semantics": "blocking native byte stream; create installs end 0, PipePeer installs the pinned peer; not ObjectFIFO",
+      "uart_semantics": "iseve gate; mode fixes default rights; Vread/Vwrite data, Vcontrol ctl, Vmeta status; console/special ports Eperm; unknown port Enodev",
+      "kbd_semantics": "iseve and exclusive kbdscancodeacquire; raw scan-code bytes, not KeyEvent; LED requires iseve+Vcontrol",
+      "inheritance": "PIPEINHERIT one-shot legacy bits 1/2/3; RFPROC copies only marked Pipe Handles preserving slot/gen; OSPAWN uses only its validated pipes list; exec/exit release all Handles",
+      "errors": "Ebadarg stale/wrong-kind/double-close; Eperm rights, non-eve UART/KBD and console/special UART; Ebadusefd UART direction mismatch; Enodev unknown UART/absent PS2"
+    },
+    "builds": {
+      "kernel": {
+        "result": "PASS",
+        "file": "build/gcc/9pc64.elf",
+        "bytes": 1154904,
+        "sha256": "5e098a298b569c888772cfa4deec699dcb7a3e21f2e05435eba8639cdd216014",
+        "detail": "132/132 selected, 134/134 full closure, ABI PASS, link PASS"
+      },
+      "micropython": {
+        "result": "PASS",
+        "file": "build/gcc/micropython.elf",
+        "bytes": 528488,
+        "sha256": "bf723c8e672e556b90ffbbe2f74fbee821ed40cfcd29abf2e2889a8b9d306f6d",
+        "detail": "246 units, 0 FAIL, no undefined symbols"
+      }
+    },
+    "qemu_tests": [
+      {
+        "name": "Pipe OBJ and legacy compatibility, rights and lifetime",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-pipe2-5",
+        "evidence": [
+          "OBJ create/peer and byte transfer end0->end1 and end1->end0",
+          "OBJ info kind VkindPipe and default rights Vread|Vwrite|Vmeta|Vdelegate",
+          "second PEER call, end-1 peer, attenuated write and GRANT amplification denied",
+          "mixed legacy PIPEINHERIT write and OBJ read on one pair",
+          "legacy PIPENEW/READ/WRITE/CLOSE work over the same core",
+          "stale read and second close return Ebadarg"
+        ]
+      },
+      {
+        "name": "Pipe RFPROC and OSPAWN explicit inheritance",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-pipe2-5",
+        "evidence": [
+          "PIPEINHERIT + RFPROC child read the marked end and exited with FORK-PIPE",
+          "OSPAWN child read only its explicit pipes list and exited with SPAWN",
+          "unmarked endpoints were not installed in either child"
+        ]
+      },
+      {
+        "name": "UART provider, safe errors and free-port data path",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-pipe2-5",
+        "evidence": [
+          "UARTCOUNT reported 2; console port 0 open denied with Eperm",
+          "bad port 99 denied; wrong-Handle status/ctl denied",
+          "free port 1 open, status (16 bytes), ctl, OBJ write, legacy write/ioctl/status, cross-route close PASS",
+          "stale UART status after close denied"
+        ]
+      },
+      {
+        "name": "KBD exclusive claim and LED authority",
+        "result": "PASS (negative paths only)",
+        "dir": "build/qemu-o/task-pipe2-5",
+        "evidence": [
+          "OBJOPEN(ObjOpenKbd) denied while the native REPL console holds the single PS/2 claim",
+          "legacy KBDOPEN denied for the same reason",
+          "ObjOpKbdLeds on a Pipe Handle denied"
+        ]
+      },
+      {
+        "name": "UART read-only-memory fault reproducer and fix isolation",
+        "result": "PASS",
+        "dirs": [
+          "build/qemu-o/task-uart-only1",
+          "build/qemu-o/task-uart-only3"
+        ],
+        "evidence": [
+          "before fix: opening the second UART panicked in qtoken writing the uartctl string literal in read-only kernel memory",
+          "after fix: opening UART 1 returned a Handle; the fault did not recur"
+        ]
+      }
+    ],
+    "fix": "kernel/drivers/uart/uartcore.c uartenable() now copies \"l8\", \"s1\", \"pn\" and \"b9600\" into a writable local buffer before uartctl(), because uartctl tokenizes in place",
+    "not_run": [
+      "reading real PS/2 scan codes and releasing the claim from a non-console claimant",
+      "keyboard LED hardware behavior",
+      "external-peer UART receive and baud/parity error injection",
+      "UART hot-unplug and unprivileged-user denial (no non-eve harness)",
+      "exec/exit endpoint release observation in a live multi-process session",
+      "allocation-exhaustion, multi-CPU and guessed-Handle campaigns",
+      "performance measurement (no reliable measurement collected)"
+    ],
+    "logs": [
+      "build/qemu-o/task-pipe2-5/serial-boot.log",
+      "build/qemu-o/task-pipe2-5/report.txt",
+      "build/qemu-o/task-uart-only1/serial-boot.log",
+      "build/qemu-o/task-uart-only3/serial-boot.log"
+    ]
+  },
+  "usb_service_provider_2026_11_05": {
+    "task": "2de71075e8c54f44afef60a4792857a9",
+    "date": "2026-11-05",
+    "status": "implemented and executed candidate; not declared production HEAD",
+    "syscalls": "unchanged: OBJCREATE/OPEN/CLOSE/BIND/INVOKE = 136-140; legacy USBOPEN/USBLIST/USBEPOPEN/USBEPNAME/USBREAD/USBWRITE/USBIOCTL/USBCLOSE = 63-70 unchanged",
+    "abi": {
+      "obj_header": "runtime/abi/obj.h",
+      "vobj_header": "runtime/abi/vobj.h",
+      "kinds": {
+        "VkindUsb": 9
+      },
+      "open_providers": {
+        "ObjOpenUsb": 12
+      },
+      "invoke_ops": {
+        "ObjOpUsbList": 20
+      },
+      "record": "ObjUsbEntry, byte-compatible with Usbentry from include/usbctl.h",
+      "kernel_router": "kernel/core/sysobj.c",
+      "shared_core": "kernel/core/sysvobj.c",
+      "libc": "runtime/libc/port/oobject.c",
+      "micropython": "micropython/modplan9.c",
+      "limits": {
+        "OBJ_USB_LISTMAX": 256,
+        "Vusbslotmax": 4,
+        "Vhandmax": 96
+      },
+      "rights": "default Vmeta|Vdelegate; subsets allowed; any other bit Eperm; ObjOpUsbList requires Vmeta",
+      "list_semantics": "outlen is a byte capacity and must be a multiple of sizeof(ObjUsbEntry); records clamped to 256 then to total; result is copied count; out==NULL or outlen==0 returns the total legacy USBLIST size query; no partial copy",
+      "scope": "metadata only: no endpoint open, data I/O, control transfer or USBIOCTL; legacy 16-slot Usbhtab remains for endpoint handles",
+      "errors": "Ebadarg stale/wrong-kind/double-close and malformed buffer; Eperm rights attenuation, missing Vmeta and non-subset open"
+    },
+    "builds": {
+      "kernel": {
+        "result": "PASS",
+        "file": "build/gcc/9pc64.elf",
+        "bytes": 1155048,
+        "sha256": "f1f50750398df486253a99d4f7cfec349befee95279dd81ccca9cf16f8de9a43",
+        "detail": "132/132 selected, 134/134 full closure, ABI PASS, link PASS"
+      },
+      "micropython": {
+        "result": "PASS",
+        "file": "build/gcc/micropython.elf",
+        "bytes": 533128,
+        "sha256": "8426c0fd5ece411feefc40df10e60ba7d592a72552a1caf2cb5450557c2d542d",
+        "detail": "246 units, 0 FAIL, no undefined symbols"
+      }
+    },
+    "qemu_tests": [
+      {
+        "name": "USB service open/list/close, rights, legacy USBLIST parity and no-I/O boundary",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-usb-5",
+        "evidence": [
+          "20/20 assertions PASS in a zero-endpoint KVM boot",
+          "OBJOPEN(ObjOpenUsb) returned a Handle with the default rights",
+          "ObjOpUsbList returned total 0 with an empty snapshot; size query, 300-record clamp and 1-record request agreed",
+          "legacy USBOPEN/USBLIST/USBCLOSE returned the same total and record count",
+          "guessed Handle, byte-object Handle, Vdelegate-only Handle, Vread open request and Read/Write denied",
+          "double close and stale close denied",
+          "legacy USBEPOPEN returned clean Ebadarg with no endpoints; invalid kind denied; no panic or disk error"
+        ]
+      }
+    ],
+    "not_run": [
+      "listing one or more real/emulated USB endpoints (environment had zero)",
+      "full 256-record table and nonempty endpoint-name copy",
+      "endpoint open/data/control/USBIOCTL unification (outside this step)",
+      "physical USB hardware"
+    ],
+    "logs": [
+      "build/qemu-o/task-usb-5/serial-boot.log",
+      "build/qemu-o/task-usb-5/report.txt"
+    ]
+  },
+  "usb_endpoint_open_2026_11_05": {
+    "task": "3b6774358ecd4b5687b392078a5c92eb",
+    "date": "2026-11-05",
+    "status": "implemented and executed candidate; not declared production HEAD",
+    "syscalls": "unchanged: OBJCREATE/OPEN/CLOSE/BIND/INVOKE = 136-140; legacy USBOPEN/USBLIST/USBEPOPEN/USBEPNAME/USBREAD/USBWRITE/USBIOCTL/USBCLOSE = 63-70 unchanged",
+    "abi": {
+      "obj_header": "runtime/abi/obj.h",
+      "vobj_header": "runtime/abi/vobj.h",
+      "kinds": {
+        "VkindUsb": 9,
+        "VkindUsbEp": 10
+      },
+      "open_providers": {
+        "ObjOpenUsb": 12
+      },
+      "invoke_ops": {
+        "ObjOpUsbList": 20,
+        "ObjOpUsbEpOpen": 21
+      },
+      "request": "ObjUsbEpReq {int devno; int epno; int kind; int mode; uint flags; uint reserved;}",
+      "record": "ObjUsbEntry, byte-compatible with Usbentry from include/usbctl.h; OBJ_USB_ENTRY_SIZE=164",
+      "kernel_router": "kernel/core/sysobj.c",
+      "shared_core": "kernel/core/sysvobj.c",
+      "libc": "runtime/libc/port/oobject.c",
+      "micropython": "micropython/modplan9.c",
+      "limits": {
+        "OBJ_USB_LISTMAX": 256,
+        "OBJ_USB_ENTRY_SIZE": 164,
+        "Vusbslotmax": 4,
+        "Vusbepslotmax": 16,
+        "Vhandmax": 96
+      },
+      "rights": "default Vmeta|Vdelegate (metadata only); Vcreate is available only to eve/bootstrap at ObjOpenUsb and is never added by OPENHANDLE/GRANT/OSPAWN; ObjOpUsbList requires Vmeta; ObjOpUsbEpOpen requires Vcreate",
+      "endpoint_rights": "derived from kind/mode: Vmeta|Vdelegate plus Vread (OREAD), Vwrite (OWRITE) or both (ORDWR); CTL also Vcontrol",
+      "list_semantics": "outlen is a byte capacity and must be a multiple of sizeof(ObjUsbEntry); capacities above 256 records are accepted and clamped like obj_usb_list(); records clamped to total; result is copied count; out==NULL or outlen==0 is the legacy size query; only copied range validated",
+      "endpoint_open_semantics": "DATA calls usbcore_dataopen(); CTL references the endpoint only; OBJCLOSE/exec/exit calls usbcore_dataclose() for DATA then usbcore_putep() exactly once when the last Vhand reference is dropped; no data I/O, USBIOCTL or control transfer",
+      "scope": "object endpoint open/close added; legacy 16-slot Usbhtab and legacy USB calls unchanged; no second Handle table",
+      "errors": "Eperm for missing Vcreate, non-subset open/grant, or non-eve Vcreate; Ebadarg for invalid devno/epno/kind/mode, non-multiple outlen, malformed buffer, stale/double close"
+    },
+    "builds": {
+      "kernel": {
+        "result": "PASS",
+        "file": "build/gcc/9pc64.elf",
+        "bytes": 1155160,
+        "sha256": "ebc9e590e7894ab1df4840863f61e7cc27f61a31ecce88892874cc1f0bc5cde8",
+        "detail": "132/132 selected, 134/134 full closure, ABI PASS, link PASS"
+      },
+      "micropython": {
+        "result": "PASS",
+        "file": "build/gcc/micropython.elf",
+        "bytes": 533336,
+        "sha256": "0ff113c8bf3d05ca124bd453144a4fb5531e0aa5770f11ab43b5f9571d838ec1",
+        "detail": "246 units, 0 FAIL, no undefined symbols"
+      }
+    },
+    "qemu_tests": [
+      {
+        "name": "OBJ USB metadata vs Vcreate gate, invalid endpoint requests, direct list capacities, legacy compatibility and close",
+        "result": "PASS",
+        "dir": "build/qemu-o/task-usbep-1",
+        "assertions": "32/32",
+        "evidence": [
+          "default metadata Handle kind VkindUsb and rights Vmeta|Vdelegate",
+          "metadata, Vdelegate-only and OBJOPEN(ObjOpenHandle) copies denied endpoint open with Eperm",
+          "OBJOPEN(ObjOpenHandle) and GRANT could not add Vcreate",
+          "eve Vcreate Handle passed the gate and reached endpoint lookup, returning Ebadarg because the boot had zero endpoints",
+          "invalid kind, mode, device and endpoint numbers returned Ebadarg",
+          "direct ObjOpUsbList byte capacities of 1, 256 and 300 records returned normally; 257-record+1 capacity was rejected as non-multiple",
+          "legacy USBOPEN/USBLIST/USBCLOSE worked and legacy USBEPOPEN denied invalid/absent endpoints",
+          "double close of service Handles returned Ebadarg; no panic, bad-disk or sync error"
+        ],
+        "logs": [
+          "build/qemu-o/task-usbep-1/serial-boot.log",
+          "build/qemu-o/task-usbep-1/report.txt"
+        ]
+      }
+    ],
+    "not_run": [
+      "successful DATA/CTL endpoint open and live endpoint rights (zero endpoints in the QEMU environment)",
+      "usbcore_dataclose()/putep release observation on a live endpoint",
+      "CTL endpoint reference/close path on a live endpoint",
+      "non-eve Vcreate denial (no non-eve harness is retained)",
+      "endpoint data I/O, USBIOCTL and control transfer (outside this step)",
+      "physical USB hardware, multi-CPU stress and allocation-fault injection"
+    ]
+  },
+  "pipe_uart_kbd_retirement_2026_11_05": {
+    "task": "437f5cbc56d040c6a8fb08fbb5aceff1",
+    "syscalls": "OBJCREATE/OPEN/CLOSE/BIND/INVOKE=136-140 remain active; PIPENEW/PIPEREAD/PIPEWRITE/PIPECLOSE=71-74, KBDOPEN/KBDREAD/KBDCLOSE/KBDLEDS=75-78, UARTCOUNT/UARTOPEN/UARTREAD/UARTWRITE/UARTIOCTL/UARTSTATUS/UARTCLOSE=79-85 and PIPEINHERIT=100 are RESERVED with nil systab and sysreserved=1; no sys* handler symbol is linked",
+    "new_invoke_ops": "ObjOpPipeInherit=22 (Pipe Handle, arg0 legacy read/write bits, one-shot next RFPROC, subset-only) and ObjOpUartCount=23 (handle 0, uartnports()); ObjOpKbdLeds=19 now also accepts handle 0 as the eve-only global LED control without a scan-code claim",
+    "compatibility_adapters": "MicroPython historical names pipenew/piperead/pipewrite/pipeclose/pipeinherit, uart_*, kbd_* call OBJCREATE/OPEN/INVOKE/CLOSE only; plan9.sysraw(n) is a diagnostic userland trampoline that adds no kernel entry point",
+    "kernel_build": "PASS: 132/132 selected, 134/134 closure, ABI PASS, link PASS, no undefined symbols; build/gcc/9pc64.elf 1154216 bytes SHA-256 c705bc55764a474e502e06a45e38070f662e56f12686e1e02a2683cbb7ad936e",
+    "micropython_build": "PASS: 246 units, 0 FAIL, no undefined symbols; build/gcc/micropython.elf 533512 bytes SHA-256 2cf35f5dd197692d351997bb27cac92d111f24e5501e37156cd8a54c76bb6ef2",
+    "static_retirement": "PASS: 135 named / 71 active / 64 reserved; all 16 new reserved names have nil dispatch and sysreserved=1; none of the 16 sys* handler symbols is present in the linked ELF",
+    "qemu": "PASS build/qemu-o/sysretire-2 (disposable KVM, --obootexec 0x4f45584543000003, REPL RETIRE-OK): OBJ and adapter Pipe data/close; ObjOpPipeInherit+RFPROC child read FORK-PIPE; OSPAWN list child read SPAWN; ObjOpUartCount=2 plus OBJ/adapter UART control/status/data and denial paths; KBD OBJ/adapter open denial, non-KBD and guessed-handle LED denial, handle-0 global LED success; raw sysraw(71..85,100) each Ebadarg; no panic or I/O error",
+    "not_run": "physical PS/2 scan-code/LED hardware outside QEMU, physical UART hardware, multi-CPU stress; no USB development"
+  },
+  "net6_retirement_2026_11_05": {
+    "task": "4e7b38c817be41c5bb1991a0e7f8d2e5",
+    "date": "2026-11-05",
+    "status": "completed",
+    "syscalls": "NET6ADDR=116, NET6OPEN=117, NET6RECVFROM=118, NET6SENDTO=119 and NET6CLOSE=120 are RESERVED: nil systab, sysreserved=1, no linked sysnet6* handler symbol, raw call Ebadarg; table 135 named / 66 active / 69 reserved; no number added, renumbered or reused",
+    "new_invoke_op": "ObjOpNet6Addr=24 copies the active interface IPv6 link-local address: handle 0, in==NULL, inlen==0, outlen=16; same obootstrap/net6permit gate as UDP6 open; reserves no port",
+    "compatibility_adapters": "libc adds obj_udp6_addr; MicroPython adds obj_udp6_addr and keeps net6_addr/net6_open/net6_sendto/net6_recvfrom/net6_close as userland adapters over obj_udp6_addr/open/sendto/recvfrom and obj_close; modplan9.o has no raw net6* relocation",
+    "kernel_build": {
+      "result": "PASS",
+      "selected": "132/132",
+      "closure": "134/134",
+      "abi": "PASS",
+      "link": "PASS",
+      "undefined": 0,
+      "path": "build/gcc/9pc64.elf",
+      "bytes": 1149936,
+      "sha256": "9f7a8219505bd17a937e3dc586a139073868fbd9c3afc20c2edfadd69ecffd39"
+    },
+    "micropython_build": {
+      "result": "PASS",
+      "units": "246",
+      "fail": 0,
+      "undefined": 0,
+      "path": "build/gcc/micropython.elf",
+      "bytes": 533672,
+      "sha256": "ef521c803e72ff1894b9f61e0cfcd7ffa3842c13e8db302483c91ead8732384c"
+    },
+    "static_retirement": "PASS build/qemu-o/phase4-static/check.txt: 135/66/69; all five NET6 names nil+sysreserved=1; no sysnet6* symbol linked; vudp6addr linked; modplan9.o references only obj_udp6_addr/open/sendto/recvfrom and obj_close",
+    "qemu": "PASS build/qemu-o/phase4-udp6c/ (REPL PHASE4 PASS, peer UDP6 PEER PASS): real IPv6 peer received NET6-PING from guest 4444 and OBJ-PING from 4445; guest received both replies with peer address and source port 40000; obj_udp6_addr and net6_addr adapter matched; read-only send and GRANT amplification Eperm; second close and stale send Ebadarg; raw 116-120 Ebadarg; no panic/bad-disk/flush/sync error",
+    "not_run": [
+      "physical network hardware",
+      "multi-CPU stress",
+      "receive-buffer-too-small path via raw OBJINVOKE (MicroPython supplies full 1232-byte capacity)",
+      "unprivileged-child UDP6 open denial beyond the tested read-only Handle denial"
+    ]
+  }
+}
