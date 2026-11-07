@@ -1,5 +1,22 @@
 # Plan2001-O — instructions for coding agents
 
+## Current source and task workflow (2026-11-07)
+
+The owner's later GitHub-first decision supersedes the kuha-only development
+and mandatory MCP source-publication rules preserved below. Read the
+[current workflow](docs/DEVELOPMENT-WORKFLOW.md#nykyinen-työnkulku-2026-11-07)
+before acting. Use Plan2001 MCP to claim tasks and report results; use
+[GitHub main](https://github.com/plan2001-kernel/kernel/tree/main) as current
+source. Verify the actual executor, available authentication and exact main
+SHA for each task. Propose changes on a dedicated branch and PR, verify the
+remote commit/files after writing, and report commit/PR links and actual test
+outcomes through MCP. Do not merge or update main without explicit assignment.
+
+The MCP source snapshot is historical T11 until separately synchronized; never
+substitute it for GitHub main or overwrite T12 with it. GitHub branch/PR writes
+and task_report do not update that snapshot. The dated publisher/hooks below
+are historical mechanisms, not the default route for current tasks.
+
 ## plan2001.com: current infrastructure (2026-11-03)
 
 Owner-confirmed facts, authoritative over older documents and session summaries:
@@ -23,9 +40,14 @@ Owner-confirmed facts, authoritative over older documents and session summaries:
   conflicting host assumptions and follow these facts. Do not automatically
   redeploy either removed service.
 
-## Source publication is mandatory at the end of every task round (2026-11-04)
+## Historical source-publication decision (2026-11-04)
 
-Owner decision, binding over older publishing notes: there is **no production
+**Historical scope:** the 2026-11-07 workflow above supersedes this section's
+source-transfer requirements. Its dated text and mechanism descriptions are
+retained as evidence; they do not require running the old publisher or hooks
+for a GitHub branch/PR task. Hardware/format authorization boundaries remain.
+
+Owner decision, binding over older publishing notes at that date: there is **no production
 kernel**. The kernel is a PoC on `kuha`. The full canonical source tree is
 edited on `kuha` and published immediately to `plan2001.com`. Every task round
 must publish the **complete current source tree**, including failed or
