@@ -11,8 +11,31 @@
 > T10 is implemented as the narrow time/WAIT cleanup and is PASS (2026-11-06);
 > T11 is validated and PASS (2026-11-06) with one FIFO infinite-timeout
 > sentinel fix and a strengthened-validation follow-up PASS (2026-11-07, no
-> kernel change); T12–T16 remain **PLANNED**; see
+> kernel change); T12 passes its emulated USB endpoint integration gate
+> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13–T16 remain **PLANNED**; see
 > [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+
+## T12: common device ABI (2026-11-07, emulated endpoint gate PASS)
+
+The contract is [DEVICE-ABI](DEVICE-ABI.md); exact commands, patch provenance,
+artifact hashes and limits are in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md).
+The finishing pass requires Vcontrol for side-effecting USB setups (including
+root-hub reads), latches sessions after provider transfer errors, and adds
+tracked focused tests. Existing USB administration prepares a downstream
+endpoint; its complete data/completion path uses the T12 OBJ session.
+
+All four canonical builds PASS. The final disposable QEMU/TCG xHCI+mouse boot
+passed **66/66 executed assertions**, including a real peripheral descriptor,
+short reply, OUT transfer, actual STALL and reopen, idle detach, ObjectFIFO
+handoff, Handle exhaustion/receive retry, concurrent process aliases and
+last-owner process exit with a pending response. Original root-only 34/34
+evidence is superseded for this gate, not counted again.
+
+Physical hardware, active-transfer unplug/timeout injection, broad regressions
+and T13–T16 are NOT RUN. Source publication is **BLOCKED**: no writable source
+MCP operation is available; neither SSH nor task_report substitutes for it.
+The full verified patch/source artifacts are supplied for integration; kuha
+and server CURRENT have not been updated by this round.
 
 ## T11: ObjectFIFO multiprocess validation (2026-11-06 PASS; strengthened 2026-11-07 PASS)
 

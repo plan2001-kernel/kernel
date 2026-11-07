@@ -4,8 +4,10 @@
 the documentation/measurement audit (PASS, 2026-11-06); T10 implemented and
 verified as the narrow time/WAIT decision round (PASS, 2026-11-06); T11
 validated and verified (PASS, 2026-11-06) with one FIFO timeout sentinel fix;
-T12–T16 remain PLANNED — documentation only. Nothing in T12–T16 is implemented
-by this document.** T7 is the previous partial result. This roadmap records
+T12 passes the emulated USB endpoint integration gate (66/66 PASS);
+see its result below.
+T13–T16 remain PLANNED — documentation only. This document itself implements
+no stage.** T7 is the previous partial result. This roadmap records
 architectural decisions and staged acceptance gates; T8 was completed under a
 separately assigned task and its observed result is recorded below and in
 [SYSCALL-T8-MULTIPROCESS](SYSCALL-T8-MULTIPROCESS.md). This document does not
@@ -400,9 +402,21 @@ variants, network protocol implementation, or device-driver migration.
 
 ### T12 — Specify the common device ABI
 
+**Current result (2026-11-07): emulated endpoint integration gate PASS
+(66/66); publication BLOCKED.** See [DEVICE-ABI](DEVICE-ABI.md) and
+[T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). The finishing task verifies the
+original patch against the published T11 baseline and minimally corrects
+USB authorization and uncertain-outcome reuse. Tracked focused tests demonstrate
+a downstream QEMU USB mouse control endpoint through existing xHCI, with
+complete IN/OUT transactions, actual STALL/reopen, rights, Handle exhaustion,
+ObjectFIFO handoff, concurrent processes and exit/detach lifetime. Root-hub
+responses are recorded separately. Physical hardware and unavailable fault
+injection are NOT RUN. T13–T16 remain separate work. The requirements below
+remain the acceptance gate; no later stage is authorized by this result.
+
 **Depends on:** T11 validity evidence for the ObjectFIFO reuse.
 
-**Scope (PLANNED):**
+**Scope (implemented for the USB control representative):**
 
 Specify and demonstrate one general authorized device model covering:
 
@@ -629,7 +643,8 @@ narrow cleanup with the direct `_NSEC(53)` time path and the retained typed
 sentinel fix, plus a 2026-11-07 strengthened-validation PASS (70/70 checks, no
 kernel change; subscription close while blocked NOT RUN as unreachable); see
 [SYSCALL-T11-OBJECTFIFO](SYSCALL-T11-OBJECTFIFO.md).
-T12–T16 remain **PLANNED, not implemented**. T7 is the previous partial result and is not
-re-marked here. The roadmap is a plan and does not itself authorize executing
-any stage; implementation of any T12–T16 stage requires a separate, explicitly
-assigned task and that stage's acceptance gate.
+T12 **passes the emulated endpoint integration gate** (66/66 PASS), with verification and
+limits in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). T13–T16 remain
+**PLANNED, not implemented**. T7 is the previous partial result. The roadmap
+itself does not authorize implementation; T12 was separately assigned by the
+user, and later stages still require their own assignment and acceptance gate.

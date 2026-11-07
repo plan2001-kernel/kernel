@@ -1,0 +1,784 @@
+#!/usr/bin/env python3
+"""Read a gefs image's alloc logs, read-only: what a crash left unapplied.
+
+  gefslog IMG                  the log chain of every arena, and the
+                               entries past the last durable barrier,
+                               classified against the replayed free set
+  gefslog IMG --json           the same as JSON (for the tests)
+  gefslog IMG --census         also a physical census of block types
+  gefslog IMG --hash auto|blk|blob
+                               verify headers with blkhash (a block, Blksz
+                               bytes) or bufhash (the log's own bytes);
+                               auto (default) tries both
+
+Historical Plan2001 space-v6 crash experiments found that `check`'s leak counter
+grows ~200 MiB per QEMU kill, about the amount written since the last
+sync, and leaves the cause open.
+
+The alloc log is written before the tree (blk.c logappend, called from
+blkalloc), so after a crash the disk holds more log than the tree
+accounts for.  loadlog replays up to the first LogSync whose generation
+is still current (gen >= fs->qgen) and then returns, so the rest of the
+chain is never read and its entries stay unapplied.
+
+What that tail means is NOT a loss of space, and this tool does not call
+it one (measured in the source-branch crash image on 19.10.2026: 9924 of 9937 tail
+allocations of a real crash image were already inside the reconstructed
+free set).  loadarena starts a->free EMPTY with a->used = a->size
+(load.c), and the replay is what fills the free set in, from the
+LogFree entries before the barrier; the LogAlloc entries before it take
+blocks back out again.  A tail allocation is therefore free space
+already, unless something *before* the barrier took it out of the free
+set and the tail is what gives it back.
+
+So the tail is split, per arena, into:
+
+  covered    the block is inside the free set the replay rebuilt: its
+             LogAlloc was never applied, so the space is still free and
+             nothing is lost.  Most of the tail, and most of it is never
+             written to the disk at all.
+  uncovered  the block is not free after the replay and no tree reaches
+             it (the tree was not synced).  This is the part that can
+             cost space, and it is small: 13 blocks / 208 KiB in the
+             measured image.
+
+An uncovered block with a LogFree in the tail *before* its LogAlloc is a
+second case: the replay applies neither entry, so the block is neither
+free nor reached.  Such a duplicate free is also what a naive tail
+reclaim (freerange in loadlog) would abort on ("freerange: already
+free"), which is why it is counted apart, as `uncovered_dupfree`.
+
+The tool never writes to IMG and takes no locks: it is for images at
+rest (a halted disk, or a copy of a killed QEMU's disk).
+
+Format (gdat.h, pack.c, blk.c; all big endian):
+  superblock  0 (primary) or the last whole block (backup):
+                "gefs9.00", blksz[4], bufspc[4], narena[4], snap.ht[4],
+                snapbp.addr[8] +hash[8], snapdl hd addr/hash, tl
+                addr/hash, flag, nextqid, nextgen, qgen (8 bytes each),
+                arenabp[i] addr+hash (8+8 each), then the hash of
+                everything before it
+  arena hdr   loghd.addr[8], loghd.hash[8], size[8], used[8]  (Arenasz)
+  log block   type[2] (Tlog 3, Tdlist 4), logsz[2], logh[8], then logp
+                as a Bptr (addr, hash, gen: 24 bytes), then the
+                entries; logsz counts the entries only
+  entry       PACK64(off | op); op 1 = LogAlloc1, 2 = LogFree1,
+                3 = LogSync (the gen is ent >> 8), 4 = LogAlloc and
+                5 = LogFree, which carry a second PACK64 length
+"""
+
+import json
+import os
+import struct
+import sys
+
+Blksz = 1 << 14
+KiB = 1024
+MiB = 1024 * 1024
+
+LogNop, LogAlloc1, LogFree1, LogSync, LogAlloc, LogFree = range(6)
+Log2wide = LogAlloc
+
+Loghdsz = 2 + 2 + 8 + 24
+Arenasz = 8 + 8 + 8 + 8
+Ptrsz = 24
+
+Tdat, Tpivot, Tleaf, Tlog, Tdlist, Tarena = 0, 1, 2, 3, 4, 5
+Tsuper = 0x6765
+
+btype = {
+    Tdat: "Tdat",
+    Tpivot: "Tpivot",
+    Tleaf: "Tleaf",
+    Tlog: "Tlog",
+    Tdlist: "Tdlist",
+    Tarena: "Tarena",
+    Tsuper: "Tsuper",
+}
+bname = {v: k for k, v in btype.items()}
+
+# blk.c's op names, for the report
+opname = {
+    LogAlloc1: "alloc1",
+    LogFree1: "free1",
+    LogSync: "sync",
+    LogAlloc: "alloc",
+    LogFree: "free",
+}
+
+M64 = (1 << 64) - 1
+M32 = (1 << 32) - 1
+k0 = 0xC83A91E1
+k1 = 0x8648DBDB
+k2 = 0x7BDEC03B
+k3 = 0x2F5870A5
+
+# hash.c's tail reads a u8/u16/u32 and multiplies it by k3, which is an
+# enum constant.  An enumerator that does not fit in int is unsigned in
+# gcc and int in kencc, and the product then wraps at 32 bits, so what
+# reaches the 64-bit addend differs.  The tool tries each and says which
+# verified, instead of assuming a compiler.
+TailMul = ("u32", "s32", "u64")
+
+
+def rot(v, k):
+    return ((v >> k) | (v << (64 - k))) & M64
+
+
+def tailmul(a, mode):
+    """a * k3, as hash.c's tail adds it to a u64int."""
+    if mode == "u32":
+        return (a * k3) & M32
+    if mode == "s32":
+        v = (a * k3) & M32
+        return (v - M32) & M64 if v >> 31 else v
+    return (a * k3) & M64
+
+
+def metrohash64_1(buf, seed, mode="u32"):
+    """hash.c metrohash64_1, the source of bufhash and blkhash."""
+    n = len(buf)
+    h = (((seed + k2) * k0) + n) & M64
+    p = 0
+    if n >= 32:
+        v0 = v1 = v2 = v3 = h
+        while p <= n - 32:
+            (a, b, c, d) = struct.unpack_from("<4Q", buf, p)
+            v0 = (rot((v0 + a * k0) & M64, 29) + v2) & M64
+            v1 = (rot((v1 + b * k1) & M64, 29) + v3) & M64
+            v2 = (rot((v2 + c * k2) & M64, 29) + v0) & M64
+            v3 = (rot((v3 + d * k3) & M64, 29) + v1) & M64
+            p += 32
+        t = ((v0 + v3) * k0 + v1) & M64
+        v2 ^= (rot(t, 33) * k1) & M64
+        t = ((v1 + v2) * k1 + v0) & M64
+        v3 ^= (rot(t, 33) * k0) & M64
+        t = ((v0 + v2) * k0 + v3) & M64
+        v0 ^= (rot(t, 33) * k1) & M64
+        t = ((v1 + v3) * k1 + v2) & M64
+        v1 ^= (rot(t, 33) * k0) & M64
+        h = (h + (v0 ^ v1)) & M64
+    if n - p >= 16:
+        (a, b) = struct.unpack_from("<2Q", buf, p)
+        p += 16
+        v0 = rot((h + a * k0) & M64, 33) * k1 & M64
+        v1 = rot((h + b * k1) & M64, 33) * k2 & M64
+        t = v0 * k0 & M64
+        v0 ^= (rot(t, 35) + v1) & M64
+        t = v1 * k3 & M64
+        v1 ^= (rot(t, 35) + v0) & M64
+        h = (h + v1) & M64
+    if n - p >= 8:
+        (a,) = struct.unpack_from("<Q", buf, p)
+        p += 8
+        h = (h + a * k3) & M64
+        h ^= (rot(h, 33) * k1) & M64
+    if n - p >= 4:
+        (a,) = struct.unpack_from("<I", buf, p)
+        p += 4
+        h = (h + tailmul(a, mode)) & M64
+        h ^= (rot(h, 15) * k1) & M64
+    if n - p >= 2:
+        (a,) = struct.unpack_from("<H", buf, p)
+        p += 2
+        h = (h + tailmul(a, mode)) & M64
+        h ^= (rot(h, 13) * k1) & M64
+    if n - p >= 1:
+        (a,) = struct.unpack_from("<B", buf, p)
+        p += 1
+        h = (h + tailmul(a, mode)) & M64
+        h ^= (rot(h, 25) * k1) & M64
+    h ^= rot(h, 33)
+    h = (h * k0) & M64
+    h ^= rot(h, 33)
+    return h
+
+
+def bufhash(buf, mode="u32"):
+    """hash.c bufhash: a blob's hash, over its own length."""
+    return metrohash64_1(buf, 0x6765, mode)
+
+
+def blkhash(buf, mode="u32"):
+    """hash.c blkhash: a block's hash, over Blksz."""
+    return metrohash64_1(buf, 0x6765, mode)
+
+
+def up16(b, o):
+    return struct.unpack_from(">H", b, o)[0]
+
+
+def up32(b, o):
+    return struct.unpack_from(">I", b, o)[0]
+
+
+def up64(b, o):
+    return struct.unpack_from(">Q", b, o)[0]
+
+
+def unpackbp(b, o):
+    return (up64(b, o), up64(b, o + 8), up64(b, o + 16))
+
+
+# A Bptr's -1 is stored unsigned: gefs's Zb is all ones on the disk
+NIL = M64
+
+
+def isnil(addr):
+    """a block address that ends a chain"""
+    return addr is None or addr == -1 or addr == NIL
+
+
+class Image:
+    def __init__(self, path, hashmode="auto"):
+        self.path = path
+        self.fd = open(path, "rb")
+        self.fd.seek(0, os.SEEK_END)
+        self.size = self.fd.tell()
+        self.hashmode = hashmode
+        self.tailmode = None
+        self.verified = 0
+        self.unverified = 0
+
+    def close(self):
+        self.fd.close()
+
+    def read(self, addr, n=Blksz):
+        self.fd.seek(addr)
+        b = self.fd.read(n)
+        if len(b) != n:
+            raise ValueError("short read at %#x: %d of %d" % (addr, len(b), n))
+        return b
+
+    def modes(self):
+        return (self.tailmode,) if self.tailmode else TailMul
+
+    def verify(self, buf, hashval, dataoff, datalen):
+        """Does hashval match this block?  Returns a label, or None.
+
+        log.c blk.c finalize sets bp.hash to blkhash over the whole
+        block; older images (and the arena headers) carry bufhash over
+        the payload.  Both are tried unless --hash says otherwise.
+        """
+        if hashval in (-1, None) or hashval == NIL:
+            return "nohash"
+        for mode in self.modes():
+            if self.hashmode in ("auto", "blk") and blkhash(buf, mode) == hashval:
+                if self.hashmode == "auto":
+                    self.tailmode = mode
+                self.verified += 1
+                return "blkhash/" + mode
+            if self.hashmode in ("auto", "blob") and \
+                    bufhash(buf[dataoff:dataoff + datalen], mode) == hashval:
+                if self.hashmode == "auto":
+                    self.tailmode = mode
+                self.verified += 1
+                return "bufhash/" + mode
+        self.unverified += 1
+        return None
+
+
+def parse_super(img, addr, label):
+    """pack.c unpacksb"""
+    b = img.read(addr)
+    if b[:8] != b"gefs9.00":
+        raise ValueError("%s @%#x: not gefs9.00 (%r)" % (label, addr, b[:8]))
+    sb = {
+        "label": label,
+        "addr": addr,
+        "blksz": up32(b, 8),
+        "bufspc": up32(b, 12),
+        "narena": up32(b, 16),
+        "snapht": up32(b, 20),
+        "snapbp": (up64(b, 24), up64(b, 32)),
+        "snapdl": {"hd": (up64(b, 40), up64(b, 48)),
+                   "tl": (up64(b, 56), up64(b, 64))},
+        "flag": up64(b, 72),
+        "nextqid": up64(b, 80),
+        "nextgen": up64(b, 88),
+        "qgen": up64(b, 96),
+    }
+    p = 104
+    arenas = []
+    for _ in range(sb["narena"]):
+        arenas.append((up64(b, p), up64(b, p + 8)))
+        p += 16
+    sb["arenabp"] = arenas
+    if sb["blksz"] != Blksz:
+        raise ValueError("%s: blksz %d, this tool knows %d" % (label, sb["blksz"], Blksz))
+    want = up64(b, p)
+    sb["hash"] = None
+    for mode in img.modes():
+        if bufhash(b[:p], mode) == want:
+            sb["hash"] = {"stored": want, "mode": mode, "ok": True}
+            if img.hashmode == "auto":
+                img.tailmode = mode
+            break
+    if sb["hash"] is None:
+        sb["hash"] = {"stored": want, "mode": None, "ok": False}
+    return sb
+
+
+def load_super(img):
+    """the primary, else the backup"""
+    err = None
+    try:
+        sb = parse_super(img, 0, "primary")
+        if sb["hash"]["ok"]:
+            return sb
+    except (ValueError, struct.error) as e:
+        sb = None
+        err = e
+    eb = img.size - (img.size % Blksz) - Blksz
+    if eb <= 0:
+        if sb is not None:
+            return sb
+        raise err or ValueError("%s: too small for a gefs superblock (%d bytes)"
+                                % (img.path, img.size))
+    try:
+        sb2 = parse_super(img, eb, "backup")
+    except (ValueError, struct.error):
+        if sb is not None:
+            return sb
+        raise err or ValueError("no superblock")
+    return sb2
+
+
+def load_arena(img, addr, idx):
+    """load.c loadarena: header h0 or h1, then pack.c unpackarena."""
+    cand = []
+    for off, label in ((0, "h0"), (Blksz, "h1")):
+        a = addr + off
+        try:
+            buf = img.read(a)
+            typ = up16(buf, 0)
+            if typ != Tarena:
+                cand.append({"blk": label, "addr": a, "ok": False,
+                             "why": "type %d, not Tarena" % typ})
+                continue
+            data = buf[2:2 + Arenasz]
+            cand.append({"blk": label, "addr": a, "ok": True,
+                         "loghd": (up64(data, 0), up64(data, 8)),
+                         "size": up64(data, 16),
+                         "used": up64(data, 24)})
+        except (ValueError, struct.error) as e:
+            cand.append({"blk": label, "addr": a, "ok": False, "why": str(e)})
+    good = [c for c in cand if c["ok"]]
+    if not good:
+        raise ValueError("arena %d @%#x: neither header loads (%s)"
+                         % (idx, addr, ", ".join("%s: %s" % (c["blk"], c["why"]) for c in cand)))
+    h = dict(good[0])
+    h["index"] = idx
+    h["base"] = addr
+    h["candidates"] = cand
+    return h
+
+
+def walk_entries(blk):
+    """one log block's entries, in order (blk.c loadlog's inner loop)"""
+    out = []
+    d = blk["buf"]
+    addr = blk["addr"]
+    end = blk["meta"]["logsz"]
+    if end > Blksz - Loghdsz:
+        raise ValueError("log block @%#x: logsz %d past the block" % (addr, end))
+    i = 0
+    while i < end:
+        ent = up64(d, Loghdsz + i)
+        op = ent & 0xFF
+        off = ent & ~0xFF
+        if op == LogSync:
+            out.append({"at": i, "op": op, "name": opname[op],
+                        "off": None, "len": None, "gen": ent >> 8})
+            i += 8
+        elif op in (LogAlloc1, LogFree1):
+            out.append({"at": i, "op": op, "name": opname[op],
+                        "off": off, "len": Blksz, "gen": None})
+            i += 8
+        elif op in (LogAlloc, LogFree):
+            n = up64(d, Loghdsz + i + 8)
+            out.append({"at": i, "op": op, "name": opname[op],
+                        "off": off, "len": n, "gen": None})
+            i += 16
+        else:
+            raise ValueError("log block @%#x: unknown op %d at %d" % (addr, op, i))
+    if i != end:
+        raise ValueError("log block @%#x: entries %d != logsz %d" % (addr, i, end))
+    return out
+
+
+def read_block(img, addr, hashval=None):
+    """blk.c readblk, without its asserts: a typed block."""
+    buf = img.read(addr)
+    typ = up16(buf, 0)
+    if typ not in btype:
+        raise ValueError("block @%#x: invalid type %d" % (addr, typ))
+    meta = {}
+    dataoff, datalen = 0, 0
+    if typ in (Tlog, Tdlist):
+        meta["logsz"] = up16(buf, 2)
+        meta["logh"] = up64(buf, 4)
+        meta["logp"] = unpackbp(buf, 12)
+        dataoff, datalen = Loghdsz, meta["logsz"]
+    elif typ == Tarena:
+        dataoff, datalen = 2, Arenasz
+    elif typ == Tpivot:
+        meta = {"nval": up16(buf, 2), "valsz": up16(buf, 4),
+                "nbuf": up16(buf, 6), "bufsz": up16(buf, 8)}
+        dataoff = 10
+    elif typ == Tleaf:
+        meta = {"nval": up16(buf, 2), "valsz": up16(buf, 4)}
+        dataoff = 6
+    v = img.verify(buf, hashval, dataoff, datalen) if hashval is not None else None
+    return {"addr": addr, "buf": buf, "type": typ, "meta": meta,
+            "verified": v, "hashval": hashval}
+
+
+def walk_log(img, hd, tl=None, limit=1 << 20):
+    """Walk a log chain from hd to its end on the disk.
+
+    Stops where the chain says it ends (logp.addr == -1), and also
+    records the point where loadlog's replay stops; the two differ
+    exactly when the disk's chain runs past the last durable barrier,
+    which is the case this tool exists to see.
+    """
+    chain = []
+    seen = set()
+    addr = hd[0]
+    hashval = hd[1] if len(hd) > 1 else None
+    while not isnil(addr):
+        if addr in seen:
+            raise ValueError("log chain loops at %#x" % addr)
+        seen.add(addr)
+        if len(chain) > limit:
+            raise ValueError("log chain past %d blocks at %#x" % (limit, addr))
+        b = read_block(img, addr, hashval)
+        if b["type"] not in (Tlog, Tdlist):
+            raise ValueError("log chain @%#x: type %s, not a log" % (addr, btype[b["type"]]))
+        entries = walk_entries(b)
+        chain.append({"addr": addr, "type": btype[b["type"]],
+                      "logsz": b["meta"]["logsz"], "logh": b["meta"]["logh"],
+                      "logp": b["meta"]["logp"], "verified": b["verified"],
+                      "entries": entries})
+        if tl is not None and not isnil(tl[0]) and addr == tl[0]:
+            break
+        # logappend and compresslog leave logp.hash -1 (the block is not
+        # written yet); a link that carries one is verified against it
+        addr, hashval = b["meta"]["logp"][0], b["meta"]["logp"][1]
+    return chain
+
+
+class Freeset:
+    """The free set loadlog rebuilds, as the ranges blk.c keeps.
+
+    loadarena leaves a->free empty and a->used = a->size (load.c), so the
+    replay is the only writer: LogFree adds a range (freerange), LogAlloc
+    takes one out (grabrange).  Ranges are kept sorted and merged, as
+    freerange merges its neighbours.
+    """
+
+    def __init__(self):
+        self.ranges = []
+
+    def bytes(self):
+        return sum(n for _o, n in self.ranges)
+
+    def _at(self, off):
+        for i, (o, n) in enumerate(self.ranges):
+            if o <= off < o + n:
+                return i
+        return None
+
+    def free(self, off, n):
+        """freerange: add a range, merging with the ones that touch it."""
+        self.ranges.append((off, n))
+        self.ranges.sort()
+        out = []
+        for o, m in self.ranges:
+            if out and out[-1][0] + out[-1][1] == o:
+                out[-1] = (out[-1][0], out[-1][1] + m)
+            else:
+                out.append((o, m))
+        self.ranges = out
+
+    def grab(self, off, n):
+        """grabrange: take a range out; False where the C code would abort."""
+        i = self._at(off)
+        if i is None or off + n > self.ranges[i][0] + self.ranges[i][1]:
+            return False
+        o, m = self.ranges[i]
+        if off == o:
+            self.ranges[i] = (o + n, m - n)
+        elif off + n == o + m:
+            self.ranges[i] = (o, m - n)
+        else:
+            self.ranges[i:i + 1] = [(o, off - o), (off + n, o + m - (off + n))]
+        if self.ranges[i][1] == 0:
+            del self.ranges[i]
+        return True
+
+    def covers(self, off, n):
+        """is off..off+n entirely inside one free range?"""
+        i = self._at(off)
+        if i is None:
+            return False
+        o, m = self.ranges[i]
+        return off + n <= o + m
+
+    def has(self, off):
+        """does any free range contain this address at all?"""
+        return self._at(off) is not None
+
+
+def replay_freeset(prefix):
+    """the free set loadlog holds once it has applied `prefix`.
+
+    The C code aborts on a grab of a range it does not have, so a failed
+    grab is counted rather than raised: a crash image is evidence, not an
+    assertion.
+    """
+    f = Freeset()
+    bad = 0
+    for e in prefix:
+        # a LogSync carries no address (walk_entries leaves off None)
+        if e["op"] not in (LogAlloc, LogAlloc1, LogFree, LogFree1):
+            continue
+        off = e["off"] & ~0xff
+        if e["op"] in (LogAlloc, LogAlloc1):
+            if not f.grab(off, e["len"]):
+                bad += 1
+        else:
+            f.free(off, e["len"])
+    return f, bad
+
+
+def analyse_log(chain, qgen):
+    """Split the replayed log at its last durable barrier.
+
+    Everything the log allocated after that barrier is leased on the
+    disk and reached by no tree: the committed tail a crash leaves.
+    """
+    seq = []
+    for blk in chain:
+        for e in blk["entries"]:
+            e = dict(e)
+            e["blkaddr"] = blk["addr"]
+            seq.append(e)
+
+    # blk.c loadlog: the first LogSync whose gen is still current ends
+    # the replay, and the rest of the block on the disk is truncated
+    stop = None
+    for i, e in enumerate(seq):
+        if e["op"] == LogSync and e["gen"] >= qgen:
+            stop = i
+            break
+
+    tail = seq[stop + 1:] if stop is not None else []
+    alloc = [e for e in tail if e["op"] in (LogAlloc, LogAlloc1)]
+    free = [e for e in tail if e["op"] in (LogFree, LogFree1)]
+
+    # The free set the replay has built from the prefix.  A tail
+    # allocation whose block is still in it cost nothing: the LogAlloc
+    # was never applied, so the space was never taken.  One that is not
+    # in it is the whole of what a crash can cost.
+    fs, badgrabs = replay_freeset(seq[:stop] if stop is not None else [])
+    cov = unc = dup = 0
+    covb = uncb = 0
+    for e in alloc:
+        off = e["off"] & ~0xff
+        if fs.covers(off, e["len"]):
+            cov += 1
+            covb += e["len"]
+        else:
+            unc += 1
+            uncb += e["len"]
+    # a tail LogFree of an uncovered block, before its tail LogAlloc:
+    # neither entry is applied, so the block is neither free nor reached,
+    # and a naive reclaim of the tail would freerange it twice
+    freed = set(e["off"] & ~0xff for e in free)
+    dup = sum(1 for e in alloc if not fs.covers(e["off"] & ~0xff, e["len"])
+              and (e["off"] & ~0xff) in freed)
+    # of the uncovered ones, the blocks a LogFree before the barrier had
+    # already returned to the free set: a tail reclaim frees them twice
+    prefreed = set(e["off"] & ~0xff for e in (seq[:stop] if stop is not None else [])
+                   if e["op"] in (LogFree, LogFree1))
+    pre = sum(1 for e in alloc if not fs.covers(e["off"] & ~0xff, e["len"])
+              and (e["off"] & ~0xff) in prefreed)
+    return {
+        "entries": len(seq),
+        "barriers": [{"gen": e["gen"], "replay": (stop is not None and i == stop)}
+                     for i, e in enumerate(seq) if e["op"] == LogSync],
+        "replay_stop": stop,
+        "replay_gen": seq[stop]["gen"] if stop is not None else None,
+        "tail_entries": len(tail),
+        "tail_alloc_blocks": len(alloc),
+        "tail_alloc_bytes": sum(e["len"] for e in alloc),
+        "tail_free_blocks": len(free),
+        "tail_free_bytes": sum(e["len"] for e in free),
+        "tail_net_bytes": sum(e["len"] for e in alloc) - sum(e["len"] for e in free),
+        "has_barrier": stop is not None,
+        # what the tail costs, against the free set the replay rebuilt
+        "free_after_replay_bytes": fs.bytes(),
+        "prefix_bad_grabs": badgrabs,
+        "tail_covered_blocks": cov,
+        "tail_covered_bytes": covb,
+        "tail_uncovered_blocks": unc,
+        "tail_uncovered_bytes": uncb,
+        "tail_uncovered_dupfree": dup,
+        "tail_uncovered_prefreed": pre,
+    }
+
+
+def census(img):
+    """A physical count of block types, every Blksz from 0."""
+    counts = {}
+    for i in range(img.size // Blksz):
+        try:
+            buf = img.read(i * Blksz)
+        except ValueError:
+            break
+        typ = up16(buf, 0)
+        name = btype.get(typ, "raw/%#x" % typ)
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def analyse(path, hashmode="auto", do_census=False):
+    img = Image(path, hashmode)
+    try:
+        sb = load_super(img)
+        arenas = []
+        for i, (addr, _h) in enumerate(sb["arenabp"]):
+            a = load_arena(img, addr, i)
+            chain = walk_log(img, a["loghd"])
+            a["chain"] = chain
+            a["log"] = analyse_log(chain, sb["qgen"])
+            arenas.append(a)
+        res = {
+            "path": path,
+            "hash": hashmode,
+            "tailmul": img.tailmode,
+            "verified": img.verified,
+            "unverified": img.unverified,
+            "super": {"label": sb["label"], "narena": sb["narena"],
+                      "qgen": sb["qgen"], "snapbp": sb["snapbp"],
+                      "snapdl": sb["snapdl"], "hash_ok": sb["hash"]["ok"],
+                      "hash_mode": sb["hash"]["mode"]},
+            "arena": [{
+                "index": a["index"], "base": a["base"],
+                "size_mib": round(a["size"] / MiB, 3),
+                "used_mib": round(a["used"] / MiB, 3),
+                "chain_blocks": len(a["chain"]),
+                "verified": [b["verified"] for b in a["chain"]],
+                "log": a["log"],
+            } for a in arenas],
+        }
+        res["totals"] = {
+            "tail_alloc_mib": round(sum(a["log"]["tail_alloc_bytes"] for a in arenas) / MiB, 3),
+            "tail_net_mib": round(sum(a["log"]["tail_net_bytes"] for a in arenas) / MiB, 3),
+            "tail_alloc_blocks": sum(a["log"]["tail_alloc_blocks"] for a in arenas),
+            "tail_covered_blocks": sum(a["log"]["tail_covered_blocks"] for a in arenas),
+            "tail_uncovered_blocks": sum(a["log"]["tail_uncovered_blocks"] for a in arenas),
+            "tail_uncovered_mib": round(sum(a["log"]["tail_uncovered_bytes"] for a in arenas) / MiB, 3),
+            "tail_uncovered_dupfree": sum(a["log"]["tail_uncovered_dupfree"] for a in arenas),
+            "tail_uncovered_prefreed": sum(a["log"]["tail_uncovered_prefreed"] for a in arenas),
+            "free_after_replay_mib": round(sum(a["log"]["free_after_replay_bytes"] for a in arenas) / MiB, 3),
+            "used_mib": round(sum(a["used"] for a in arenas) / MiB, 3),
+        }
+        if do_census:
+            res["census"] = census(img)
+        return res
+    finally:
+        img.close()
+
+
+def report(res, out):
+    s = res["super"]
+    print("%s: %s superblock, %d arena(s), qgen %d, snap %#x"
+          % (res["path"], s["label"], s["narena"], s["qgen"], s["snapbp"][0]), file=out)
+    if not s["hash_ok"]:
+        print("  warning: the superblock's own hash verifies under no variant", file=out)
+    if res["unverified"]:
+        print("  warning: %d header hash(es) verify under no variant" % res["unverified"],
+              file=out)
+    for a in res["arena"]:
+        lg = a["log"]
+        print("  arena %d @%#x: %.1f of %.1f MiB used, log chain %d block(s)"
+              % (a["index"], a["base"], a["used_mib"], a["size_mib"], a["chain_blocks"]),
+              file=out)
+        g = ",".join("%d%s" % (b["gen"], "*" if b["replay"] else "") for b in lg["barriers"])
+        print("    barriers: %s   (replayed to gen %s; * = loadlog's replay point)"
+              % (g or "none", lg["replay_gen"]), file=out)
+        print("    past the replay point: %d entr(ies), %d alloc and %d free; "
+              "%.2f MiB allocated, %.2f MiB freed: net %+.2f MiB"
+              % (lg["tail_entries"], lg["tail_alloc_blocks"], lg["tail_free_blocks"],
+                 lg["tail_alloc_bytes"] / MiB, lg["tail_free_bytes"] / MiB,
+                 lg["tail_net_bytes"] / MiB), file=out)
+        print("    free set after the replay: %.1f MiB; the tail against it: "
+              "%d covered (%.1f MiB), %d uncovered (%.1f MiB)"
+              % (lg["free_after_replay_bytes"] / MiB,
+                 lg["tail_covered_blocks"], lg["tail_covered_bytes"] / MiB,
+                 lg["tail_uncovered_blocks"], lg["tail_uncovered_bytes"] / MiB), file=out)
+        if lg["prefix_bad_grabs"]:
+            print("    warning: %d prefix alloc(s) grab a range the replay does not have"
+                  % lg["prefix_bad_grabs"], file=out)
+    t = res["totals"]
+    print("  total: %d block(s), %.2f MiB allocated past the last durable barrier; "
+          "%.2f MiB of that is uncovered" %
+          (t["tail_alloc_blocks"], t["tail_alloc_mib"], t["tail_uncovered_mib"]), file=out)
+    if t["tail_uncovered_dupfree"]:
+        print("  %d of the uncovered blocks have a LogFree before their LogAlloc in the"
+              % t["tail_uncovered_dupfree"], file=out)
+        print("  tail, so the replay applies neither entry; a tail reclaim would abort in", file=out)
+        print("  grabrange on all of them, and in freerange (\"already free\") on the %d"
+              % t["tail_uncovered_prefreed"], file=out)
+        print("  that a LogFree before the barrier had already freed.", file=out)
+    if "census" in res:
+        print("  census: " + ", ".join("%s %d" % (k, v) for k, v in sorted(res["census"].items())),
+              file=out)
+    print("", file=out)
+    print("  The tail is the log written after the last durable barrier: a crash there", file=out)
+    print("  leaves it unapplied.  Most of it costs nothing -- 99.9 % of a measured", file=out)
+    print("  crash image's tail was still free in the set the replay rebuilds, and", file=out)
+    print("  most of those blocks were never written to the disk at all.  The", file=out)
+    print("  uncovered blocks are the ones a crash can cost, and check reports them", file=out)
+    print("  since the census was added to the storage check too", file=out)
+    print("  (ge/storage/check.c: checkleak, \"reported, not failed\" -- a disk", file=out)
+    print("  at rest still shows in-flight frees there, so the count is diagnostic).", file=out)
+
+
+def main(argv):
+    flags = [a for a in argv[1:] if a.startswith("-")]
+    skip = set()
+    hashmode = "auto"
+    for f in flags:
+        if f == "--hash":
+            i = argv.index("--hash")
+            if i + 1 < len(argv):
+                hashmode = argv[i + 1]
+                skip.add(hashmode)
+                if hashmode not in ("auto", "blk", "blob"):
+                    print("--hash takes auto, blk or blob", file=sys.stderr)
+                    return 2
+    args = [a for a in argv[1:] if not a.startswith("-") and a not in skip]
+    if not args:
+        print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
+        return 2
+    try:
+        res = analyse(args[0], hashmode=hashmode, do_census="--census" in flags)
+    except (ValueError, struct.error) as e:
+        print("gefslog: %s: %s" % (args[0], e), file=sys.stderr)
+        return 1
+    except OSError as e:
+        print("gefslog: %s: %s" % (args[0], e), file=sys.stderr)
+        return 1
+    if "--json" in flags:
+        json.dump(res, sys.stdout, indent=1)
+        print(file=sys.stdout)
+    else:
+        report(res, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

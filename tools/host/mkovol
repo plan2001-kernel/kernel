@@ -1,0 +1,72 @@
+#!/bin/bash
+# Plan2001: make a new native O volume image (docs/O-FORMAT.md).
+# Host-side only: the Linux GCC formatter (build/format-o/format-o)
+# runs the repository's real GE/O reamer, and the Linux seeder compiles
+# the module with build/mpy-cross/mpy-cross.  No VM, no Ken C, no Plan 9
+# mk and no tar-as-virtual-disk.
+#
+#   tools/mkovol OUT [MIB] [SOURCE]
+#                             MIB, default 512; at least 129.  With
+#                             SOURCE, also seed one demo Environment and
+#                             its compiled .mpy as O objects in the fresh
+#                             image.
+#   MPEXEC=FILE               seed FILE as the MicroPython executable byte for
+#                             byte at OID 0x4f45584543000003 (requires SOURCE).
+#                             With SOURCE and no MPEXEC, the focused build's
+#                             micropython is seeded by default: every fresh
+#                             runnable O image then boots the normal O path.
+#   NOMPEXEC=1                with SOURCE, omit the interpreter (an older or
+#                             diagnostic image; the normal boot then reports a
+#                             missing object).  Not valid with MPEXEC.
+#   MPYCROSS=FILE             mpy-cross (default build/mpy-cross/mpy-cross)
+#   FORMATO=FILE              format-o (default build/format-o/format-o)
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
+[ $# -ge 1 ] && [ $# -le 3 ] || { echo "usage: tools/mkovol OUT [MIB] [SOURCE]" >&2; exit 2; }
+out=$(realpath -m "$1")
+mb=${2:-512}
+src=${3:-}
+mpyexec=${MPEXEC:-}
+nompyexec=${NOMPEXEC:-}
+formato=${FORMATO:-$root/build/format-o/format-o}
+mpycross=${MPYCROSS:-$root/build/mpy-cross/mpy-cross}
+[ "$mb" -ge 129 ] || { echo "mkovol: image must be at least 129 MiB" >&2; exit 2; }
+[ -x "$formato" ] || { echo "mkovol: no $formato (tools/build.sh)" >&2; exit 1; }
+if [ -n "$src" ]; then
+	[ -r "$src" ] || { echo "mkovol: SOURCE: no $src" >&2; exit 1; }
+	[ -x "$mpycross" ] || { echo "mkovol: no $mpycross (tools/build.sh)" >&2; exit 1; }
+	[ -z "$mpyexec" ] || [ -r "$mpyexec" ] || { echo "mkovol: MPEXEC: no $mpyexec" >&2; exit 1; }
+	[ -z "$nompyexec" ] || [ -z "$mpyexec" ] || { echo "mkovol: NOMPEXEC and MPEXEC are exclusive" >&2; exit 2; }
+	if [ -z "$mpyexec" ] && [ -z "$nompyexec" ]; then
+		mpyexec=$root/build/gcc/micropython.elf
+		[ -r "$mpyexec" ] || { echo "mkovol: no $mpyexec (tools/build-mpy-gcc.sh)" >&2; exit 1; }
+	fi
+fi
+[ -z "$mpyexec" ] || [ -n "$src" ] || { echo "mkovol: MPEXEC requires SOURCE" >&2; exit 2; }
+[ -z "$nompyexec" ] || [ -n "$src" ] || { echo "mkovol: NOMPEXEC requires SOURCE" >&2; exit 2; }
+
+ike_args=()
+if [ -n "${IKEEXEC:-}" ]; then
+ [ -n "$src" ] && [ -r "$IKEEXEC" ] || { echo "mkovol: IKEEXEC requires SOURCE and readable ELF" >&2; exit 2; }
+ ike_args=(--ike-exec "$IKEEXEC")
+fi
+seed=
+if [ -n "$src" ]; then
+	seed=$(mktemp -d "$root/build/mkovol-seed.XXXXXX")
+	trap 'rm -rf "$seed"' EXIT
+	if [ -n "$nompyexec" ]; then
+		python3 "$here/oseed.py" --source "$src" --seed "$seed" \
+			--mpy-cross "$mpycross" --no-mp "${ike_args[@]}"
+	else
+		python3 "$here/oseed.py" --source "$src" --seed "$seed" \
+			--mp-exec "$mpyexec" --mpy-cross "$mpycross" "${ike_args[@]}"
+	fi
+	"$formato" --seed "$seed" --size "$mb" "$out"
+else
+	"$formato" --size "$mb" "$out"
+fi
+if [ -n "$src" ]; then
+	echo "mkovol: $out ($mb MiB), O profile version 1, init -> 1, seeded from $src${mpyexec:+, MicroPython executable $mpyexec}"
+else
+	echo "mkovol: $out ($mb MiB), O profile version 1, init -> 1"
+fi

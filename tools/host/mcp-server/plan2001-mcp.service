@@ -1,0 +1,21 @@
+[Unit]
+Description=Plan2001 MCP source browser and agent task queue
+After=network.target
+
+[Service]
+Type=simple
+User=plan2001-mcp
+Group=plan2001-mcp
+Environment=PLAN2001_MCP_ROOT=/var/lib/plan2001-mcp
+ExecStart=/usr/bin/python3 /opt/plan2001-mcp/server.py
+Restart=on-failure
+RestartSec=3
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/plan2001-mcp/agent-queue
+
+[Install]
+WantedBy=multi-user.target

@@ -22,6 +22,15 @@ operation must not be forced through the object calls merely to preserve a
 count. Historical T0–T7 reports are evidence of their rounds, not current
 quotas. See [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
 
+**T12 implementation addition (2026-11-07):** the common message-device ABI
+and one native USB control-endpoint integration are defined in
+[DEVICE-ABI](DEVICE-ABI.md), with current validation in
+[T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). The catalog/session objects use the
+existing Vhand core and USB endpoint ownership; complete responses are ordinary
+immutable bytes objects. There is no new syscall or generic driver callback
+table. Earlier USB metadata-only statements describe the pre-T12 slice; the
+legacy ObjOpenUsb/UsbEp interface itself remains metadata/open-only.
+
 **Revision:** 0.1, 2026-10-24.
 **Source baseline inspected:** `main` at `373497917be36e03e36fd5f6a92d880fcf2a8bf2`. Source references are evidence at that revision, not eternal line numbers.
 **Audience:** coding agents implementing or reviewing kernel, low-level C userspace, MicroPython bindings, and source-to-source migration. This is a working contract, not a general OS survey.

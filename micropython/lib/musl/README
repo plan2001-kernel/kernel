@@ -1,0 +1,9 @@
+musl's exp, log and pow (ARM's optimized-routines, as in glibc since
+2.28, so the same results as CPython's on Linux), over lib/libm_dbl's
+older ones (musl 1.1.16).  From musl 1.2.5, src/math (the copy in
+Debian's emscripten package, /usr/share/emscripten/system/lib/libc/musl,
+which has these files as musl has them): exp.c exp_data.[ch] log.c
+log_data.[ch] pow.c pow_data.[ch] __math_{oflow,uflow,xflow,invalid,
+divzero}.c, unchanged.  libm.h and features.h are Plan2001's: the part
+of musl's internal headers that these use, for 6c.  License: COPYRIGHT
+(MIT; the ARM files say SPDX MIT too).
