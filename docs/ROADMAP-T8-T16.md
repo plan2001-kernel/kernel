@@ -6,15 +6,16 @@ verified as the narrow time/WAIT decision round (PASS, 2026-11-06); T11
 validated and verified (PASS, 2026-11-06) with one FIFO timeout sentinel fix;
 T12 passes the emulated USB endpoint integration gate (66/66 PASS);
 see its result below.
-T13–T16 remain PLANNED — documentation only. This document itself implements
-no stage.** T7 is the previous partial result. This roadmap records
+T13 is merged and passes its emulated integration gate (55 T13 checks and a
+fresh 66-check USB regression; physical NIC NOT RUN). T14–T16 remain
+PLANNED. This document itself implements no stage.** T7 is the previous partial result. This roadmap records
 architectural decisions and staged acceptance gates; T8 was completed under a
 separately assigned task and its observed result is recorded below and in
 [SYSCALL-T8-MULTIPROCESS](SYSCALL-T8-MULTIPROCESS.md). This document does not
 authorize source, ABI, build, test or hardware changes for T9–T16, and does not
 create new syscalls.
 
-- **Source baseline inspected:** published snapshot
+- **Historical source baseline inspected:** published snapshot
   `01a7c7a454b420136779595117dce2cd5170e5a1b689ead3dbb77b98d1bafe17`
   (2026-11-06) on host `kuha`; the T9 ledger measured the later published
   snapshot `2b3e6126f2d195fc3c3d8d89f9410fd228ec87ff0adbce7880d5a955e7d62253`
@@ -30,7 +31,7 @@ create new syscalls.
 - **T8 result:** the first complete multi-process MicroPython PoC is observed
   PASS on `kuha` (2026-11-06). See [SYSCALL-T8-MULTIPROCESS](SYSCALL-T8-MULTIPROCESS.md)
   and `.json`. T9 was completed separately as the audit below and T10 as the
-  narrow cleanup; T11–T16 were not started.
+  narrow cleanup; T11–T16 were not started at that historical round.
 - **Evidence vocabulary:** CURRENT IMPLEMENTED means observed in the inspected
   source/tree. PLANNED means a target accepted for this roadmap but not built.
   AGENT-REPORTED means a result stated in an earlier task report and not
@@ -44,7 +45,7 @@ create new syscalls.
   exact error/PID/status and quota-count evidence, mutation-discriminated) and
   marked subscription-close-while-blocked NOT RUN as unreachable, with no
   kernel change; see [SYSCALL-T11-OBJECTFIFO](SYSCALL-T11-OBJECTFIFO.md).
-  T12–T16 were not started.
+  T12–T16 were not started at that historical round; current status is below.
 
 ## 1. Why this roadmap exists
 
@@ -139,30 +140,48 @@ Network device access is raw and protocol-independent:
 - Wi-Fi access uses the frame/mode exposed by the driver, not an invented
   Ethernet-only contract.
 
-Network protocols live **primarily in userspace**: IPv6, ICMPv6, Neighbor
-Discovery, UDP, TCP and eventually IPv4 if desired; routing, IKEv2, ESP and
-similar protocol logic also belong there. EtherType/IPv6 Next Header filtering
-at the kernel device boundary is classification/access control, not a separate
-kernel protocol stack.
+Network protocols live **primarily in userspace**. T14 first proves IPv6,
+ICMPv6, Neighbor Discovery and addressing. UDP and TCP are independent later
+objectives, not prerequisites for ESP. The current native profile remains
+IPv6-only; no IPv4 stage is assigned here. Filtering at the raw device
+boundary is classification/access control, not a new kernel protocol stack.
 
-CURRENT IMPLEMENTED and TRANSITIONAL: the native kernel IPv6 path,
-`ObjOpenTcpListen`, `ObjOpenTcpConnect`, `ObjOpenUdp6` and the current kernel
-network devices exist and work in the inspected tree. They are transition
-mechanisms, **not** templates for adding more protocol-specific object
-providers. Do not treat a provider-per-protocol pattern as the target.
+T13 raw Ethernet is implemented and merged. Native IPv6 startup and OBJ
+TCP/UDP opens are disabled; linked legacy code remains, as documented in
+[T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md). It is not a template for more
+protocol-specific kernel object providers or a compatibility obligation.
 
-### 2.5 Preserve working network and security behavior during migration
+### 2.5 Externally provisioned userspace ESP; fail closed
 
-Preserve the existing working drivers, native IPv6 and the existing experimental
-IKEv2/ESP code until tested userspace replacements can provide the required
-service.
+**The owner's 2026-11-08 decision supersedes previous network-preservation
+and IKEv2 migration clauses.** IKEv2 is removed entirely from the active PoC
+and future target: no handshake/negotiation, PSKs, UDP/500 service, IKE daemon,
+key-exchange implementation or deferred IKE migration. Historical examples
+are evidence, never implementation instructions.
 
-- IKEv2 uses UDP port 500.
-- ESP uses IPv6 Next Header 50.
-- These are **not** the same identification and must not be conflated.
-- Never weaken authentication or replay protection.
-- Never permit unauthenticated plaintext fallback when a userspace service
-  crashes or restarts.
+The normative [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) specifies a PLANNED two-host
+userspace ESP proof over T13/T14, IPv6 Next Header 50, AES-128-GCM-16,
+transport mode preferred, one SA pair and protected ICMPv6 echo. A versioned
+bounded GE/O object provisions both hosts through an external authenticated
+and confidential channel. Its four secret components are two 16-byte keys
+and two 4-byte salts (40 bytes), plus directional SPIs, IPv6 selectors,
+profile, generation, validity/lifetime and policy. Object transfer is not key
+exchange; OIDs are local and local FIFO distribution does not secure a network.
+
+Require authenticated decryption, bounded anti-replay, no nonce reuse, no
+reactivation of consumed bundles across restart, fresh unique key material
+for new sessions, bounded counters/lifetimes and fail-closed behavior without
+plaintext fallback. Preserve necessary ND under explicit policy. Manual
+provisioning is experimental: the RFC 4106 automatic-key-management caveat
+precludes a full-compliance/production-security claim. The design document
+defines lifecycle and future acceptance gates, not an implemented service.
+
+Preserve demonstrated boot, MPY and driver functionality. Unused native
+IPv6/TCP/UDP/Netfile/Chan residue may be removed or disabled after real
+dependency checks; no backward-compatibility requirement mandates retaining
+it. This docs task changes no code. Existing ESP/AES-GCM code may be reused
+in a separately assigned coding task; no new protocol kernel provider/FIFO,
+syscall, pathname layer or extra daemon is planned.
 
 ### 2.6 Supported userspace during the syscall-cleanup PoC
 
@@ -197,8 +216,10 @@ At the inspected snapshot:
 Current transitional network code is visible in `kernel/core/ethercore.c`
 (`ethercore_lookup`, `ethercore_byindex`, `ethercore_attach`, `ethercore_tx`,
 `ethercore_rxregister`, `etheriq`), the native IPv6 sources, and the UDP6/TCP6
-object providers. The experimental IKEv2/ESP material is described in
-[MINIMAL-IKEV2](MINIMAL-IKEV2.md).
+object providers. This is the historical baseline: T13 later disabled native
+IP startup and TCP/UDP opens. The experimental IKEv2/kernel-ESP report
+[MINIMAL-IKEV2](MINIMAL-IKEV2.md) is historical and NON-TARGET. The current
+planned ESP target is [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md).
 
 Do not silently convert any “current” statement above into a T8–T16 PASS claim.
 
@@ -248,7 +269,7 @@ changed.
 **NOT in scope:**
 
 - A second REPL window or terminal multiplexing.
-- Networking, IKEv2 userland, ESP VPN, a network-stack port or device migration.
+- Networking, ESP, a network-stack port or device migration.
 - Unrelated userspace daemons.
 - Redesign of process/Space APIs, or implicit handle/PID inheritance.
 - Marking T8 PASS if only a single trivial child path was run.
@@ -492,75 +513,73 @@ a sleeping allocation or blocking lock from the interrupt path.
 the GE/O format, or implementing T14–T16. Native network disabling is authorized by the
 later T13 task and is documented in its result.
 
-### T14 — Minimal userspace IPv6 service (only after T13 passes)
+### T14 — Minimal userspace IPv6 service (PLANNED)
 
-**Depends on:** T13 raw-frame send/receive and device model evidence.
+**Depends on:** T13 raw-frame send/receive and device-model evidence (merged,
+emulated gate PASS; physical NIC NOT RUN).
 
-**Scope (PLANNED):**
+Implement a minimal MicroPython userspace IPv6 node over T13 raw Ethernet:
+IPv6 addressing, ICMPv6 and Neighbor Discovery, with basic external exchange.
+This is not a complete router stack. UDP may follow the demonstrated base,
+then TCP; those are independent objectives, not prerequisites of T15 ESP.
 
-Implement a minimal userspace IPv6 service over raw Ethernet:
+**Acceptance conditions (future tests):**
 
-- IPv6, ICMPv6, Neighbor Discovery and IPv6 addressing;
-- basic IPv6 exchange;
-- add UDP, later TCP;
-- start with a minimal MicroPython PoC.
+- Demonstrate basic IPv6/ICMPv6/ND traffic and observable address/neighbor
+  configuration over the actual T13 NIC path, independently of ESP.
+- Keep the obsolete kernel network service disabled for that traffic/address;
+  no competing responders or silent fallback.
+- Report malformed-packet, bounds, timeout and failure behavior explicitly.
+- Distinguish the minimal PoC from a production router/full stack.
 
-This does not need to be a complete router stack.
+**NOT in scope:** ESP implementation, complete routing, IPv4, or device
+migration beyond T13. T14 is not implemented by this documentation task.
 
-**Acceptance conditions (verifiable):**
+### T15 — Externally provisioned userspace ESP SA pair (PLANNED)
 
-- A minimal userspace exchanging node performs basic IPv6/ICMPv6/ND traffic
-  over the T13 raw-frame path.
-- Address configuration and neighbor discovery are observable and tested.
-- UDP is added only after the IPv6/ICMPv6/ND exchange works; TCP only after that.
-- The old kernel stack and the new userspace stack do not answer the same
-  traffic/address simultaneously; the handover or isolation mechanism is
-  explicit.
-- Failure and malformed-packet behavior is reported.
-- The report distinguishes a minimal PoC from a production router or full stack.
+**Depends on:** independently demonstrated T14 IPv6/ICMPv6/ND and T13 raw-device
+delivery. It does not depend on UDP or TCP. No T15 implementation is claimed.
 
-**NOT in scope:** complete router functionality, IPv4 unless separately
-desired and planned, IKEv2 userland, ESP VPN, or device migration beyond what
-T13 supplies.
+Implement the separately specified [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md): two
+IPv6 hosts, one bidirectional configuration made of two unidirectional SAs,
+AES-128-GCM-16, transport mode preferred, protected echo sufficient. The user
+supplies one versioned bounded binary object to both machines over an
+external trusted/confidential channel. No key-exchange/distribution system
+or extra protocol daemon is part of the PoC. Existing ESP/AES-GCM may be
+reused/refactored in a future coding task. UDP/TCP remain independent goals.
 
-### T15 — Gradual userspace protocol migration
+**Acceptance conditions (future tests):**
 
-**Depends on:** T14 minimal userspace IPv6 and T13 device delivery.
+- Prove opposite TX/RX mappings with separate directional SPIs, keys and
+  salts, explicit peers/selectors, mode/version, generation, lifetime/policy.
+  Four secrets (40 bytes) are not the complete provisioning object.
+- Use authorized local object Handles, not ambient OID authority; different
+  local OIDs may hold the same content. Local ObjectFIFO is not secure
+  interhost transport.
+- Show protected echo both directions as IPv6 NH=50, exact recovered content
+  and necessary ND; no protected plaintext appears on the link.
+- Reject malformed/mismatched bundles, peers, SPIs/policy, invalid tags,
+  replays and counter/lifetime exhaustion. Test bounded replay windows and
+  authenticated reordering without unauthenticated state advancement.
+- Fail closed on crash, exit, restart, missing key, expiry or link loss;
+  never downgrade to plaintext. Reject previously consumed bundles, including
+  after restart/rollback; require fresh unique key material for each session.
+- Prove no AES-GCM key/salt/IV reuse and best-effort secret cleanup. Running
+  sequence/replay state is separate from provisioning, never a reusable secret.
+- Record the RFC 4106 automated-key-management requirement caveat: manually
+  provisioned AES-GCM is experimental, not fully compliant/production security.
+- Reuse Device ABI/ObjectFIFO without new protocol-specific kernel providers,
+  FIFOs, syscalls or pathname/Chan/fd adapters. Report each gate honestly.
 
-**Scope (PLANNED):**
-
-Bring up or port UDP, TCP, VPN IKEv2 and ESP as needed over the generic
-device-message delivery mechanism.
-
-- Preserve the existing kernel implementations until feature, security,
-  failure, authorization and compatibility tests pass.
-- Never add new kernel TCP/UDP/ESP object providers.
-- Remove a redundant legacy protocol implementation only after independent
-  validation.
-- Explicitly prevent unauthenticated plaintext fallback.
-
-**Acceptance conditions (verifiable):**
-
-- Each protocol has its own feature, security, failure and compatibility gate.
-- IKEv2 (UDP/500) and ESP (IPv6 Next Header 50) remain distinct and correctly
-  identified.
-- Authentication and replay protection are not weakened.
-- A userspace service crash/restart cannot silently fall back to plaintext or
-  an unauthenticated path.
-- The kernel implementation is removed only after the replacement is
-  independently validated, not merely “present”.
-- No new protocol-specific kernel object provider or FIFO is introduced.
-- Results record per-protocol pass/partial/not-run status.
-
-**NOT in scope:** a big-bang protocol replacement, removal of the kernel stack
-before validation, or weakening cryptographic/security behavior for
-convenience.
+**NOT in scope:** negotiation or automatic rekeying, general VPN/router,
+UDP/TCP as ESP dependencies, or a secure distribution/storage infrastructure.
+The no-IKE decision in §2.5 applies to both present and future targets.
 
 ### T16 — Generalize to USB and Wi-Fi
 
 **Depends on:** the T12 common device contract and the relevant T11
 ObjectFIFO/T13 device-integration validation. It does not require completed T15
-userland TCP/UDP/VPN migration.
+userspace ESP or independent TCP/UDP work.
 
 **Scope (PLANNED):**
 
@@ -601,7 +620,7 @@ filesystem, or claiming all USB/Wi-Fi hardware is covered.
 5. **Distinguish evidence classes.** Write CURRENT IMPLEMENTED, PLANNED and
    AGENT-REPORTED explicitly. An agent-reported test is not an independently
    re-run test.
-6. **First-PoC scope.** T8 does not require IKEv2 userland, ESP VPN, a network
+6. **First-PoC scope.** T8 does not require ESP, a network
    stack port, or device migration.
 7. **Preserve security.** Never trade authentication, replay protection or
    authorization for migration convenience. Never add a silent plaintext
@@ -631,7 +650,8 @@ filesystem, or claiming all USB/Wi-Fi hardware is covered.
 - [OBJECT-MODEL](OBJECT-MODEL.md) — object, file and Python boundaries.
 - [VOLATILE-OBJECT-OBJECTFIFO](VOLATILE-OBJECT-OBJECTFIFO.md) — volatile
   objects and ObjectFIFO/TEE.
-- [MINIMAL-IKEV2](MINIMAL-IKEV2.md) — current IKEv2/ESP profile.
+- [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) — normative PLANNED ESP object/lifecycle.
+- [MINIMAL-IKEV2](MINIMAL-IKEV2.md) — historical NON-TARGET evidence only.
 - [REPOSITORY-LAYOUT](REPOSITORY-LAYOUT.md) — source layout.
 - Working code: `kernel/core/ethercore.c`, `kernel/core/sysvobj.c`,
   `micropython/p9space.c`, `runtime/libc/port/oobject.c`,
@@ -650,7 +670,10 @@ sentinel fix, plus a 2026-11-07 strengthened-validation PASS (70/70 checks, no
 kernel change; subscription close while blocked NOT RUN as unreachable); see
 [SYSCALL-T11-OBJECTFIFO](SYSCALL-T11-OBJECTFIFO.md).
 T12 **passes the emulated endpoint integration gate** (66/66 PASS), with verification and
-limits in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). T13–T16 remain
-**PLANNED, not implemented**. T7 is the previous partial result. The roadmap
-itself does not authorize implementation; T12 was separately assigned by the
-user, and later stages still require their own assignment and acceptance gate.
+limits in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). T13 is merged and
+**passes its emulated gate** (55 T13 checks, fresh 66-check USB regression;
+physical NIC NOT RUN); see [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md).
+T14–T16 remain **PLANNED, not implemented**. T15 specifies externally
+provisioned ESP, not a negotiation protocol. T7 is the previous partial
+result. The roadmap itself does not authorize implementation; T12 was
+separately assigned by the user, and later stages still require their own assignment and acceptance gate.

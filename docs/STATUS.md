@@ -15,6 +15,27 @@
 > (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14–T16 remain **PLANNED**; see
 > [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
 
+## Network target correction (2026-11-08, documentation only)
+
+IKEv2 is excluded entirely from the active PoC and future target, including
+handshake/negotiation, PSKs, UDP/500, an IKE daemon and deferred migration.
+[ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) specifies **PLANNED**, externally provisioned
+userspace ESP: one versioned bounded GE/O bundle, two directional SAs,
+four secret components/40 bytes plus SPIs/IPv6 selectors/profile/generation/
+lifetime/policy, trusted confidential external delivery, tag/replay checks,
+no nonce reuse/restart reactivation and fail closed. Manual AES-GCM remains
+experimental with the RFC 4106 automatic-key-management compliance caveat.
+
+T13 is merged at GitHub main `4e7f7a1bf4de126c3e99480b6c911af721d6a620`,
+with its recorded emulated PASS; physical NIC NOT RUN. T14 IPv6/ICMPv6/ND
+must be separately demonstrated before T15 ESP. UDP/TCP and T16 are independent.
+Existing kernel ESP/control code is historical reuse material, not userspace
+ESP evidence. [MINIMAL-IKEV2](MINIMAL-IKEV2.md) remains a NON-TARGET report.
+
+This correction changes documentation only. Builds, boots, protocol tests and
+hardware operations are **NOT RUN**, and earlier PASS results are not reruns.
+See [T15-DOCS-RESULT](T15-DOCS-RESULT.md) for scope/checks/reference inventory.
+
 ## T13: raw Ethernet (2026-11-07, emulated integration gate PASS)
 
 [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md) records the verified GitHub T12
@@ -169,7 +190,7 @@ measured published snapshot
   as permission to remove them.
 - **No source, build script, test or ABI change occurred in T9.** The ledger
   identifies high-value questions for the separate T10 decision. T10 was
-  completed separately; T11–T16 remain PLANNED.
+  completed separately; see the current T11–T16 status above.
 
 ## T8: first complete multi-process MicroPython PoC (2026-11-06, PASS)
 

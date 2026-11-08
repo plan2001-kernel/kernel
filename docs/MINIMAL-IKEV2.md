@@ -1,5 +1,14 @@
 # Minimal IKEv2: userspace IKE, kernel ESP
 
+> **SUPERSEDED / HISTORICAL / NON-TARGET (2026-11-08).** This is preserved
+> implementation and test evidence from an earlier profile. Its build/launch,
+> future-work and migration descriptions are not current instructions. The
+> owner's later decision removes IKEv2 entirely from the active PoC and future
+> target. [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) is the normative PLANNED userspace
+> ESP design with external secret provisioning. T13 disabled native IPv6
+> startup/OBJ TCP/UDP opens; this report does not prove the old profile still
+> runs or that userspace ESP is implemented. This docs change removes no code.
+
 > Test harnesses and userspace programs named below are retained in the
 > separate `Plan2001-O-weekend-tests/plan2001` companion bundle. Relative
 > `tools/...` and `user/...` paths refer to that bundle layout; they are not

@@ -1,3 +1,11 @@
+# Retained crypto source provenance (historical IKE context)
+
+The IKE names below describe actual retained code, not an active/future
+protocol target. The 2026-11-08 decision excludes IKEv2; see the normative
+[planned ESP-SA-BUNDLE](../../docs/ESP-SA-BUNDLE.md). Existing AES-GCM is
+potential reuse material for future userspace ESP, not proof of that service.
+This documentation task changes no crypto source, build or license.
+
 BearSSL 0.6, unmodified subset from https://bearssl.org/bearssl-0.6.tar.gz
 Archive SHA-256: 6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14
 License: bearssl/LICENSE.txt (MIT).

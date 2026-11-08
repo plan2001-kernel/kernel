@@ -17,6 +17,40 @@ substitute it for GitHub main or overwrite T12 with it. GitHub branch/PR writes
 and task_report do not update that snapshot. The dated publisher/hooks below
 are historical mechanisms, not the default route for current tasks.
 
+## Network target decision (2026-11-08)
+
+The owner's newer decision overrides older networking prose, archived reports
+and inherited agent context. [ESP-SA-BUNDLE](docs/ESP-SA-BUNDLE.md) is the
+normative **PLANNED** ESP design. **IKEv2 is entirely excluded from the active
+PoC and future target**: no IKE negotiation/handshake, PSK/UDP-500 service,
+key-exchange implementation, IKE daemon or deferred IKE migration. Never
+restore it as a presumed target from historical examples.
+
+T14 is separately demonstrated userspace IPv6/ICMPv6/Neighbor Discovery over
+T13 raw Ethernet/Device ABI/ObjectFIFO. Future T15 is one bidirectional ESP
+SA pair (IPv6 NH=50), AES-128-GCM-16, preferably transport mode and protected
+echo. One bounded versioned GE/O bundle is supplied to both hosts through an
+external authenticated/confidential channel. It contains two directional
+keys (16 bytes each), two salts (4 bytes each), separate SPIs, IPv6 selectors,
+profile, generation, lifetime and policy. Four secret components/40 bytes are
+not the complete object. OIDs are local, not capabilities; local FIFO delivery
+does not secure interhost transfer. Key generation/distribution is outside
+this PoC; do not request secrets in chat.
+
+Require tag verification, bounded anti-replay, fresh unique material per new
+session, no AES-GCM nonce reuse or consumed-bundle reactivation after restart,
+and fail closed without plaintext downgrade on failure. Manual provisioning
+is experimental and must not be claimed fully RFC 4106-compliant or production
+security. No new protocol-specific kernel provider/FIFO/syscall or extra daemon.
+UDP/TCP are independent; T16 USB/Wi-Fi is independent. Existing ESP code is
+potential reuse material, not proof of userspace ESP.
+
+T13 is merged and passes its emulated integration gate; physical NICs were
+NOT RUN. Its native IPv6 startup/OBJ TCP/UDP opens are disabled. Assess actual
+boot/MPY/driver dependencies before removing residue; there is no obligation
+to preserve the unused legacy stack for compatibility. Documentation changes
+implement neither T14 nor T15. The GitHub-first workflow above remains in force.
+
 ## plan2001.com: current infrastructure (2026-11-03)
 
 Owner-confirmed facts, authoritative over older documents and session summaries:
