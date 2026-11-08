@@ -1,0 +1,181 @@
+{
+  "task_id": "476d91c0a8e64ffa86db6bba0644b84a",
+  "stage": "T16",
+  "title": "Consolidate and verify the common USB/Ethernet Device ABI",
+  "result": "PASS",
+  "executor": "agentti",
+  "execution_date_utc": "2026-11-08",
+  "host": "9db093436960",
+  "os": "Debian 13 / Linux 6.18.57",
+  "worktree": "/workspace/t16",
+  "branch": "agent/t16/device-abi-consolidation",
+  "repository": "https://github.com/plan2001-kernel/kernel",
+  "start_sha": "654b5ee4aeb592a93fc7c9e764429b17ee196286",
+  "start_tree": "7baa3e057e0a77bf388905b9d162f38c531e3f13",
+  "tested_implementation_end_sha": "654b5ee4aeb592a93fc7c9e764429b17ee196286",
+  "delivery_sha_record": "MCP task_report and /workspace/artifacts/t16-delivery.json (created after commit to avoid self-reference)",
+  "credentials": {
+    "github": "OAuth connector, identity plan2001-kernel",
+    "task": "Plan2001 OAuth connector",
+    "secrets_recorded": false
+  },
+  "scope": {
+    "included": [
+      "T12 USB control-endpoint Device ABI",
+      "T13 raw Ethernet Device ABI",
+      "T11 ordinary ObjectFIFO delivery machinery"
+    ],
+    "wifi": "EXCLUDED by owner; deferred to unspecified separately authorized assignment",
+    "t14_t15_prerequisites": false,
+    "runtime_changes": 0,
+    "abi_changes": 0,
+    "new_syscalls": 0
+  },
+  "diff_inventory": [
+    "AGENTS.md",
+    "README.md",
+    "docs/DEVICE-ABI.md",
+    "docs/ROADMAP-T8-T16.md",
+    "docs/STATUS.md",
+    "docs/T16-DEVICE-RESULT.md",
+    "docs/T16-DEVICE-RESULT.json",
+    "tools/host/mcp-public-files.txt"
+  ],
+  "commands": [
+    "python tools/host/build-kernel.py --kernel --jobs 8",
+    "python tools/host/build-mpy-gcc.py --jobs 8",
+    "bash tools/build-efi-gcc.sh",
+    "bash tools/build.sh",
+    "T12_OUT=$PWD/build/t16/t12 bash tools/host/t12/run-device-checks.sh",
+    "T13_OUT=$PWD/build/t16/t13 bash tools/host/t13/run-ethernet-checks.sh"
+  ],
+  "checks": {
+    "kernel": {
+      "status": "PASS",
+      "selected": 133,
+      "selected_pass": 133,
+      "closure": 135,
+      "final_link": "PASS"
+    },
+    "micropython": {
+      "status": "PASS",
+      "built": 254,
+      "cached": 0,
+      "undefined_symbols": 0
+    },
+    "efi": {
+      "status": "PASS"
+    },
+    "host": {
+      "status": "PASS",
+      "tools": [
+        "format-o",
+        "mpy-cross"
+      ]
+    },
+    "t12": {
+      "status": "PASS",
+      "fresh": true,
+      "assertions": 66,
+      "runner_verification": "66 sequential executed assertions",
+      "cpus": 1
+    },
+    "t13": {
+      "status": "PASS",
+      "fresh": true,
+      "assertions": 55,
+      "runner_verification": "55 executed assertions and external peer records",
+      "cpus": 2,
+      "handoff": {
+        "arrivals": 880,
+        "published": 204,
+        "handoff_drops": 676,
+        "publication_drops": 0,
+        "tx_accepted": 3,
+        "high_water": 64,
+        "capacity": 64,
+        "queued": 0
+      }
+    },
+    "normal_boot_commit_repl": {
+      "status": "PASS",
+      "boots": [
+        "T12",
+        "T13"
+      ]
+    },
+    "t14_t15": {
+      "status": "NOT RUN",
+      "reason": "Zero runtime/shared-code changes; not prerequisites"
+    },
+    "physical_hardware_kvm": {
+      "status": "NOT RUN",
+      "reason": "QEMU TCG execution only; no /dev/kvm"
+    },
+    "combined_device_boot": {
+      "status": "NOT RUN",
+      "reason": "Fresh T12 and T13 use separate boots of the same artifacts"
+    }
+  },
+  "failures": [],
+  "audit_findings": [
+    "Common VkindDevice and shared Handle/capability/lifetime machinery already implemented",
+    "USB pending synchronous completion differs correctly from Ethernet TX acceptance and asynchronous FIFO RX",
+    "Documentation clarified provider-specific transfer/control rules and open admission vs alias limits",
+    "Native USBIOCTL enumeration/address/detach adapter is a required live T12 dependency",
+    "Legacy native USB service has separate Handle table and lacks the catalog iseve/Vcreate admission policy; no global USB sandbox claim",
+    "No demonstrated defect justified runtime cleanup; ABI/layouts/providers remain unchanged"
+  ],
+  "not_run": [
+    "USB SMP stress",
+    "Active HCI unplug/timeout fault injection",
+    "Allocation failure and TX queue saturation injection",
+    "Exhaustive scheduling interleavings",
+    "Numerical alias bypass of 4/16 open admission checks",
+    "Full legacy API permission boundary execution"
+  ],
+  "source_sha256_unchanged_from_start": {
+    "runtime/abi/obj.h": "6d030b97096367e89536896692f1779b0ca2c619635d5ff3613da116860312d5",
+    "runtime/libc/port/oobject.c": "660271d8a2002bee43a89cf9a0505f49c41b7978611e67048ae5f0bebd62b58d",
+    "kernel/core/sysobj.c": "70925822bd1005862ff77935ea2be7b7f921d068818e10cb7975c8729169faee",
+    "kernel/core/sysvobj.c": "b9f3484074e0ef8c9666184e84a7210094a57e9b4cc74a073eff3a6dde82923a",
+    "kernel/core/vobjint.h": "cf84d40fd2920a095d5ba007c92d994173c0138399409c7e1894c761394e9418",
+    "kernel/core/sysdevether.c": "2ae07de6e1020ae5f460456b4f23ab7081187b97d1e95993e760714f3f2e28ed",
+    "kernel/core/ethercore.c": "461a38034fe8593d0dc8fe04129a5cab01b226c6e89b048ca1c9186a6afb1dac",
+    "kernel/core/sysusb.c": "3c0b0a0f4dfad6ad46b05e05d6a90a45f4cb3a5e7769e13aa70932f2edb0ac5f",
+    "kernel/drivers/usb/usbcore.c": "542c214f16118b809b7032e18ad7e7b30e94b520eff1f4cb2155d577aaf93c2a",
+    "kernel/drivers/usb/usbxhci.c": "167bb920edab7c05db0a2980863390b1a6809533769c44650370d0a3cb1fb359",
+    "micropython/modplan9.c": "b0ca3072bb567ce6bcd7abc1168be2bbb219608e1911bf4a784f162c1daeee52",
+    "tools/host/t12/device-checks.py": "e060d093b93cd135bcc8f02159929f6e10994a5912998eeb80b7a2f62995ba6c",
+    "tools/host/t12/run-device-checks.sh": "0b6ed76338a6f0865a8f49395d39891ca9560d2ba31894b3d7821927f5c0b70c",
+    "tools/host/t13/ethernet-checks.py": "f950e8582451165a1e8a6486e5cf3d3d5650efcccd6467074f3c581826c34569",
+    "tools/host/t13/run-ethernet-checks.sh": "c7c1075341237c6d0b512f23bd4c0b3b9a36451b7db2065ddbf3dd5b98989bf4",
+    "tools/host/t13/peer.py": "d5bba0f493e8bb65e8c0989efb545cf6109819e73b9f8f8f05abbd83991fbd30"
+  },
+  "artifact_sha256": {
+    "build/gcc/9pc64.elf": "022566092a41c117a2d4c01ea115e2faaccb27bdfab1ec06bb77e82fe0ff0a03",
+    "build/gcc/micropython.elf": "783bcaafda5d406cbf4467a61227dbe89bdb43f24775ca29d056826ca6b07fba",
+    "build/gcc/bootx64.efi": "bed49700ae7841945feab2cd9fe70571258bdd1b185e18385d8aa65a3351189f",
+    "build/format-o/format-o": "64df144d46371833f14b2056b8d4265cd69f57fb07058dfa00c5b926e5bf2732",
+    "build/mpy-cross/mpy-cross": "b588cb32c3181770eac5e7b3a4213a1f4388f736b12e096d9b8f46545229ddc3"
+  },
+  "evidence_sha256": {
+    "build/t16/efi-build.log": "800ed612712c56fc8a0076e2ad31356a1c2db081ef7735485ee4a9fcda1bc60f",
+    "build/t16/host-build.log": "0779a9b6a453d4a80fefe1fe4ecf3d1fdca87abb612fc0555f7b3011b999f8da",
+    "build/t16/kernel-build.log": "c7490566059342f14bbc946e67ff2c97da954d23ac47d68e2cdede6f21f8e2bb",
+    "build/t16/mpy-build.log": "36749b02a125e52db5b992a0ea65819c400f4fe0a18c59bd43731dcd7be1f036",
+    "build/t16/t12.log": "82fef3c2431b9e4f1cb2a5eab6191744c0a03f348f4df2940a2abfc3fcaf10c5",
+    "build/t16/t12/boot-boot.log": "0700a21c934455c0ff08d563012702d6f6b2cf7609261d0cec78a007e6c85f1f",
+    "build/t16/t12/qemu-boot.log": "f989d903bcac2027667bc898874346bda30b391f7d98bbbcc36e35217df4108b",
+    "build/t16/t12/ream/mkovol.log": "136cf23f05b821b81eefba653e6dd526090dc49ee43478c78a894093cb0c52bd",
+    "build/t16/t12/report.txt": "a5f6dc312e896326c92c43b78dd0d1d0f97b9cdb1948d58f47b5c50a00e327a7",
+    "build/t16/t12/serial-boot.log": "a0e6cb245e8e60608eb35fddbe8ca4199dce7fe0abf0cc4037851209fdac6356",
+    "build/t16/t13.log": "bc24276a4eb3be734f605620b0ce14c3d88ae3bf42f54d99113ae23e9f12bf1c",
+    "build/t16/t13/boot-boot.log": "3952f7f8a7feb8f860732030cd0ee38904848dce30a5bdbddd47141e1f1e075e",
+    "build/t16/t13/peer.log": "76bad8e6d0e1abb0b82993218fa57cae62c8a7337c5d0e7d66cf2a86d3a0a2a4",
+    "build/t16/t13/qemu-boot.log": "89b9173e641b269d8fa3a54fc2fc30e7f3a4828e6b929e1f671ca937e523a60e",
+    "build/t16/t13/ream/mkovol.log": "52ed83f42707e74eb6a92f83fa2498f66f601460d47eca5102c3651de67fa9e2",
+    "build/t16/t13/report.txt": "a7def1716515e5ea55fc07aa472af5a0a386771b28ece651bbde785ee3eed19d",
+    "build/t16/t13/serial-boot.log": "473a01084bbb40419f3b677aad7a4c828b99947742b31141674e376e00a6c4da"
+  }
+}

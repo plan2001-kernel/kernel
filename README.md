@@ -281,7 +281,8 @@ prerequisites. Do not add other test infrastructure to the tree.
   documented gates; T13 is merged (emulated gate only, physical NIC NOT RUN).
   T14 minimal userspace IPv6 passes its emulated gate
   ([result](docs/T14-IPV6-RESULT.md)); T15 passes its minimal ESP integration
-  gate ([result](docs/T15-ESP-RESULT.md)); T16 remains PLANNED.
+  gate ([result](docs/T15-ESP-RESULT.md)); T16 common USB/Ethernet audit and
+  fresh verification PASS ([result](docs/T16-DEVICE-RESULT.md)), with no Wi-Fi.
   See [SYSCALL-LEDGER](docs/SYSCALL-LEDGER.md) for the accepted T9 audit.
 - [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md): the host source layout and
   its distinction from future OID-addressed source objects.

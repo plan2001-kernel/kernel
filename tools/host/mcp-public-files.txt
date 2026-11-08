@@ -83,6 +83,8 @@ docs/T14-IPV6-RESULT.json
 docs/T14-IPV6-RESULT.md
 docs/T15-ESP-RESULT.json
 docs/T15-ESP-RESULT.md
+docs/T16-DEVICE-RESULT.json
+docs/T16-DEVICE-RESULT.md
 docs/TEST-RESULTS.json
 docs/TINYCC-SPACE2.md
 docs/TODO.md

@@ -12,7 +12,17 @@ representative integration is a native USB control endpoint over `usbcore`.
 Ethernet, USB bulk/interrupt/isochronous and Wi-Fi are not integrated by T12.
 This is a byte-oriented amd64 PoC, not a universal packet schema.
 
-## Identity and authority
+## T16 verification scope (2026-11-08)
+
+The later T16 assignment consolidates the **existing USB control-endpoint and
+raw Ethernet** contract only, with T11 ObjectFIFO evidence. There is **no
+Wi-Fi** family/driver/firmware/service/test requirement; any later Wi-Fi work
+needs a separate assignment. T14/T15 and TCP/UDP are not prerequisites.
+Family-specific completion, transfer bounds and control remain explicit;
+a generic FIFO is optional distribution for synchronous USB, not an extra
+completion framework. Historical T12/T13 results above are not fresh T16 tests.
+
+## Common identity and authority
 
 The existing five `OBJ*` syscalls carry this ABI. No syscall is added or
 renumbered. New OPEN providers are `ObjOpenDevices=15` and `ObjOpenDevice=16`;
@@ -23,16 +33,19 @@ meaning. Device records have their own version, `OBJ_DEVICE_ABI_VERSION=1`.
 `OBJOPEN(ObjOpenDevices, NULL, 0, rights)` creates a `VkindDevices=13` catalog
 Handle. Default rights are `Vmeta|Vdelegate`; the existing `iseve()` bootstrap
 policy alone allows requesting `Vcreate`. This is the same transitional
-policy as the native USB service, not the proposed production authority model.
+policy as the object USB service (`ObjOpenUsb`), not the proposed production
+authority model. The separate legacy USB syscall table is not thereby brought
+under the new catalog policy; see the T16 legacy inventory.
 There is no ambient privilege in a numeric selector or volatile identity.
 
 `DeviceList` requires `Vmeta` and returns an array of 32-byte
 `ObjDeviceEntry` records. A zero byte capacity returns the current count;
 otherwise the result is the number copied, up to the caller's capacity.
-The maximum capacity is 128 records (USB endpoints and Ethernet NICs). Membership is a snapshot, not a reservation: detach or a competing
-open may occur before the selected device is opened. USB entries use family 1 and device/endpoint numbers; T13 adds family 2 NICs.
-The USB records have
-maximum send 4104 bytes and maximum receive 4096 bytes. Unused fields are zero.
+The maximum capacity is 128 records (USB endpoints and Ethernet NICs).
+Membership is a snapshot, not a reservation: detach or a competing open may
+occur before use. Family 1 selects USB device/endpoint; family 2 selects
+Ethernet controller/zero. USB maxsend is 4104, maxrecv 4096; Ethernet maxima
+are complete L2 frame sizes. Unused record fields are zero.
 Future providers must retain explicit payload and metadata semantics.
 
 `OBJOPEN(ObjOpenDevice)` takes the 24-byte `ObjOpenDeviceReq`: version, family,
@@ -44,19 +57,32 @@ a device, and an attenuated catalog cannot amplify its rights.
 An open returns a `VkindDevice=14` session Handle with a fresh boot-scoped
 volatile identity `(incarnation, space, oid)`. The selected USB device number
 is not that identity, an OID, a pathname or a capability. Rights default to
-`Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate`; a nonzero request must be a subset.
-`ObjOpenHandle`, Grant, explicit OSPAWN inheritance and ObjectFIFO delegation
-reuse existing Handle semantics. Catalogs may be closed after opening a session.
-There are at most four catalog and sixteen device Handles per process, plus
-the existing 96-Handle and global object/payload bounds.
+`Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate` for USB (206); Ethernet adds
+`Vsubscribe` (238). A nonzero request must be a subset of the family ceiling.
+`ObjOpenHandle`, Grant and explicit OSPAWN inheritance reuse existing Handle
+semantics. Generic ObjectFIFO delivery retains its own restricted rights mask;
+it does not convey all operational Device rights. Catalogs may be closed after
+opening a session.
+New catalog/session opens reject admission when the process already holds
+four catalog or sixteen device Handles respectively. These are OPEN checks,
+not hard alias limits: Grant/OpenHandle/OSPAWN use the shared Handle table
+and can create further aliases subject to its 96-slot bound. The existing
+global object/payload bounds also apply. Do not infer extra device authority
+from an alias or confuse an open-admission count with all-handle quotas.
 
-## Complete-message transfer and completion
+## Common invocation; provider-specific transfer
 
 `DeviceSend` requires `Vsend`. It takes one bounded provider message in
 `ObjCall.in/inlen`; out/outlen, arg0 and arg1 must be zero. The kernel validates
 and copies the complete request before invoking the provider, so concurrent
 changes to a user buffer cannot change the validated transfer. The kernel
 retains no user buffer, pointer or borrowed object after return.
+
+Ethernet SEND/RECV semantics are defined in the T13 section below. The
+following synchronous completion contract is **USB family 1 only**, not a
+universal completion schema.
+
+### USB control transfer and one pending completion
 
 `Vsend` permits submission; it does not authorize arbitrary USB controls.
 On downstream endpoints, only this conservative standard read-only allowlist
@@ -103,8 +129,11 @@ must close each received bytes Handle using ordinary `OBJCLOSE`.
 
 ## Device-specific control
 
-`DeviceCtl` requires `Vcontrol`. `arg0` is a provider-specific control operation;
-all buffers and arg1 must be zero. USB control operation 1 requests the existing
+`DeviceCtl` carries a family-specific operation in arg0. IN and arg1 are zero;
+OUT is permitted only for a defined bounded result. Authorization belongs to
+the operation: Ethernet status (2) requires Vmeta and exact 88-byte output,
+Ethernet detach (3) requires Vcontrol and no output. USB clear-halt (1) requires
+Vcontrol, with no input/output. USB control operation 1 requests the existing
 `usbcore_ioctl(USBclrhalt)` behavior: mark the endpoint for halt recovery on its
 next transfer. It does not add global USB administration, arbitrary ioctls,
 endpoint creation, enumeration or a reset interface. Other controls return
@@ -147,11 +176,12 @@ completion. Closing one alias leaves the others usable. Final close, exec or
 process exit releases the pending response, closes the native USB DATA claim
 exactly once and drops the endpoint reference. Already received bytes objects
 have independent lifetimes. Closing the catalog does not revoke existing
-sessions. Generic Revoke remains FIFO-only; device-wide revocation and USB
-hotplug notification are not implemented. Detachment is detected by usbcore
+sessions. Generic Revoke remains FIFO-only; this USB session has no device-wide revoke
+or hotplug notification. Ethernet separately supports explicit detach (3),
+not a new generic device revoke operation. Detachment is detected by usbcore
 on the next operation, and close still releases the held reference.
 
-All provider work runs in syscall/process context. This T12 slice introduces
+USB provider work runs in syscall/process context. This T12 slice introduces
 no IRQ callback, per-device FIFO, filesystem, `Chan` bridge or fd layer. A direct
 synchronous usbcore call is simpler for one exclusive control transaction;
 ObjectFIFO remains available when actual message distribution is required.
@@ -165,8 +195,8 @@ C adapters are declared in `runtime/abi/obj.h` and implemented in
 - `obj_devices_open(rights=0)`
 - `obj_device_list(catalog, capacity=128)` (capacity 0 returns the count)
 - `obj_device_open(catalog, family, selector0, selector1, rights=0)`
-- `obj_device_send(device, message)` (returns completion sequence)
-- `obj_device_recv(device)` (returns bytes Handle, sequence, family, length)
+- `obj_device_send(device, message)` (USB sequence; Ethernet accepted length)
+- `obj_device_recv(device)` (USB bytes Handle/completion; Ethernet FIFO/0/2/0)
 - `obj_device_ctl(device, operation)`
 
 Use `obj_info`, `obj_read`, `obj_grant`, `obj_publish` and `obj_close` on the
@@ -248,3 +278,36 @@ objects or enters ObjectFIFO publication. There is one existing ObjectFIFO
 per session, with its existing independent subscriber queues, not another
 queue family. Ownership, concurrent teardown and executed limits are detailed
 in [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md).
+
+## T16 common-contract consolidation
+
+[T16-DEVICE-RESULT](T16-DEVICE-RESULT.md) supplies the source-backed common /
+provider / legacy matrix and fresh verification. Both families use one VkindDevice,
+Vhtab/Vhand, ordinary identity/refcounts, Grant/OpenHandle/OSPAWN attenuation,
+OBJCLOSE and process-exit cleanup. Provider state is the USB pending reply/Ep
+or Ethernet Veth/FIFO, not an independent capability framework. Actual data
+is copied and never translated between USB setup bytes and Ethernet frames.
+
+Receiving a new USB bytes object or Ethernet FIFO uses an explicit provider
+result policy; it is not an alias grant of the device's rights. USB response
+137 is read/meta/delegate on **content only**, never device authority.
+Ethernet FIFO receives subscribe/meta plus only caller-held delegate/control,
+with no send right. Generic FIFO reception intersects the sender's ceiling;
+default received frame/content Handles have read/meta. Operational session
+attenuation/delegation is through Grant/OpenHandle/OSPAWN. Generic FIFO
+publication is not a promise to transfer every device I/O/control right;
+its existing ceiling does not propagate those operational device bits.
+
+The common ABI coexists with active legacy USB administration and stream
+APIs. T12's actual downstream fixture uses USBIOCTL new-device/address/detach
+through its legacy USB handles to prepare/remove the endpoint, then all
+peripheral data/completions use the common Device session. The old and new
+DATA paths share the same usbcore exclusive inuse claim; there is no second
+HCI. This dependency is preserved, not relabeled as dead code. The legacy
+USB handle table/policy remains distinct; this PoC does not claim all USB
+access is exclusively controlled by the new OBJ catalog rights. Broader
+legacy retirement/authorization is not silently implemented by this audit.
+
+No runtime, ABI layout/number, generic FIFO, driver or test logic change was
+needed. T16 only narrows the specification, clarifies these existing semantics
+and freshly verifies USB/Ethernet. Wi-Fi and new device families are excluded.
