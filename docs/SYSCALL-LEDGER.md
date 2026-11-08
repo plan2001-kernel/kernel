@@ -1,5 +1,9 @@
 # Plan2001-O syscall ledger (T9)
 
+> Historical measurement: the current branch reduces the dispatch table to
+> 33 active / 102 reserved. See [SYSCALL-CONSOLIDATION](SYSCALL-CONSOLIDATION.md).
+
+
 **Status: T9 PASS (documentation and measurement only), 2026-11-06.**
 This is the source-derived ledger required by the then-current T9 roadmap
 (since removed).

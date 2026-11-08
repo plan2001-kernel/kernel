@@ -16,14 +16,6 @@
 /* ge/storage/sysgefs.c: bounded published-object read for OSPAWN. */
 extern long osgetobject(int, uvlong, uchar**, long, uvlong*);
 
-uintptr
-sysr1(sysva_list)
-{
-	if(!iseve())
-		error(Eperm);
-	return 0;
-}
-
 static void
 abortion(void)
 {
@@ -31,8 +23,7 @@ abortion(void)
 }
 
 /*
- * Shared RFORK core.  The retired RFORK(19) entry point and the typed
- * OBJINVOKE(ObjOpRfork) operation both use exactly this function, so
+ * Shared RFORK core.  The direct RFORK(19) entry uses this function, so
  * forkchild, resource copying, rollback and parent/child linkage cannot
  * diverge.  The caller has already validated the Handle or the raw syscall
  * boundary; this function validates only the flag word and resources.
@@ -451,7 +442,6 @@ execcommit(Segment *ts, Segment *ds, Segment *bs, uintptr tstk,
 	if(up->hang)
 		up->procctl = Proc_stopme;
 	oprocexec(up);
-	usbprocexec(up);
 	vobjprocexec(up);
 	net6procexec(up);
 	pipeprocexec(up);
@@ -1176,8 +1166,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->rgrp = nil;
 	p->egrp = newegrp();
 	/* Empty by default; selected initial values can be set by the child. */
-	p->ohandles = nil;
-	p->usbhandles = nil;
 	p->vobjhandles = nil;
 	p->iomask = 0;
 	p->pgrp = newpgrp();
@@ -1507,17 +1495,8 @@ syserrstr(sysva_list list)
 	return (uintptr)generrstr(buf, len);
 }
 
-/* compatibility for old binaries */
-uintptr
-sys_errstr(sysva_list list)
-{
-	return (uintptr)generrstr(sysva_arg(list, char*), 64);
-}
-
-/* Set the calling process's note callback.  OBJINVOKE(ObjOpNotifyRegister)
- * uses this exact validation and state update: nil removes the callback,
- * otherwise the address must be readable user memory.  Nothing else (note
- * queue, ureg, note return) is touched.  NOTIFY(28) is reserved. */
+/* NOTIFY(28): nil removes the callback; otherwise validate its user address.
+ * Note queue, Ureg and note return state are unaffected. */
 void
 setnotify(int (*f)(void*, char*))
 {
@@ -1565,7 +1544,7 @@ donotify(Ureg *ureg)
 	return 1;
 }
 
-/* The single note-return core shared by the retired NOTED(29) semantics and
+/* The note-return core used by NOTED(29) and
  * OBJINVOKE(ObjOpNoted).  It is the historical sysnoted() body unchanged:
  * the same up->notified check, noteureg chain, validation and the exact
  * NCONT/NDFLT/NSAVE/NRSTR switch.  On NDFLT it exits; on a bad state it
@@ -2082,23 +2061,12 @@ syssemrelease(sysva_list list)
 	return (uintptr)semrelease(s, addr, delta);
 }
 
-/* For binary compatibility */
+/* amd64: full nanosecond value in the return register. */
 uintptr
 sys_nsec(sysva_list list)
 {
-	vlong *v;
-
-	/* return in register on 64bit machine */
-	if(sizeof(uintptr) == sizeof(vlong)){
-		USED(list);
-		return (uintptr)todget(nil, nil);
-	}
-
-	v = sysva_arg(list, vlong*);
-	evenaddr((uintptr)v);
-	validaddr((uintptr)v, sizeof(vlong), 1);
-	*v = todget(nil, nil);
-	return 0;
+    USED(list);
+    return (uintptr)todget(nil, nil);
 }
 
 #include "systab-gcc.h"
@@ -2201,11 +2169,10 @@ syscalltraceret(Sargs *args, ulong scallnr, int kind)
 	else
 		switch(scallnr){
 		case OVOLOPEN:	off = 24; break;
-		case OSPACEOPEN:	off = 32; break;
+		case OBJOPEN:	off = 48; break;
 		case OSPACEGET:
 		case OSPACEPUT:
 		case OSPACECOMMIT:
-		case OSPACECLOSE:	off = 48; break;
 		case OEXECUTE:	off = 40; break;
 		default:	off = 16; break;
 		}

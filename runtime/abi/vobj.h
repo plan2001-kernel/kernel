@@ -49,7 +49,8 @@ enum {
 	VkindUsbEp	= 10,	/* one opened USB endpoint; no data path yet */
 	VkindConsole	= 11,	/* native process output stream */
 	VkindDevices = 13,	/* common device discovery/open authority */
-	VkindDevice = 14,	/* one native message device session */
+	VkindDevice = 14,
+	VkindNamespaceView = 15,	/* one native message device session */
 	VkindProcessSelf = 12,	/* caller's own BSEG heap break */
 };
 

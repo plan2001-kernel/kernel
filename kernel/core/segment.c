@@ -74,7 +74,6 @@ putseg(Segment *s)
 		return;
 	if(decref(&s->ref) != 0)
 		return;
-
 	assert(s->sema.prev == &s->sema);
 	assert(s->sema.next == &s->sema);
 

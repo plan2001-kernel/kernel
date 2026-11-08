@@ -420,7 +420,7 @@ vobjput(Vobj *o)
 			ve->ep = nil;
 		}
 		free(ve);
-	}else if(o->kind == VkindGe || o->kind == VkindSpace){
+	}else if(o->kind == VkindGe || o->kind == VkindSpace || o->kind == VkindNamespaceView){
 		if(o->priv != nil)
 			oshandput(o->priv);
 	}
@@ -824,17 +824,24 @@ vobjcreat(int kind, uvlong space, void *buf, long n, VobjId *id)
  * volatile incarnation tag.  The new object gets its own capability copy so
  * later READ/WRITE/COMMIT use the same Ohand authority and gate.
  */
-static int
-vgerights(Ohand *cap)
+int
+vobjrightsfromo(int o)
 {
- int r = Vmeta, o = oshandrights(cap);
+ int r = Vmeta;
  if(o & Oread) r |= Vread;
  if(o & Owrite) r |= Vwrite;
  if(o & Ocreate) r |= Vcreate;
  if(o & Ocommit) r |= Vcommit;
  if(o & Oexecute) r |= Vexecute;
  if(o & Odelegate) r |= Vdelegate;
+ if(o & Orelate) r |= Vcontrol;
  return r;
+}
+
+static int
+vgerights(Ohand *cap)
+{
+ return vobjrightsfromo(oshandrights(cap));
 }
 
 /* Defense in depth for a newly opened native provider, before publication.
@@ -849,7 +856,41 @@ vgecaplimit(Ohand *cap, int rights)
  if(rights & Vcommit) r|=Ocommit;
  if(rights & Vexecute) r|=Oexecute;
  if(rights & Vdelegate) r|=Odelegate;
+ if(rights & Vcontrol) r|=Orelate;
  cap->rights &= r;
+}
+
+/* Namespace and GE share the OBJ handle table and its generation/rights checks. */
+int
+vobjinstallohand(Ohand *oh, int kind)
+{
+ Vobj *o;
+ int handle, rights;
+ if(oh == nil || (kind != VkindSpace && kind != VkindGe && kind != VkindNamespaceView)) error(Ebadarg);
+ rights = kind == VkindNamespaceView ? Vmeta|Vcontrol : vgerights(oh);
+ o = vobjalloc(kind, kind == VkindNamespaceView ? 0 : ossid(oh), 0);
+ if(o == nil) error(Enomem);
+ o->priv = oh;
+ o->oid = oh->oid;
+ o->provider = kind == VkindNamespaceView ? 0 : (kind == VkindSpace ? VopenSpace : VopenGe);
+ if(waserror()){o->priv=nil;vobjput(o);nexterror();}
+ handle = vobjinstallobj(o, rights);
+ poperror();
+ vobjput(o);
+ return handle;
+}
+
+Ohand*
+vobjholdohand(int handle, int kind, int rights)
+{
+ Vhand *h;
+ Ohand *oh;
+ h = vlookup(handle, rights);
+ if(h->obj->kind != kind || h->obj->priv == nil){vhandput(h);error(Ebadarg);}
+ oh = h->obj->priv;
+ incref(&oh->ref);
+ vhandput(h);
+ return oh;
 }
 
 int
@@ -1375,40 +1416,6 @@ vobjfifostat(int handle, VobjFifostat *out)
 	}
 	vhandput(h);
 	return 0;
-}
-
-int
-vobjgrant(int handle, uvlong rights)
-{
-	Vhand *h;
-	Vhand *nh;
-	Vhtab *t;
-	int result;
-
-	if(rights == 0 || rights > Vall)
-		error(Ebadarg);
-	h = vlookup(handle, Vdelegate);
-	if(h->sub != nil){
-		vhandput(h);
-		error("vobj: subscription handles cannot be duplicated");
-	}
-	if((rights & ~(uvlong)h->rights) != 0){
-		vhandput(h);
-		error(Eperm);
-	}
-	if((t = vgettab(1)) == nil){
-		vhandput(h);
-		error(Enomem);
-	}
-	nh = vhandalloc(h->obj, nil, (int)rights);
-	result = vinstall(t, nh);
-	if(result < 0){
-		vhandput(nh);
-		vhandput(h);
-		error("vobj: too many handles");
-	}
-	vhandput(h);
-	return result;
 }
 
 static void
@@ -2147,7 +2154,7 @@ usbsvcmaxrights(void)
 
 	r = usbsvcrights();
 	if(iseve())
-		r |= Vcreate;
+		r |= Vcreate|Vcontrol;
 	return r;
 }
 
@@ -2267,23 +2274,24 @@ vobjusbepopen(int handle, void *req)
 	Vusbep *ve;
 	Ep *ep;
 	ObjUsbEpReq r;
-	int h, opened, rights;
+	int h, opened, rights, need;
 
 	if(req == nil || !okaddr((uintptr)req, sizeof r, 0))
 		error(Ebadarg);
 	memmove(&r, req, sizeof r);
 	if(r.flags != 0 || r.reserved != 0)
 		error(Ebadarg);
-	sh = vlookup(handle, Vcreate);
+	if(r.kind != USBDATA && r.kind != USBCTL)
+		error(Ebadarg);
+	if(r.mode != OREAD && r.mode != OWRITE && r.mode != ORDWR)
+		error(Ebadarg);
+	need = Vcreate | (r.kind == USBCTL ? Vcontrol : 0);
+	sh = vlookup(handle, need);
 	if(sh->obj->kind != VkindUsb){
 		vhandput(sh);
 		error(Ebadarg);
 	}
 	vhandput(sh);
-	if(r.kind != USBDATA && r.kind != USBCTL)
-		error(Ebadarg);
-	if(r.mode != OREAD && r.mode != OWRITE && r.mode != ORDWR)
-		error(Ebadarg);
 	if(vobjhandlesbykind(up, VkindUsbEp) >= Vusbepslotmax)
 		error("too many USB endpoint handles");
 	ep = usbcore_getep(r.devno, r.epno);
@@ -2694,6 +2702,73 @@ vobjdevicerecv(int handle, void *out)
 	return result;
 }
 
+static long
+usbioargmin(int req)
+{
+	switch(req){
+	case USBnew:
+		return sizeof(struct Usbnew);
+	case USBnewdev:
+		return sizeof(struct Usbnewdev);
+	case USBhub:
+		return sizeof(struct Usbhub);
+	case USBdebug:
+	case USBmaxpkt:
+	case USBntds:
+	case USBpollival:
+	case USBtimeout:
+	case USBhz:
+	case USBsamplesz:
+	case USBsampledelay:
+	case USBuframes:
+		return sizeof(int);
+	case USBname:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+/* Provider-private USB administration.  The caller pins the Vhand and checks
+ * Vcontrol.  A copied IN/OUT buffer never escapes this synchronous call. */
+static long
+vusbctl(Vobj *o, uvlong operation, void *arg, long narg)
+{
+    Vusbep *ve;
+    char *buf;
+    long r;
+    int req;
+
+    if(operation < USBdebug || operation > USBinfo)
+        error(Ebadarg);
+    req = (int)operation;
+    ve = nil;
+    if(o->kind == VkindUsb){
+        if(req != USBdebug) error(Ebadarg);
+    }else{
+        ve = o->priv;
+        if(ve == nil || ve->kind != USBCTL) error(Ebadarg);
+    }
+    if(narg < 0 || narg > 4096 || narg < usbioargmin(req)
+    || (narg > 0 && arg == nil))
+        error(Ebadarg);
+    buf = nil;
+    if(waserror()){free(buf);nexterror();}
+    if(narg > 0){
+        validaddr((uintptr)arg, narg, 0);
+        validaddr((uintptr)arg, narg, 1);
+        buf = smalloc(narg);
+        memmove(buf, arg, narg);
+    }
+    r = ve == nil ? usbcore_globalioctl(req, buf, narg)
+                   : usbcore_ioctl(ve->ep, req, buf, narg);
+    if(r < 0) error(up->errstr[0] != 0 ? up->errstr : Eio);
+    if(narg > 0) memmove(arg, buf, narg);
+    poperror();
+    free(buf);
+    return r;
+}
+
 int
 vobjdevicectl(int handle, uvlong op, void *out, long len)
 {
@@ -2702,6 +2777,14 @@ vobjdevicectl(int handle, uvlong op, void *out, long len)
 
     h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
+    if(h->obj->kind == VkindUsb || h->obj->kind == VkindUsbEp){
+        long r;
+        if(!(h->rights & Vcontrol)) error(Eperm);
+        r = vusbctl(h->obj, op, out, len);
+        poperror();
+        vhandput(h);
+        return r;
+    }
     d = vdevice(h);
     if(d->family == ObjDeviceEthernet){
         if(op == ObjDeviceEtherStatus){
@@ -2785,23 +2868,16 @@ vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id)
 	return h;
 }
 
-/*
- * Native process-self heap-break provider.  The Handle represents only the
- * calling process's own BSEG; it carries Vcontrol and no delegation right.
- * The actual break change uses the existing ibrk(addr, BSEG) validation, not
- * a second segment implementation.
- */
+/* ProcessSelf is the caller's typed child-wait capability (Vcontrol). */
 int
 vobjprocessselfopen(uvlong rights, VobjId *id)
 {
 	Vobj *o;
 	int h, defrights, allowed;
 
-	/* The default Handle remains the T3 heap-break capability (Vcontrol).
-	 * Vmeta is the least privilege needed to read the caller's own time;
-	 * neither right names another process or any other memory. */
+	/* The sole ProcessSelf operation is typed child wait (Vcontrol). */
 	defrights = Vcontrol;
-	allowed = Vcontrol|Vmeta;
+	allowed = Vcontrol;
 	if(rights == 0)
 		rights = defrights;
 	if((rights & ~(uvlong)allowed) != 0)
@@ -2823,27 +2899,6 @@ vobjprocessselfopen(uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return h;
-}
-
-/*
- * Read the caller's time through the same kernel todget(nil,nil) source as
- * _NSEC(53).  The Handle is the caller's own VkindProcessSelf with Vmeta;
- * the value is a full 64-bit nanosecond count with the existing epoch and
- * precision.  No object, Handle or other process is affected.
- */
-int
-vobjtimenow(int handle, uvlong *ns)
-{
-	Vobj *o;
-
-	o = vobjholdobj(handle, Vmeta);
-	if(o->kind != VkindProcessSelf){
-		vobjput(o);
-		error(Ebadarg);
-	}
-	*ns = todget(nil, nil);
-	vobjput(o);
-	return 0;
 }
 
 /*
@@ -3115,50 +3170,13 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		|| (provider == VopenTcpConnect && (rights & (Vread|Vwrite)) == 0))
 			error(Eperm);
 		o = vtcp_open(provider == VopenTcpListen, tr.addr, (int)tr.port);
-	}else if(provider == VopenGe){
-		if(req == nil || len != sizeof gr)
-			error(Ebadarg);
-		validaddr((uintptr)req, sizeof gr, 0);
-		memmove(&gr, req, sizeof gr);
-		if(gr.rights != 0) error(Ebadarg);
-		oh = osopenh(gr.ospace);
-		if(oh == nil)
-			error(Ebadarg);
-		{
-			Ohand *cap;
-			if(waserror()){
-				oshandput(oh);
-				nexterror();
-			}
-			cap = oscopycap(oh, gr.oid);
-			poperror();
-			oshandput(oh);
-			oh = cap;
-		}
-		defrights = vgerights(oh) & ~(Vcreate);
-		if(rights == 0)
-			rights = defrights;
-		if((rights & ~(uvlong)defrights) != 0){
-			oshandput(oh);
-			error(Eperm);
-		}
-		o = vobjnewkind(VkindGe, 0);
-		if(o == nil){
-			oshandput(oh);
-			error(Enomem);
-		}
-		vgecaplimit(oh,(int)rights);
-		o->provider = VopenGe;
-		o->oid = gr.oid;
-		o->space = ossid(oh);
-		vobjsetpriv(o, oh);
 	}else if(provider == VopenSpace){
 		Ohand *cap;
 		if(req == nil || len <= 0 || len >= 256)
 			error(Ebadarg);
 		cap = osopenspace((char*)req, (int)len);
 		oh = cap;
- oh->bootstrap = 0; oh->caps = 2; /* explicit Space capability */
+ /* Bootstrap authority remains bound to the original volume owner. */
 		defrights = vgerights(oh);
 		if(rights == 0)
 			rights = defrights;
@@ -3279,7 +3297,7 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 	 * an independent subscription instead. */
 	if(s->sub != nil){
 		vhandput(s);
-		error("object: subscription handles cannot be duplicated");
+		error("vobj: subscription handles cannot be duplicated");
 	}
 	if(rights == 0)
 		rights = (uvlong)s->rights;

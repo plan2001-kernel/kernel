@@ -29,8 +29,6 @@ void		closepgrp(Pgrp*);
 void		closergrp(Rgrp*);
 void		oprocexec(Proc*);
 void		oprocexit(Proc*);
-void		usbprocexec(Proc*);
-void		usbprocexit(Proc*);
 void		pipeprocfork(Proc*);
 void		pipespawn(Proc*, int (*)[2], int);
 void		ocontextspawn(Proc*, int, char (*)[32], int);

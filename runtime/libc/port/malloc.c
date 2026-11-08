@@ -2,6 +2,7 @@
 #include <libc.h>
 #include <pool.h>
 #include <tos.h>
+#include "../../abi/obj.h"
 
 static void*	sbrkalloc(ulong);
 static int		sbrkmerge(void*, void*);
@@ -14,7 +15,6 @@ typedef struct Private Private;
 struct Private {
 	Lock		lk;
 	int		pid;
-	int		printfd;	/* gets debugging output if set */
 };
 
 Private sbrkmempriv;
@@ -94,43 +94,23 @@ punlock(Pool *p)
 	unlock(&pv->lk);
 }
 
-static int
-checkenv(void)
-{
-	int n, fd;
-	char buf[20];
-	fd = open("/env/MALLOCFD", OREAD|OCEXEC);
-	if(fd < 0)
-		return -1;
-	n = read(fd, buf, sizeof buf);
-	close(fd);
-	if(n < 0)
-		return -1;
-	if(n >= sizeof buf)
-		n = sizeof(buf)-1;
-	buf[n] = 0;
-	n = atoi(buf);
-	if(n == 0)
-		n = -1;
-	return n;
-}
-
 static void
 pprint(Pool *p, char *fmt, ...)
 {
-	va_list v;
-	Private *pv;
+    char buf[256];
+    ObjOpenConsoleReq req = {2, 0};
+    va_list v;
+    int h, n;
 
-	pv = p->private;
-	if(pv->printfd == 0)
-		pv->printfd = checkenv();
-
-	if(pv->printfd <= 0)
-		pv->printfd = 2;
-
-	va_start(v, fmt);
-	vfprint(pv->printfd, fmt, v);
-	va_end(v);
+    USED(p);
+    va_start(v, fmt);
+    n = vsnprint(buf, sizeof buf, fmt, v);
+    va_end(v);
+    h = obj_open(ObjOpenConsole, &req, sizeof req, 0, nil);
+    if(h >= 0){
+        if(n > 0) obj_write(h, buf, n, 0);
+        obj_close(h);
+    }
 }
 
 static char panicbuf[256];
@@ -145,22 +125,10 @@ ppanic(Pool *p, char *fmt, ...)
 	pv = p->private;
 	assert(canlock(&pv->lk)==0);
 
-	if(pv->printfd == 0)
-		pv->printfd = checkenv();
-	if(pv->printfd <= 0)
-		pv->printfd = 2;
-
 	msg = panicbuf;
 	va_start(v, fmt);
 	n = vseprint(msg, msg+sizeof panicbuf, fmt, v) - msg;
-	write(2, "panic: ", 7);
-	write(2, msg, n);
-	write(2, "\n", 1);
-	if(pv->printfd != 2){
-		write(pv->printfd, "panic: ", 7);
-		write(pv->printfd, msg, n);
-		write(pv->printfd, "\n", 1);
-	}
+	pprint(p, "panic: %.*s\n", n, msg);
 	va_end(v);
 //	unlock(&pv->lk);
 	abort();

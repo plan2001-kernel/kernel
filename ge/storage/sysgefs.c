@@ -1,7 +1,7 @@
 /*
  * NATIVE GE/O KERNEL INTERFACE: the kernel-side native O syscalls
- * (sysovolopen/sysospace/sysoexecute) implemented below, the per-process
- * O handles and the exported GE shutdown hook.  There is no Dev, no
+ * (sysovolopen/sysoexecute) implemented below, the internal Ohand
+ * authority and the exported GE shutdown hook.  There is no Dev, no
  * filesystem root and no plan9.ini root= or getest/otest/oobj mount
  * path: nothing here presents objects as files.
  */
@@ -13,6 +13,7 @@
 #include "../../kernel/core/error.h"
 #include "../../kernel/core/sd.h"
 #include "ocontext.h"
+#include "../../kernel/core/vobjint.h"
 #include "../../runtime/abi/namespace.h"
 #define GR_KERNEL 1
 #include "../../runtime/ge_relations/relations.h"
@@ -226,21 +227,10 @@ oblockopenpart(char *guid, char *dev, int ndev, vlong *off, vlong *size)
  * /dev entry carries an object.  OVOLOPEN opens the one native O volume
  * by PARTUUID and starts
  * its GE instance; a legacy device specifier is rejected rather than
- * falling back to a pathname/Chan open.  OSPACEOPEN
- * gives a Space handle from the flat catalog, and the rest are the
- * native object calls of docs/O-FORMAT.md.  The handles are
- * kernel-side: a process never sees an Ospace pointer.
+ * falling back to a pathname/Chan open. OBJOPEN gives a Space handle
+ * from the flat catalog. Internal Ohand references authorize storage and
+ * namespace operations; a process never sees an Ospace pointer.
  */
-enum {
-	Ospmax	= 8,
-};
-
-typedef struct Ohtab Ohtab;
-struct Ohtab {
-	Lock lk;
-	Ohand *h[Ospmax];
-	ulong gen[Ospmax];
-};
 static Proc *bootowner;
 static ulong bootpid;
 static ulong onextgen;
@@ -377,54 +367,10 @@ ohandput(Ohand *oh)
 	free(oh);
 }
 
-static Ohtab*
-ogettab(void)
-{
-	Ohtab *ht;
-
-	if((ht = up->ohandles) != nil)
-		return ht;
-	ht = smalloc(sizeof *ht);
-	up->ohandles = ht;
-	return ht;
-}
-
-static int
-oinstall(Ohand *oh)
-{
-	Ohtab *ht = ogettab();
-	int i;
-	ulong g = ogeneration();
-	lock(&ht->lk);
-	for(i=0; i<Ospmax; i++)
-		if(ht->h[i] == nil){
-			ht->h[i] = oh;
-			ht->gen[i] = g;
-			unlock(&ht->lk);
-			return (g<<8) | (i+1);
-		}
-	unlock(&ht->lk);
-	error("too many O handles");
-	return -1;
-}
-
 static Ohand*
-ogetspace(int h)
+ogetspace(int h, int kind, int rights)
 {
-	Ohtab *ht = up->ohandles;
-	Ohand *oh;
-	int i = (h & 255)-1;
-	if(ht == nil || h<=0 || i<0 || i>=Ospmax)
-		error(Ebadarg);
-	lock(&ht->lk);
-	oh = ht->h[i];
-	if(oh == nil || ht->gen[i] != (ulong)h>>8){
-		unlock(&ht->lk);
-		error(Ebadarg);
-	}
-	incref(&oh->ref);
-	unlock(&ht->lk);
-	return oh;
+ return vobjholdohand(h, kind, rights);
 }
 
 /* Derived capabilities serialize admission and revocation on their origin.
@@ -460,43 +406,21 @@ oauthorize(Ohand *oh, uvlong oid, int rights)
 		error(Eperm);
 }
 
-static void
-odropall(Proc *p)
-{
-	Ohtab *ht;
-	Ohand *h[Ospmax];
-	int i;
-
-	if((ht = p->ohandles) == nil)
-		return;
-	p->ohandles = nil;
-	lock(&ht->lk);
-	for(i = 0; i < Ospmax; i++){
-		h[i] = ht->h[i];
-		ht->h[i] = nil;
-	}
-	unlock(&ht->lk);
-	for(i = 0; i < Ospmax; i++)
-		ohandput(h[i]);
-	free(ht);
-}
-
 void
 oprocexit(Proc *p)
 {
-	if(p == bootowner){ bootowner = nil; bootpid = 0; }
-	odropall(p);
+ if(p == bootowner){ bootowner = nil; bootpid = 0; }
 }
 
 void
 oprocexec(Proc *p)
 {
-	odropall(p);
+ USED(p);
 }
 
 /*
- * Authorized Space capability acquisition shared by OSPACEOPEN and the
- * canonical OBJOPEN(ObjOpenSpace) path.  The caller owns the returned
+ * Authorized Space capability acquisition for the canonical
+ * OBJOPEN(ObjOpenSpace) path.  The caller owns the returned
  * reference.  The name is a bounded Space name, not a pathname; bootstrap
  * authority (the mounted O volume owner) is still required.
  */
@@ -523,174 +447,6 @@ osopenspace(char *p, int n)
 	oh->bootstrap = 1;
 	poperror();
 	return oh;
-}
-
-uintptr
-sysospaceopen(sysva_list list)
-{
-	char *p;
-	Ohand *oh;
-	int h, n, result;
-	h = sysva_arg(list, int);
-	p = sysva_arg(list, char*);
-	n = sysva_arg(list, int);
-	if(h != 1) error(Ebadarg);
-	oh = osopenspace(p, n);
-	if(waserror()){ ohandput(oh); nexterror(); }
-	result = oinstall(oh);
-	poperror();
-	return result;
-}
-
-uintptr
-sysospaceget(sysva_list list)
-{
-	Ohand *oh;
-	char *buf;
-	uvlong oid, v, *ver;
-	long n, r;
-	int h;
-
-	h = sysva_arg(list, int);
-	oid = sysva_arg(list, uvlong);
-	buf = sysva_arg(list, char*);
-	n = sysva_arg(list, long);
-	ver = sysva_arg(list, uvlong*);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oid, Oread);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 1);	/* written */
-	if(ver != nil)
-		validaddr((uintptr)ver, sizeof *ver, 1);
-	v = 0;
-	r = onativeget(oh->sp, oid, buf, n, &v);
-	if(ver != nil)
-		memmove(ver, &v, sizeof v);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return r;
-}
-
-uintptr
-sysospaceput(sysva_list list)
-{
-	Ohand *oh;
-	char *buf;
-	uvlong oid;
-	long n;
-	int h;
-
-	h = sysva_arg(list, int);
-	oid = sysva_arg(list, uvlong);
-	buf = sysva_arg(list, char*);
-	n = sysva_arg(list, long);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oid, Owrite);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 0);	/* read */
-	onativeput(oh->sp, oid, buf, n);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
-}
-
-uintptr
-sysospacecreate(sysva_list list)
-{
-	Ohand *oh;
-	char *buf;
-	uvlong oid, *p;
-	long n;
-	int h;
-
-	h = sysva_arg(list, int);
-	buf = sysva_arg(list, char*);
-	n = sysva_arg(list, long);
-	p = sysva_arg(list, uvlong*);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oh->oid, Ocreate);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 0);	/* read */
-	if(p == nil)
-		error(Ebadarg);
-	validaddr((uintptr)p, sizeof *p, 1);	/* written */
-	oid = 0;
-	onativecreate(oh->sp, buf, n, &oid);
-	memmove(p, &oid, sizeof oid);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
-}
-
-uintptr
-sysospacecommit(sysva_list list)
-{
-	Ohand *oh;
-	uvlong v, *ver;
-	int h;
-
-	h = sysva_arg(list, int);
-	ver = sysva_arg(list, uvlong*);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oh->oid, Ocommit);
-	if(ver != nil)
-		validaddr((uintptr)ver, sizeof *ver, 1);
-	v = onativecommit(oh->sp);
-	if(ver != nil)
-		memmove(ver, &v, sizeof v);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
-}
-
-uintptr
-sysospaceclose(sysva_list list)
-{
-	Ohtab *ht = up->ohandles;
-	Ohand *oh;
-	int h = sysva_arg(list, int), i = (h&255)-1;
-	if(ht == nil || h<=0 || i<0 || i>=Ospmax) error(Ebadarg);
-	lock(&ht->lk);
-	oh = ht->h[i];
-	if(oh == nil || ht->gen[i] != (ulong)h>>8){ unlock(&ht->lk); error(Ebadarg); }
-	ht->h[i] = nil;
-	unlock(&ht->lk);
-	ohandput(oh);
-	return 0;
 }
 
 enum {
@@ -730,8 +486,8 @@ osgetobjecthand(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 	return n;
 }
 
-/* Native-handle form used by the retired direct OSPAWN layout and by
- * bootstrapping callers.  It resolves the process-local Ohand, then shares
+/* Space Handle form used by OEXECUTE. It resolves the unified process-local
+ * Vhand to an internal Ohand, then shares
  * the one read/authorization core above. */
 long
 osgetobject(int h, uvlong oid, uchar **bp, long max, uvlong *ver)
@@ -739,7 +495,7 @@ osgetobject(int h, uvlong oid, uchar **bp, long max, uvlong *ver)
 	Ohand *oh;
 	long n;
 
-	oh = ogetspace(h);
+	oh = ogetspace(h, VkindSpace, Vexecute);
 	if(waserror()){
 		ohandput(oh);
 		nexterror();
@@ -748,12 +504,6 @@ osgetobject(int h, uvlong oid, uchar **bp, long max, uvlong *ver)
 	poperror();
 	ohandput(oh);
 	return n;
-}
-
-Ohand*
-osopenh(int h)
-{
-	return ogetspace(h);
 }
 
 void
@@ -983,7 +733,7 @@ onscanextend(void)
  if(denied) error(Eperm);
 }
 static uintptr
-obinding(sysva_list list, int extended)
+obinding(sysva_list list)
 {
 	Ohand *source, *grant;
 	char name[Onamemax], *p;
@@ -994,12 +744,12 @@ obinding(sysva_list list, int extended)
 	p = sysva_arg(list, char*);
 	n = sysva_arg(list, int);
 	rights = sysva_arg(list, int);
- if(extended){mode=(unsigned)rights>>8;rights &= 255;}
+ mode=(unsigned)rights>>8;rights &= 255;
  if(mode>2) error(Ebadarg);
  onscanextend();
 	orolename(name, p, n);
 	if(up->pgrp == nil || rights<=0 || (rights & ~(Oall & ~Ocreate))) error(Ebadarg);
-	source = ogetspace(h);
+	source = ogetspace(h, VkindSpace, vobjrightsfromo(rights | Odelegate));
 	qlock(ohgate(source));
 	if(waserror()){
 		qunlock(ohgate(source));
@@ -1033,11 +783,8 @@ obinding(sysva_list list, int extended)
 }
 
 uintptr
-sysobind(sysva_list list)
-{return obinding(list,0);}
-uintptr
 sysobindx(sysva_list list)
-{return obinding(list,1);}
+{return obinding(list);}
 
 /* A view handle is process-local and cannot be used as a storage handle.
  * Export freezes only authorized roles; attachments retain actual grants. */
@@ -1068,7 +815,7 @@ sysonsview(sysva_list list)
   poperror();qunlock(ohgate(h));ohandput(h);
  }
  if(epoch!=octxepoch(up->pgrp->ocontext)) error("O: namespace changed; retry");
- result=oinstall(view);poperror();return result;
+ result=vobjinstallohand(view, VkindNamespaceView);poperror();return result;
 }
 uintptr
 sysonmount(sysva_list list)
@@ -1076,7 +823,7 @@ sysonmount(sysva_list list)
  Ohand *view,*grants[Obindmax]; int handle,mode,n=0,i; uvlong attachment;
  handle=sysva_arg(list,int);mode=sysva_arg(list,int);
  onscanextend();if(mode<0 || mode>2) error(Ebadarg);
- view=ogetspace(handle);
+ view=ogetspace(handle, VkindNamespaceView, Vcontrol);
  if(waserror()){for(i=0;i<n;i++) ohandput(grants[i]);ohandput(view);nexterror();}
  if(view->provider==nil) error(Ebadarg);
  n=octxsnapshot(view->provider,grants,1);
@@ -1125,7 +872,7 @@ sysolookup(sysva_list list)
 	values[1] = oh->oid;
 	values[2] = oh->rights;
 	memmove(info, values, sizeof values);
-	h = oinstall(oh);
+	h = vobjinstallohand(oh, VkindGe);
 	poperror();
 	qunlock(ohgate(oh));
 	return h;                   /* installed slot owns lookup reference */
@@ -1149,7 +896,7 @@ sysorevoke(sysva_list list)
 {
 	Ohand *oh;
 	int h = sysva_arg(list, int);
-	oh = ogetspace(h);
+	oh = ogetspace(h, VkindGe, Vdelegate);
 	qlock(ohgate(oh));
 	if(waserror()){
 		qunlock(ohgate(oh));
@@ -1325,7 +1072,7 @@ nrbootstrap(int op,NsAuthority *user,char *text,int len,NsOutput *output)
  if(!oboot()) error(Eperm);
  if(op<NS_FIND || op>NS_CREATE || len<0 || len>(op==NS_CREATE?GR_MAX_DATA:4096)) error(Ebadarg);
  validaddr((uintptr)user,sizeof authority,0);memmove(&authority,user,sizeof authority);
- h=ogetspace(authority.handle);
+ h=ogetspace(authority.handle, VkindSpace, vobjrightsfromo(Oread | (op==NS_CREATE ? Ocreate|Ocommit : (op==NS_ADD || op==NS_REMOVE ? Owrite|Ocommit : 0))));
  if(waserror()){
   if(gate) qunlock(ohgate(h));
   if(sp) onativeclose(sp);

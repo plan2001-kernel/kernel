@@ -707,15 +707,12 @@ newproc(void)
 
 	if(!fresh){
 		oprocexit(p);
-		usbprocexit(p);
 		vobjprocexit(p);
 		net6procexit(p);
 		pipeprocexit(p);
 		kbdprocexit(p);
 		uartprocexit(p);
 	}
-	p->ohandles = nil;
-	p->usbhandles = nil;
 	p->vobjhandles = nil;
 	p->net6permit = 0;
 	p->stdoutpipe = 0;
@@ -1380,7 +1377,6 @@ pexit(char *exitstr, int freemem)
 	qunlock(&up->debug);
 
 	oprocexit(up);
-	usbprocexit(up);
 	vobjprocexit(up);
 	net6procexit(up);
 	pipeprocexit(up);

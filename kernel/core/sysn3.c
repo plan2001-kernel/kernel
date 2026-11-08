@@ -5,7 +5,6 @@
 #include	"fns.h"
 #include	"io.h"
 #include	"../core/error.h"
-#include	"../amd64/rtcapi.h"
 #include	"env/envapi.h"
 
 enum
@@ -32,34 +31,6 @@ envnamecopy(char *u, int n)
 		error(Ebadarg);
 	}
 	return k;
-}
-
-uintptr
-sysrtcget(sysva_list list)
-{
-	Rtcdate *u, d;
-
-	u = sysva_arg(list, Rtcdate*);
-	if(u == nil || !okaddr((uintptr)u, sizeof d, 1))
-		error(Ebadarg);
-	if(rtcnativeget(&d) < 0)
-		error(up->errstr[0] != 0 ? up->errstr : Eio);
-	memmove(u, &d, sizeof d);
-	return 0;
-}
-
-uintptr
-sysrtcset(sysva_list list)
-{
-	Rtcdate *u, d;
-
-	u = sysva_arg(list, Rtcdate*);
-	if(u == nil || !okaddr((uintptr)u, sizeof d, 0))
-		error(Ebadarg);
-	memmove(&d, u, sizeof d);
-	if(rtcnativeset(&d) < 0)
-		error(up->errstr[0] != 0 ? up->errstr : Eperm);
-	return 0;
 }
 
 uintptr

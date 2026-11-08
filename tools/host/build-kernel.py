@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from syscall_abi import syscall_entries
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 BUILD = ROOT / "build" / "gcc"
 OBJDIR = BUILD / "obj"
@@ -195,7 +197,6 @@ KERNEL_SOURCES = {
     "syspipe": "kernel/core/syspipe.c",
     "sysproc": "kernel/core/sysproc.c",
     "sysuart": "kernel/core/sysuart.c",
-    "sysusb": "kernel/core/sysusb.c",
     "sysvobj": "kernel/core/sysvobj.c",
     "sysdevether": "kernel/core/sysdevether.c",
     "taslock": "kernel/core/taslock.c",
@@ -334,72 +335,12 @@ def make_systab_gcc() -> None:
     actually compiles.  Generated kernel units contain configuration and
     startup data, not syscall handlers, so no generated source is scanned.
     Missing handlers are a build error unless the exact historical name is
-    in the explicit N11.3 set; those resolve to the one explicit reject.
+    marked reserved in sys.h; reserved entries have no handler.
     """
-    sysh = (ROOT / "runtime/abi/sys.h").read_text()
+    entries = syscall_entries()
+    names = [name for name, _, _ in entries]
+    reserved_names = {name for name, _, reserved in entries if reserved}
 
-    names: list[str] = []
-    numbers: dict[int, str] = {}
-    for line in sysh.splitlines():
-        m = re.match(r"#define\s+([A-Z0-9_][A-Z0-9_]*)\s+([0-9]+)\b", line)
-        if not m:
-            continue
-        name, number = m.group(1), int(m.group(2))
-        if name in names:
-            raise SystemExit(f"systab: duplicate syscall name {name}")
-        if number in numbers:
-            raise SystemExit(
-                f"systab: duplicate ABI number {number}: {numbers[number]} and {name}")
-        names.append(name)
-        numbers[number] = name
-
-    # Deliberately explicit: every historical number whose implementation was
-    # retired.  These stay allocated in sys.h forever but emit a nil dispatch
-    # entry, so a raw call cannot reach a removed legacy implementation.  A
-    # new unexpected missing handler still fails the build.
-    reserved = {
-        # Phase 1: retired TCP6* and VOBJ* compatibility families.
-        "systcp6listen", "systcp6connect", "systcp6accept", "systcp6read",
-        "systcp6write", "systcp6close",
-        "sysvobjcreate", "sysvobjread", "sysvobjinfo", "sysvobjclose",
-        "sysvobjfifocreate", "sysvobjfifosub", "sysvobjfifosend",
-        "sysvobjfiforecv", "sysvobjfifostat", "sysvobjgrant",
-        "sysvobjrevoke", "sysvobjio", "sysvobjlist", "sysvobjopen",
-        "sysvobjaccept",
-        # Phase 2: retired pathname/FS calls.
-        "sysbind", "syschdir", "sysexec", "sys_mount", "sysopen",
-        "sys_stat", "syscreate", "sysfd2path", "sysremove", "sys_wstat",
-        "sys_fwstat", "sysunmount", "sysstat", "syswstat", "sysfwstat",
-        "sysmount",
-        # Phase 2: retired always-failing legacy FD calls.
-        "sysclose", "sysdup", "sys_fstat", "sys_read", "sysoseek",
-        "sys_write", "syspipe", "sysseek", "sysfstat", "syspread",
-        "syspwrite",
-        # Phase 3: retired native Pipe, UART and KBD compatibility family
-        # plus the one-shot PIPEINHERIT call.  The numbers stay allocated
-        # forever; the five-call OBJ* ABI is the only entry point.
-        "syspipenew", "syspiperead", "syspipewrite", "syspipeclose",
-        "syskbdopen", "syskbdread", "syskbdclose", "syskbdleds",
-        "sysuartcount", "sysuartopen", "sysuartread", "sysuartwrite",
-        "sysuartioctl", "sysuartstatus", "sysuartclose",
-        "syspipeinherit",
-        # Phase 4: retired NET6* UDP6 compatibility family.  The address
-        # lookup is OBJINVOKE(ObjOpNet6Addr), the endpoint is
-        # OBJOPEN(ObjOpenUdp6), and data uses SendTo/RecvFrom/CLOSE.
-        "sysnet6addr", "sysnet6open", "sysnet6sendto",
-        "sysnet6recvfrom", "sysnet6close",
-        # Console: IOWRITE(62) is retired.  Native output is an OBJ
-        # console Handle (ObjOpenConsole) written with OBJINVOKE(Write).
-        "sysiowrite",
-        # Phase 6: process lifecycle.  _WAIT(36), AWAIT(47) and OSPAWN(92)
-        # now dispatch to nothing; the typed ObjOpWait/Ospawn operations call
-        # the same shared kern* cores.  RFORK(19), OTERMINATE(93) and
-        # EXITS(8) are direct historical calls again: their shared
-        # kernrfork/kernoterminate/pexit cores and the obootoid loader's
-        # EXITS error path all stay active.  NOTIFY(28) and NOTED(29) are
-        # direct again too; only their former ObjOp variants were retired.
-        "sys_wait", "sysawait", "sysospawn",
-    }
     # Non-handler helpers that also take sysva_list in the handler modules.
     non_handlers = {"syscallfmt", "sysretfmt"}
 
@@ -412,6 +353,7 @@ def make_systab_gcc() -> None:
             fn = "sysdeath"
         expected[name] = fn
     expected_fns = set(expected.values())
+    reserved = {expected[name] for name in reserved_names}
 
     defpat = re.compile(
         r"(?m)^([A-Za-z_][A-Za-z0-9_ *]*?)[ \t]*(?:\n[ \t]*|[ \t]+)"
@@ -593,20 +535,15 @@ USER_SYSCALLS = [
     ("sleep", 1, "SLEEP"),
     ("exits", 1, "EXITS"),
     ("ovolopen", 2, "OVOLOPEN"),
-    ("ospaceopen", 3, "OSPACEOPEN"),
-    ("ospaceget", 5, "OSPACEGET"),
+    ("objopen", 5, "OBJOPEN"),
+    ("objclose", 1, "OBJCLOSE"),
     ("oexecute", 4, "OEXECUTE"),
 ]
 
 
 def syscall_numbers() -> dict[str, int]:
-    text = (ROOT / "runtime/abi/sys.h").read_text()
-    out = {}
-    for line in text.splitlines():
-        m = re.match(r"#define\s+([A-Z0-9_]+)\s+([0-9]+)", line)
-        if m:
-            out[m.group(1)] = int(m.group(2))
-    return out
+    return {name: number for name, number, reserved in syscall_entries()
+            if not reserved}
 
 
 def make_user_stubs() -> Path:
@@ -644,9 +581,8 @@ def make_user_image(name: str, src: Path, stubs: Path) -> None:
         "ENTRY(_main)\n"
         "SECTIONS { . = 0x200028; .text : { *(.text*) *(.rodata*) }\n"
         " /DISCARD/ : { *(.note*) *(.comment) *(.eh_frame*) } }\n")
-    if not stubobj.is_file():
-        subprocess.run([CC_DEFAULT, "-c", "-o", str(stubobj), "-m64", "-fno-pie", str(stubs)],
-                       check=True, cwd=ROOT)
+    subprocess.run([CC_DEFAULT, "-c", "-o", str(stubobj), "-m64", "-fno-pie", str(stubs)],
+                   check=True, cwd=ROOT)
     flags = ["-DPLAN2001_GCC", "-include", str(ROOT / "kernel/compat/plan2001-gcc.h"),
              "-std=gnu11", "-m64", "-ffreestanding",
              "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-fno-pic",
@@ -1113,7 +1049,7 @@ CHK(bootinfo_magic, offsetof(BootInfo, magic) == 0);
 CHK(bootinfo_acpi, offsetof(BootInfo, acpi) == 48);
 CHK(bootinfo_epoch, offsetof(BootInfo, epoch) == 64);
 
-Lock abi_Lock; Rendez abi_Rendez; Rendezq abi_Rendezq; Sema abi_Sema;
+Lock abi_Lock; Rendez abi_Rendez; Rendezq abi_Rendezq;
 Proc *abi_Proc; Mach *abi_Mach; Conf abi_Conf; Sargs abi_Sargs;
 Ureg abi_Ureg; Label abi_Label; Segdesc abi_Segdesc;
 Exec abi_Exec; Tos abi_Tos; BootInfo abi_BootInfo;

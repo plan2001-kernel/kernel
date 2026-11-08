@@ -9,7 +9,7 @@
  * sysvobj.c/systcp6.c.  It is not an object class hierarchy and contains no
  * network stack.
  *
- * The legacy VOBJ* family remains a compatibility shim over the same core.
+ * Historical VOBJ* syscall numbers are reserved and have no handlers.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -95,8 +95,6 @@ sysobjopen(sysva_list list)
 	case ObjOpenTcpListen:
 	case ObjOpenTcpConnect:
         error("obj: kernel network protocols disabled; use raw device");
-	case ObjOpenGe:
-		return vobjopenstream(provider, req, len, rights, (VobjId*)id);
 	case ObjOpenHandle:
 		if(req == nil || len != sizeof hr)
 			error(Ebadarg);
@@ -141,13 +139,13 @@ sysobjopen(sysva_list list)
 		return vobjuartopenrights(ur.port, ur.mode, rights, (VobjId*)id);
 	}
 	case ObjOpenKbd:
-		if(req != nil && len != 0)
+		if(req != nil || len != 0)
 			error(Ebadarg);
 		if(rights != 0)
 			error(Eperm);
 		return vobjkbdopen((VobjId*)id);
 	case ObjOpenUsb:
-		if(req != nil && len != 0)
+		if(req != nil || len != 0)
 			error(Ebadarg);
 		return vobjusbopen(rights, (VobjId*)id);
 	case ObjOpenConsole:
@@ -161,7 +159,7 @@ sysobjopen(sysva_list list)
     case ObjOpenDevice:
         return vobjdeviceopen(req, len, rights, (VobjId*)id);
     case ObjOpenProcessSelf:
-		if(req != nil && len != 0)
+		if(req != nil || len != 0)
 			error(Ebadarg);
 		return vobjprocessselfopen(rights, (VobjId*)id);
 	default:
@@ -244,7 +242,7 @@ sysobjinvoke(sysva_list list)
         if(c.in != nil || c.inlen != 0 || c.arg1 != 0)
             error(Ebadarg);
         c.result = vobjdevicectl(handle, c.arg0, c.out,
-            bounded(c.outlen, sizeof(ObjEtherStatus), Ebadarg));
+            bounded(c.outlen, OBJ_DEVICE_MAXPAYLOAD, Ebadarg));
         break;
     case ObjOpInfo:
 		if(c.out == nil || c.outlen != sizeof(VobjInfo))
@@ -304,9 +302,6 @@ sysobjinvoke(sysva_list list)
 		c.result = vobjaccept(handle,
 			(int)bounded(c.arg0, 0x7fffffff, Ebadarg));
 		break;
-	case ObjOpGrant:
-		c.result = vobjgrant(handle, c.arg0);
-		break;
 	case ObjOpRevoke:
 		vobjrevoke(handle);
 		c.result = 0;
@@ -315,21 +310,6 @@ sysobjinvoke(sysva_list list)
 		c.result = vobjlist(c.out,
 			bounded(c.outlen, Vhandmax, Ebadarg));
 		break;
-	case ObjOpCreatePersist:
-	{
-		uvlong oid;
-  int created;
-
-		if(c.out == nil || c.outlen != sizeof oid)
-			error(Ebadarg);
-		validaddr((uintptr)c.out, sizeof oid, 1);
-		created = vobjcreatege(handle, c.in,
-			bounded(c.inlen, Vobjpaymax, Ebadarg), &oid, nil);
-  vobjclosehandle(created); /* INVOKE returns an OID, not a live Handle */
-		memmove(c.out, &oid, sizeof oid);
-		c.result = 0;
-		break;
-	}
 	case ObjOpSendTo:
 		if(c.in == nil || c.inlen < sizeof(ObjUdp6SendReq))
 			error(Ebadarg);
@@ -412,25 +392,6 @@ sysobjinvoke(sysva_list list)
 		   c.out != nil || c.outlen != 0)
 			error(Ebadarg);
 		c.result = vobjusbepopen(handle, c.in);
-		break;
-	case ObjOpTimeNow:
-		if(c.in != nil || c.inlen != 0 || c.out == nil
-		|| c.outlen != sizeof(uvlong))
-			error(Ebadarg);
-		validaddr((uintptr)c.out, sizeof(uvlong), 1);
-		c.result = vobjtimenow(handle, (uvlong*)c.out);
-		break;
-	case ObjOpErrstrExchange:
-		/* No Handle is opened or consumed: the operation touches only the
-		 * calling process's own error buffers, so a exhausted Handle table
-		 * cannot be the reason its error text cannot be read.  The buffer is
-		 * the single IN/OUT area and generrstr() performs the exact ERRSTR(41)
-		 * swap after validating the user address. */
-		if(handle != 0 || c.in != nil || c.inlen != 0
-		|| c.out == nil || c.outlen == 0 || c.outlen > OBJ_ERRSTR_MAX
-		|| c.arg0 != 0 || c.arg1 != 0)
-			error(Ebadarg);
-		c.result = generrstr((char*)c.out, (uint)c.outlen);
 		break;
 	case ObjOpPutOid:
 		/* Replace one explicitly named OID through the Space's Owrite
