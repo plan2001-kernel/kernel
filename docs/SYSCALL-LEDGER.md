@@ -1,4 +1,4 @@
-# Plan2001-O syscall ledger (T9)
+# Plan 2001-kernel syscall ledger (T9)
 
 > Historical measurement: the current branch reduces the dispatch table to
 > 33 active / 102 reserved. See [SYSCALL-CONSOLIDATION](SYSCALL-CONSOLIDATION.md).

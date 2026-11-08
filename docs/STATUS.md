@@ -1,4 +1,4 @@
-# Plan2001-O — current status
+# Plan 2001-kernel — current status
 
 ## Development workflow (current)
 
@@ -49,7 +49,8 @@ UEFI loader compiles and links as a PE32+ EFI application, but the wrapper's
 host `file(1)` assertion fails on Termux's libmagic wording, so that command is
 not claimed PASS. ARM64 has no scheduler, virtual memory, GE/O, syscalls,
 userspace, networking, USB, storage or SMP support, and physical ARM64
-hardware was **NOT RUN**. amd64 remains the only supported target.
+hardware was **NOT RUN**. AMD64 remains the currently complete kernel target;
+ARM64 is an active experimental early-boot target, not yet a full-system port.
 
 ## T16: common USB/Ethernet Device ABI (2026-11-08, emulated gate PASS)
 
@@ -1055,8 +1056,8 @@ here.
 
 ## Current state
 
-Plan2001-O is an experimental operating system for the amd64 architecture.
-amd64 is the only supported and intended target. The source tree is the
+Plan 2001-kernel is an experimental operating system with a working AMD64
+kernel and ongoing ARM64 early-boot development. The source tree is the
 compact N11.7 layout (see
 [REPOSITORY-LAYOUT](REPOSITORY-LAYOUT.md)); the former 9front `sys/src`
 userland, the formatter VM/Ken C bootstrap, the GEFS FS/9P server units in
@@ -1540,7 +1541,7 @@ obootrepl=1
   paths were **NOT RUN** against a real or disposable ESP/partition (no
   configured fixture and no ESP/GRUB write was permitted); the title
   derivation was verified non-destructively against the actual ELF.
-  Plan2001-O-owned MicroPython names moved to MPY: the entry points are now
+  Plan 2001-kernel-owned MicroPython names moved to MPY: the entry points are now
   `tools/build-mpy-gcc.sh` and `tools/host/build-mpy-gcc.py`, with internal
   MPY variables, `build/gcc/mpy` intermediates and MPY diagnostics; the
   public/persistent names `OID_MP_EXEC` (numeric OID unchanged), `MpOid`→private
@@ -1821,7 +1822,7 @@ tools/gcc-ovol-ream.sh --plan --device /dev/nvme0n1p5 \
 sudo -n tools/gcc-ovol-ream.sh --install --device /dev/nvme0n1p5 \
   --partuuid <live-p5-partuuid> --image build/fresh-p5.img
 
-# ESP kernel/loader/plan9.ini and the single Plan2001-O GRUB entry
+# ESP kernel/loader/plan9.ini and the single Plan 2001-kernel GRUB entry
 tools/gcc-o-install.sh --plan --device /dev/nvme0n1p5 \
   --partuuid <live-p5-partuuid>
 sudo -n tools/gcc-o-install.sh --install --device /dev/nvme0n1p5 \

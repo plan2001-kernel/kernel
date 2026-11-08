@@ -1,29 +1,30 @@
-# Plan2001-O
+# Plan 2001-kernel
 
 <p align="center">
-  <img src="assets/plan2001-o-mascot.svg" alt="Plan2001-O mascot: a rabbit playing the banjo" width="280">
+  <img src="assets/plan2001-o-mascot.svg" alt="Plan 2001-kernel mascot: a rabbit playing the banjo" width="280">
 </p>
 
 **Project mascot:** the banjo-playing rabbit.
 
-**Plan2001-O is an experimental operating system for the amd64 architecture.**
+**Plan 2001-kernel is an experimental operating system with a working AMD64 kernel and an early ARM64 boot foundation.**
 
-Plan2001-O is a small, byte-oriented operating-system proof of concept:
+Plan 2001-kernel is a small, byte-oriented operating-system proof of concept:
 persistent Space occurrences (*olios*), contextual objects, observations and,
-eventually, native relations, built on the existing Plan2001/9front code and
-conventional amd64 hardware. amd64 is the only supported and intended target.
+eventually, native relations, built on the existing Plan2001/9front code.
+AMD64 has the working kernel, userspace and device stack; ARM64 is an active
+experimental boot target with early shared boot code, but not yet feature parity.
 
 The [Finnish manifesto](docs/OLIO-OBJEKTI-MANIFESTI.md) keeps the philosophical
 meaning of *olio* and *object* separate from this implementation. The
 [general software specification](docs/GENERAL-SOFTWARE-SPECIFICATION.md)
 describes the practical computer. This PoC deliberately uses ordinary bytes,
-64-bit OIDs and conventional amd64 hardware; the manifesto does not mandate
-exotic storage or hardware.
+64-bit OIDs and conventional hardware; the manifesto does not mandate
+exotic storage or hardware. The current full-system implementation runs on AMD64.
 
 NS2–NS4 object namespaces and kernel-authorized GE relation queries are described
 in [NS integration](docs/NS-INTEGRATION.md), with machine-readable results in
 [NS verification](docs/NS-VERIFICATION.json). The weekend test harnesses are
-retained in the separate companion bundle (`../Plan2001-O-weekend-tests/plan2001`);
+retained in the separate companion bundle (the separate weekend-test bundle);
 they are not build or boot prerequisites of this canonical tree.
 
 Optional [CBOR and O-Envelope v1](docs/CBOR-O-ENVELOPE.md) encode application
@@ -84,7 +85,7 @@ UEFI -> GRUB -> Clang 19/LLD PE32+ EFI loader (bootx64.efi)
   source tree no longer carries their 9front userland sources.
 
 The N10.1 GCC kernel and Clang UEFI loader were booted on the physical Dell
-Precision 7520 from the single `Plan2001-O` GRUB entry and reached an
+Precision 7520 from its installed legacy GRUB entry and reached an
 interactive `>>>` MicroPython REPL. The earlier pre-cleanup binary also
 demonstrated PS/2 keyboard input, `dir()`, `import space`, `space.info()` and
 real GE/O commits. After N11.HW1 installed that configuration, the owner
@@ -175,7 +176,8 @@ not a test framework.
 
 A separate, experimental AArch64 boot tree proves that the existing BootInfo
 v1 handoff and the shared `oplanboot` early-boot module work on a second ISA.
-It is not a port of the amd64 kernel and is not a supported target yet.
+This is an initial ARM64 kernel-port foundation, not yet a full-system port
+with the AMD64 kernel's facilities.
 
 ```sh
 tools/build-arm64.sh -j 8           # build/arm64/9karm64.elf
@@ -242,7 +244,7 @@ tools/gcc-o-install.sh --verify --device /dev/nvme0n1p5 \
   --partuuid <live-p5-partuuid>
 ```
 
-The one visible GRUB entry is **`Plan2001-O`** (id `plan2001-o`); it chainloads
+The one visible GRUB entry retains its installed label (id `plan2001-o`); it chainloads
 `/EFI/plan2001-gcc/BOOTX64.EFI`. The historical `42_plan2001` and
 `43_plan2001_o` scripts are made non-executable, so later `update-grub` runs
 cannot bring their entries back; their files and old ESP directories are left

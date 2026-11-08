@@ -1,4 +1,4 @@
-# Plan2001-O kernel API/ABI: terminology and boundary contract
+# Plan 2001-kernel kernel API/ABI: terminology and boundary contract
 
 > **Network status correction (2026-11-08):** the dated UDP/TCP provider
 > descriptions below are migration history. T13 disabled native IPv6 startup
@@ -9,7 +9,7 @@
 > fixed-SA ESP integration test, not the superseded key-bundle/security product.
 > Neither example adds a kernel syscall/provider.
 
-**Status:** normative vocabulary and migration rules for **new Plan2001-O code**; proposed API/ABI design, **not an implemented or frozen binary ABI**.
+**Status:** normative vocabulary and migration rules for **new Plan 2001-kernel code**; proposed API/ABI design, **not an implemented or frozen binary ABI**.
 **Volatile-object implementation addition:** the RAM-only scope-qualified object
 identity, rights-bearing handles and ObjectFIFO TEE channel are specified in
 [VOLATILE-OBJECT-OBJECTFIFO](VOLATILE-OBJECT-OBJECTFIFO.md). Persistent GE/O
@@ -108,7 +108,7 @@ The **canonical token** below is what new code and design prose must mean. `Sour
 | T11c | `ObjectFIFO` | General message-framed channel carrying authorized references to immutable objects, plus an optional opaque envelope. It is itself a volatile object, not a synonym for `Queue`, `Pipe`, `Stream`, TCP, or a NetFrame queue. | IMPLEMENTED: `kernel/core/sysvobj.c` |
 | T11d | `Subscription` | A receiver-side ObjectFIFO attachment with its own bounded queue, cursor and overflow counter. Independent subscriptions implement TEE/fanout. It is represented to a process by a rights-bearing subscription Handle. | IMPLEMENTED: `kernel/core/sysvobj.c` |
 | T12 | `Space` | GE/O persistence scope containing OID-addressed contents/versions. Not a process address space, device file tree or a `Queue`. | EXISTING O operations, `sysgefs.c`; native graph relations remain a separate development target |
-| T13 | `File` | **Finite byte content** of an identifiable stored occurrence in the Plan2001-O object model; excludes mandatory pathname/owner/stat/directory/Unix inode metadata. Not a `Stream` or `Pipe`, although a stream may transfer its bytes. | Normative architecture: `docs/OBJECT-MODEL.md`; storage profile described separately in `docs/O-FORMAT.md` |
+| T13 | `File` | **Finite byte content** of an identifiable stored occurrence in the Plan 2001-kernel object model; excludes mandatory pathname/owner/stat/directory/Unix inode metadata. Not a `Stream` or `Pipe`, although a stream may transfer its bytes. | Normative architecture: `docs/OBJECT-MODEL.md`; storage profile described separately in `docs/O-FORMAT.md` |
 | T14 | `Proc` | Kernel process record/current execution context. A process's PID is an integer observation, not an object pointer or `Handle` to an arbitrary process. | EXISTING: `portdat.h` |
 | T15 | `Driver` | Code plus state that controls a **concrete device/controller class** (e.g. PS/2 controller, framebuffer). No universal `Dev` callback table required. | PROPOSED architectural use; concrete inherited code EXISTING |
 | T16 | `Service` | Kernel-provided operation not necessarily tied to a physical device, e.g. process information, clock, logging or reboot. Do not categorize all `#c` functions as console hardware. | PROPOSED architectural use; concrete existing functions |
@@ -204,7 +204,7 @@ An eventual public operation MUST define:
 | Lifetime | Creation/acquisition, duplicate/share (if supported), exec inheritance, process exit and close |
 | Execution | Blocking, wakeups, cancellation, concurrency, interrupt safety, ordering and partial transfers |
 | Result/error | Return values, errors, EOF/hangup, invalid handle, denied rights, device absent |
-| Version | Target architecture (amd64), call convention and compatibility/version negotiation where necessary |
+| Version | Target architecture (AMD64 or ARM64, as implemented), call convention and compatibility/version negotiation where necessary |
 
 An ordinary userspace `Handle` is not a `T*`; a kernel must resolve it before calling a trusted internal C function. A Python `import`/method name is a *language binding* above the ABI, not a specification of its implementation or persistent graph type.
 

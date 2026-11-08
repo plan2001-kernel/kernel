@@ -5,7 +5,7 @@
 > `tools/...` and `user/...` paths refer to that bundle layout; they are not
 > build or boot prerequisites of this canonical kernel tree.
 
-Plan2001-O retains Plan 9 process namespace ownership while replacing namespace
+Plan 2001-kernel retains Plan 9 process namespace ownership while replacing namespace
 contents with native GE object capabilities. Pgrp owns OContext; its bounded
 ordered entries retain Ohand grants. GE objects and R1 relations remain
 persistent and independent of these temporary views.

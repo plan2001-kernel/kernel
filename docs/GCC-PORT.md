@@ -1,6 +1,6 @@
 # GCC 14 kernel, Clang 19/LLD loader and GCC 14 MicroPython
 
-Plan2001-O builds its canonical amd64 kernel and MicroPython with GCC 14, and
+Plan 2001-kernel builds its current full-system AMD64 kernel and MicroPython with GCC 14, and
 its UEFI loader with Clang 19/LLD. MicroPython is **not** embedded in the
 kernel: it is an independent freestanding ELF stored as a normal O object and
 loaded through native `OEXECUTE`.

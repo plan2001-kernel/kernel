@@ -1,6 +1,6 @@
 # Repository layout
 
-This tree now describes Plan2001-O's own parts, not a complete 9front
+This tree now describes Plan 2001-kernel's own parts, not a complete 9front
 distribution. The host directory names are a development and export view only:
 they are **not** a GE/O namespace, and source paths are not object identity.
 Persistent identity remains `(SpaceID, OID)` in a GE/O volume.
@@ -233,9 +233,9 @@ were removed; `ledname`/`name2led` remain as generic IBPI policy. Actual AHCI
 enclosure LED hardware control (`ledkproc`, `blink`, `blinkesb`, `ledstate`)
 and NVMe controller initialization/identify/`nvmerctl` remain. `Qid` remains
 only in `kernel/core/lib.h` for the GEFS formatter (`ge/storage/dump.c`);
-no canonical driver uses it as directory identity. Dormant arm64 sources still
-mention the removed `Dev`/`Chan`/`Walkqid` types and are outside the amd64
-build scope.
+no canonical driver uses it as directory identity. Unbuilt legacy arm64 sources still mention the removed
+`Dev`/`Chan`/`Walkqid` types and are outside the AMD64 build scope; these are
+distinct from the actively developed `kernel/arm64/gcc/` boot foundation.
 
 Network drivers are likewise detached from directory Qid. `kernel/net/ip.h`
 no longer has `Proto.qid`; `ipcore.c::Fsproto()` no longer writes `QTDIR`/

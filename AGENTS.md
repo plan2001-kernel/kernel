@@ -1,4 +1,4 @@
-# Plan2001-O — instructions for coding agents
+# Plan 2001-kernel — instructions for coding agents
 
 ## Development workflow
 
@@ -12,8 +12,9 @@ machine, working directory, task queue, or source publication service is
 required. See [DEVELOPMENT-WORKFLOW](docs/DEVELOPMENT-WORKFLOW.md).
 
 Codex Cloud and Android Termux/OpenCode are supported development environments.
-The operating system target is amd64; an ARM64 Termux host is not expected to
-execute amd64 kernel tests natively. Mark unavailable checks **NOT RUN**.
+The currently complete kernel target is AMD64, with experimental ARM64 early
+boot work under way; an ARM64 Termux host is not expected to execute AMD64
+kernel tests natively. Mark unavailable checks **NOT RUN**.
 
 ## Network target decision (2026-11-08, latest T15 assignment)
 
@@ -62,28 +63,29 @@ checks and builds PASS, with zero runtime/ABI changes. No physical test claim.
 
 ## Project scope
 
-**Plan2001-O is an experimental operating system for the amd64 architecture.**
-amd64 is the only supported and intended target. Do not treat dormant
-non-target sources as a supported port, a development objective or a reason to
-retain dead code in the amd64 kernel. Future amd64 cleanup must assess only the
-current amd64 build, its userspace and tools, and its real callers; there is no
-obligation to keep amd64 code compatible with dormant non-target sources.
+**Plan 2001-kernel is an experimental operating system with AMD64 and ARM64
+architecture work.** AMD64 currently has the complete kernel, userspace and
+device stack. ARM64 has an experimentally verified UEFI/QEMU early-boot
+foundation, not a full kernel port. Do not mistake ARM64 boot success for
+working ARM64 syscalls, scheduling, drivers or userspace. Changes to shared
+boot code must consider both architectures; AMD64-specific cleanup must still
+be justified by its actual callers. See [architecture support](docs/ARCHITECTURE-SUPPORT.md).
 
-Consult the [Finnish philosophical manifesto](docs/OLIO-OBJEKTI-MANIFESTI.md) and the [English general software specification](docs/GENERAL-SOFTWARE-SPECIFICATION.md) when their concepts matter. The manifesto is **not an implementation mandate**. The Plan2001-O PoC **deliberately uses ordinary 8-bit bytes, 64-bit OIDs, existing Plan2001/9front code, and conventional amd64 hardware**. Distinguish the philosophical meaning of *olio* (uninterpreted entity) and relational *object* from the concrete byte-oriented storage chosen for this PoC. Do not redesign storage, hardware abstractions or existing working code merely to make them philosophically general.
+Consult the [Finnish philosophical manifesto](docs/OLIO-OBJEKTI-MANIFESTI.md) and the [English general software specification](docs/GENERAL-SOFTWARE-SPECIFICATION.md) when their concepts matter. The manifesto is **not an implementation mandate**. The Plan 2001-kernel PoC **deliberately uses ordinary 8-bit bytes, 64-bit OIDs, existing Plan2001/9front code, and conventional hardware**. Distinguish the philosophical meaning of *olio* (uninterpreted entity) and relational *object* from the concrete byte-oriented storage chosen for this PoC. Do not redesign storage, hardware abstractions or existing working code merely to make them philosophically general.
 
 **Source tree:** the host layout is documented in [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md). The directories (`boot/`, `kernel/`, `ge/`, `micropython/`, `runtime/`, `include/`, `tools/host/`) are a development/export view, not a GE/O namespace. Do not recreate a `sys/src` 9front root.
 
-**Source-of-truth order:** current source; [O-FORMAT](docs/O-FORMAT.md) and [KERNEL-API-ABI](docs/KERNEL-API-ABI.md) for implemented storage/native/API contracts; [STATUS](docs/STATUS.md) for current verification; [README](README.md), [GENERAL-SOFTWARE-SPECIFICATION](docs/GENERAL-SOFTWARE-SPECIFICATION.md), [OBJECT-MODEL](docs/OBJECT-MODEL.md) and [PRODUCTION-BOOT-AND-AUTHORITY](docs/PRODUCTION-BOOT-AND-AUTHORITY.md) for design and limits; [LEGACY-DEPENDENCIES](docs/LEGACY-DEPENDENCIES.md) for the inherited dependency inventory. Inherited Plan 9/9front documentation is reference material, not a Plan2001-O specification. Read the relevant implementation contract when a change depends on it; do not read every large document for mechanical work.
+**Source-of-truth order:** current source; [O-FORMAT](docs/O-FORMAT.md) and [KERNEL-API-ABI](docs/KERNEL-API-ABI.md) for implemented storage/native/API contracts; [STATUS](docs/STATUS.md) for current verification; [README](README.md), [GENERAL-SOFTWARE-SPECIFICATION](docs/GENERAL-SOFTWARE-SPECIFICATION.md), [OBJECT-MODEL](docs/OBJECT-MODEL.md) and [PRODUCTION-BOOT-AND-AUTHORITY](docs/PRODUCTION-BOOT-AND-AUTHORITY.md) for design and limits; [LEGACY-DEPENDENCIES](docs/LEGACY-DEPENDENCIES.md) for the inherited dependency inventory. Inherited Plan 9/9front documentation is reference material, not a Plan 2001-kernel specification. Read the relevant implementation contract when a change depends on it; do not read every large document for mechanical work.
 
 ## Practical PoC contract
 
-**Goal:** a small, working, byte-oriented implementation of Space, olios, relational objects, observations, and eventually named graphs on an ordinary amd64 computer with a disk and network. Keep the philosophical manifesto independent of these contingent hardware choices.
+**Goal:** a small, working, byte-oriented implementation of Space, olios, relational objects, observations, and eventually named graphs on an conventional computer with disk and network (currently AMD64 for the working full system). Keep the philosophical manifesto independent of these contingent hardware choices.
 
-- **Reuse before rewriting.** Begin with the working Plan2001-O code and its Plan2001/9front-derived kernel, GE/O storage, executable loader, processes, networking, console, and device drivers. Prefer a narrow modification or thin direct interface over replacing functioning subsystems. Remove an inherited abstraction only when it demonstrably obstructs the PoC and a simpler tested replacement exists.
+- **Reuse before rewriting.** Begin with the working Plan 2001-kernel code and its Plan2001/9front-derived kernel, GE/O storage, executable loader, processes, networking, console, and device drivers. Prefer a narrow modification or thin direct interface over replacing functioning subsystems. Remove an inherited abstraction only when it demonstrably obstructs the PoC and a simpler tested replacement exists.
 - **Host preparation is native.** The O image is produced by the real `ge/format/ream.c::reamo()` code compiled as a Linux GCC host program, and its `.mpy` seed by the same-version Linux `mpy-cross`. The normal build must not require a 9front VM, Ken C `cc`/`6c`/`6l`, Plan 9 `mk` or a cached 9front image. The host formatter writes only a caller-selected regular image; physical partition writes remain the separate hardened installer.
-- **No swap — architectural rule.** Plan2001-O MUST NOT implement swapping in any form: no disk/file/network-backed swap, compressed RAM swap, anonymous-memory page-out/page-in to backing storage, swap device, or swap service in the canonical kernel. Ordinary reclamation of clean, reproducible caches, demand-zero pages and normal COW are distinct from swap; do not disable those merely because they are named in inherited paging code. The inherited 9front `devswap`, pager and swap-backed fault paths are **legacy code to eliminate**, not intended Plan2001-O features; until the migration is verified, do not claim they are absent. A **future** privileged memory-supervision process is intended to monitor per-process memory budgets and terminate processes exceeding their limits; the required accounting/enforcement semantics are undecided and are NOT implemented by this rule. Do not implement that supervisor or replace swap with another paging mechanism without an explicit task.
+- **No swap — architectural rule.** Plan 2001-kernel MUST NOT implement swapping in any form: no disk/file/network-backed swap, compressed RAM swap, anonymous-memory page-out/page-in to backing storage, swap device, or swap service in the canonical kernel. Ordinary reclamation of clean, reproducible caches, demand-zero pages and normal COW are distinct from swap; do not disable those merely because they are named in inherited paging code. The inherited 9front `devswap`, pager and swap-backed fault paths are **legacy code to eliminate**, not intended Plan 2001-kernel features; until the migration is verified, do not claim they are absent. A **future** privileged memory-supervision process is intended to monitor per-process memory budgets and terminate processes exceeding their limits; the required accounting/enforcement semantics are undecided and are NOT implemented by this rule. Do not implement that supervisor or replace swap with another paging mechanism without an explicit task.
 - **Bytes are the native carrier for this PoC.** Store and transfer ordinary octet sequences. Use existing 64-bit identifiers and GE/O conventions where possible; keep application interpretation and graph relations logically distinct from raw content. No seven-bit, analogue, exotic hardware, or substrate-independent storage engine is required.
-- **Hardware and access:** target the amd64 architecture on conventional hardware with persistent disk storage and networking. On a desktop, use the available display and keyboard. On a server, provide remote interaction over the network without requiring local GUI hardware. Reuse existing console/network/driver paths first. This is a target usage profile, not a claim that every mode is implemented today.
+- **Hardware and access:** target conventional hardware, with the existing full-system AMD64 implementation and ongoing experimental ARM64 work with persistent disk storage and networking. On a desktop, use the available display and keyboard. On a server, provide remote interaction over the network without requiring local GUI hardware. Reuse existing console/network/driver paths first. This is a target usage profile, not a claim that every mode is implemented today.
 - **Keep it a proof of concept.** Demonstrate one coherent vertical slice, not a universal ontology engine, a new general-purpose desktop, a wholesale kernel rewrite, or a new network protocol for its own sake. Prefer the smallest complete behavior that can be built and tested.
 - **Avoid premature generalization.** Any interpretation API or persistent graph is an incremental experiment. Do not implement speculative abstraction layers, type registries, class taxonomies, analogue representations, or cross-machine identity schemes merely because they are discussed philosophically.
 - **Preserve operational evidence.** The current code stores versioned byte values and a serialized Python graph; do not claim a native relation graph or general observation API before they exist and are tested.

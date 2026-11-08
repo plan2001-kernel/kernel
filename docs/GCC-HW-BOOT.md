@@ -1,6 +1,6 @@
 # Physical GCC O-server boot — operator runbook
 
-This is the real-hardware entry for the Plan2001-O GCC kernel, Clang/LLD
+This is the real-hardware entry for the Plan 2001-kernel GCC kernel, Clang/LLD
 loader and GCC MicroPython object. It is a normal native GE/O boot, not a
 probe or diagnostic profile.
 
@@ -20,8 +20,8 @@ probe or diagnostic profile.
 
 - Host: Dell Precision 7520 (`kuha`).
 - ESP: `/boot/efi` (vfat), FAT UUID `ADC3-AA1E`.
-- The only Plan2001 GRUB entry: title **`Plan2001-O (<kernel UTC build
-  stamp>)`**, currently `Plan2001-O (2026-10-29 15:35 UTC)`, stable id
+- The only Plan2001 GRUB entry: title **`Plan 2001-kernel (<kernel UTC build
+  stamp>)`**, currently `Plan 2001-kernel (2026-10-29 15:35 UTC)`, stable id
   `plan2001-o`, script `/etc/grub.d/44_plan2001_gcc`. The installer derives
   the title stamp from the kernel ELF, not from the installation clock.
 - Chainloader: `/EFI/plan2001-gcc/BOOTX64.EFI`.
@@ -91,7 +91,7 @@ makes each new link build-specific. The last byte of `plan9.ini` is `0a`.
 `/boot/grub/grub.cfg` contains exactly one user-visible Plan2001 line:
 
 ```text
-menuentry 'Plan2001-O (2026-10-29 15:35 UTC)' --id 'plan2001-o' {
+menuentry 'Plan 2001-kernel (2026-10-29 15:35 UTC)' --id 'plan2001-o' {
 	...
 	chainloader /EFI/plan2001-gcc/BOOTX64.EFI
 }
@@ -256,7 +256,7 @@ string is linked into the kernel's read-only data. `ouser.c` holds it in one
 transition, prints:
 
 ```text
-Plan2001-O kernel build: YYYY-MM-DD HH:MM UTC
+Plan 2001-kernel kernel build: YYYY-MM-DD HH:MM UTC
 ```
 
 This is a build-time constant only: there is no syscall, RTC read or runtime

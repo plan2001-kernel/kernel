@@ -121,7 +121,7 @@ The integrity digest is exactly:
 
 ```text
 SHA256(
-    UTF8("Plan2001-O O-Envelope v1")
+    UTF8("Plan 2001-kernel O-Envelope v1")
     || 0x00
     || core_deterministic_cbor(envelope_without_root_sha256)
 )
@@ -168,7 +168,7 @@ remain usable, as they do for raw data.
 
 Host dependencies: GCC 14, OpenSSL development library, Python and the
 independent reference package `cbor2==5.6.5`. QEMU/OVMF, mtools and the normal
-Plan2001-O build prerequisites are needed for native execution.
+Plan 2001-kernel build prerequisites are needed for native execution.
 
 ```sh
 python3 -m pip install cbor2==5.6.5  # preferably in a host venv

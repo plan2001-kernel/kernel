@@ -208,7 +208,7 @@ path, and do not weaken the error checks to hide it.
 
 The disk is created with an inline, verified GPT writer: protective MBR,
 primary and backup headers and entry arrays, a standard ESP type and the
-Plan2001-O O partition type. There is no dependency on `sfdisk`, `parted` or
+Plan 2001-kernel O partition type. There is no dependency on `sfdisk`, `parted` or
 `gdisk`. The O partition's unique GUID is generated fresh for each disposable
 disk and written consistently into the GPT and `plan9.ini`.
 

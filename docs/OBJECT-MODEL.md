@@ -1,4 +1,4 @@
-# Plan2001-O object and file model — architectural definition
+# Plan 2001-kernel object and file model — architectural definition
 
 **Status: normative architecture; the volatile-object, ObjectFIFO, TCP-provider, GE-capability and universal five-operation ABI slice is implemented.** This document defines the intended semantics for developers and coding agents. The implemented slice is the RAM-only object identity, ObjectFIFO/TEE, explicit cross-process Handle delegation, generic TCP6/GE provider dispatch and the `CREATE/OPEN/CLOSE/BIND/INVOKE` kernel boundary with libc wrappers described in sections 3.2-3.3 and [VOLATILE-OBJECT-OBJECTFIFO](VOLATILE-OBJECT-OBJECTFIFO.md); the rest remains proposed. It does not change GE/O on-disk format v1, historical test results, or existing MicroPython persistence. Read [O-FORMAT.md](O-FORMAT.md) for persistent storage and [STATUS.md](STATUS.md) for evidence.
 
@@ -21,7 +21,7 @@ A **stream** is a means of accessing or transferring bytes, possibly through one
 
 ## 2. Relationships, not a type or directory hierarchy
 
-Native Plan2001-O relationships are intended to form a **graph**. The graph can have many-to-many references, shared nodes, and cycles. No distinguished root directory, parent relation, canonical path, or traversal from `/` defines object identity.
+Native Plan 2001-kernel relationships are intended to form a **graph**. The graph can have many-to-many references, shared nodes, and cycles. No distinguished root directory, parent relation, canonical path, or traversal from `/` defines object identity.
 
 ```text
 OID 43
@@ -30,7 +30,7 @@ OID 43
 OID 100
     implements → OID 43
     purpose    → C compiler
-    target     → amd64
+    target     → amd64  # example; the architecture is not fixed by the object model
 ```
 
 Here `OID 43` is the stored 6c executable bytes. `OID 100` is a distinct semantic object describing a compiler and referring to that implementation. **`implements`, `purpose` and `target` are illustrative relation/property labels, not an implemented edge schema or a Python object hierarchy.** An implementation can be selected or replaced independently of the descriptive object; a loader eventually operates on the selected executable bytes.
@@ -214,14 +214,14 @@ the old paths remain verified.
 
 ## 4. Legacy files are imported as bytes, not as namespaces
 
-The Plan 9/9front tree and Unix trees are **inputs to migration**, not templates for Plan2001-O's native information model.
+The Plan 9/9front tree and Unix trees are **inputs to migration**, not templates for Plan 2001-kernel's native information model.
 
 - Import concrete ordinary files and their bytes as O objects; a binary, source file or text file remains useful as a file abstraction.
 - Plan 9 `bind`, `mount`, per-process directory views, `walk` and the synthetic root namespace are **not migrated** into GE/O.
 - Resolve ambiguous tool names using explicit source paths during import (for example, the amd64 build of `6c`). An original path may be retained as import provenance or in a temporary mapping, but it is not a native OID.
 - Build tooling such as a prospective `mk.py` may use numeric OID lists and resolved byte locations/cached handles during migration. A physical disk address is not a durable OID; relocation must not silently change identity.
 - Special dynamic Plan 9 devices, `/proc` and other generated views are not automatically imported as immutable byte files. Their behavior requires separate analysis.
-- Native Plan2001-O namespaces and discovery will be designed afresh, **after** the core object and relation semantics are understood. Do not predesign them to reproduce Unix/POSIX/9P directories.
+- Native Plan 2001-kernel namespaces and discovery will be designed afresh, **after** the core object and relation semantics are understood. Do not predesign them to reproduce Unix/POSIX/9P directories.
 
 These are migration **principles**, not a claim that `mk.py`, a legacy importer, or a new namespace has already been implemented.
 

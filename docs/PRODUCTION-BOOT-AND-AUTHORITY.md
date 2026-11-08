@@ -51,7 +51,7 @@ storage remain the base.
         +-- future optional: authenticated network boot stage -> kernel
         |
         v
- Plan2001-O kernel  [IMPLEMENTED/LEGACY: pc64 family]
+ Plan 2001-kernel kernel  [IMPLEMENTED/LEGACY: pc64 family]
         |
         +-- process isolation, scheduling, legacy eve/iseve checks
         +-- native O syscalls -> Gefs/Ospace handles -> GE storage

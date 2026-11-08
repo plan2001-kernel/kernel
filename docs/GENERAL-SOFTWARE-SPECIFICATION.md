@@ -8,7 +8,7 @@
 
 Build a computer system in which independently registered **olios** can persist before they have an assigned application meaning. Operations and relations bring these olios into contexts in which they function as **objects**. Observations produce **manifestations**. Persistent named graphs express relationships without making a directory tree, class hierarchy, or preassigned semantic type the prerequisite for existence.
 
-This is a **deliberately limited proof of concept on conventional amd64 hardware**, not a universal model of physical reality. The sole execution target is the amd64 architecture. It uses ordinary eight-bit bytes, an existing kernel and storage code base, a persistent disk, and networking. Local display and keyboard are appropriate for desktop use; servers are accessed remotely over the network. Storage hardware, encodings, addressing widths, clocks, and execution environments are contingent engineering choices. Reusing them is a strength, not a philosophical concession.
+This is a **deliberately limited proof of concept on conventional hardware**, not a universal model of physical reality. AMD64 is the currently functioning full-system implementation; ARM64 early-boot development has begun, without a claim of equivalent kernel functionality. The design is not restricted to a single instruction-set architecture. It uses ordinary eight-bit bytes, an existing kernel and storage code base, a persistent disk, and networking. Local display and keyboard are appropriate for desktop use; servers are accessed remotely over the network. Storage hardware, encodings, addressing widths, clocks, and execution environments are contingent engineering choices. Reusing them is a strength, not a philosophical concession.
 
 The design separates four questions:
 
@@ -228,7 +228,7 @@ Accordingly:
 
 ### Proof-of-concept execution constraints
 
-The target environment is a typical amd64 machine with RAM, persistent disk and network connectivity. Desktop use exposes available display and keyboard facilities; server use exposes remote control over the existing network path. The first user interface may be a command line or REPL. A new desktop GUI, remote protocol or replacement network stack is not a prerequisite.
+The full-system proof of concept currently uses a typical AMD64 machine with RAM, persistent disk and network connectivity. The experimental ARM64 path currently covers early boot only; see [architecture support](ARCHITECTURE-SUPPORT.md). Desktop use exposes available display and keyboard facilities; server use exposes remote control over the existing network path. The first user interface may be a command line or REPL. A new desktop GUI, remote protocol or replacement network stack is not a prerequisite.
 
 ### Network profile: userspace IPv6 and externally provisioned ESP
 

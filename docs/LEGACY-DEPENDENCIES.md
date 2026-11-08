@@ -24,7 +24,7 @@ file-backed `Image -> Chan` island (see below).
 **N11.7D Dev-operation audit (2026-10-28, historical):** that pass removed
 nothing. No `dev.c` definition or `portfns.h` declaration was removed. Its
 no-removal result is kept as history and does not describe the current tree;
-the amd64-only scope decision superseded its former retention rationale based
+the then-applicable AMD64-only scope decision superseded its former retention rationale based
 on dormant non-target sources.
 
 **N11.7D.2 Dev-operation removal (2026-10-28):** removed the 17 unreachable

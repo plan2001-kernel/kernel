@@ -14,7 +14,7 @@
 > `tools/...` and `user/...` paths refer to that bundle layout; they are not
 > build or boot prerequisites of this canonical kernel tree.
 
-The IKEv2 responder is now a separate **native Plan2001-O userspace ELF**,
+The IKEv2 responder is now a separate **native Plan 2001-kernel userspace ELF**,
 `build/gcc/iked.elf`. It runs through the existing OSPAWN loader. The kernel
 contains the IPv6 ESP datapath and a private Pipe control service. It contains
 no IKE parser, IKE state machine, PSK table or P-256 implementation.

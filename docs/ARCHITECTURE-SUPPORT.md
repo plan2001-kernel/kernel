@@ -1,13 +1,14 @@
 # Architecture support
 
-Plan2001-O has one supported target and one experimental boot foundation.
-The distinction is deliberate: a compiling or booting port is not a second
-operating system.
+Plan 2001-kernel is developed for more than one CPU architecture. Its AMD64
+implementation currently supports the full kernel and userspace, while ARM64
+has a verified experimental early-boot foundation. These are different levels
+of implementation, not a policy that excludes ARM64.
 
-## amd64: supported target
+## AMD64: current full-system implementation
 
-The canonical `pc64`/`9pc64` configuration is the only supported Plan2001-O
-target. It is the tree that contains the scheduler, VM, GE/O, native object
+The canonical `pc64`/`9pc64` configuration is the existing full-system
+Plan 2001-kernel target. It is the tree that contains the scheduler, VM, GE/O, native object
 syscalls, Device ABI, networking and MicroPython execution. Its boot chain is:
 
 ```text
@@ -20,8 +21,8 @@ ARM64 work.
 
 ## ARM64/AArch64: experimental boot foundation
 
-The ARM64 tree is a bounded integration proof, not a port of the amd64
-system. Its purpose is to show that the existing Plan2001 Boot ABI v1 and a
+The ARM64 tree is an initial kernel-port foundation, not yet a complete port
+of the AMD64 system. Its purpose is to show that the existing Plan2001 Boot ABI v1 and a
 shared early-boot module can be reused by a second ISA, without restoring
 Plan 9 interfaces, path semantics or 9front build tools.
 
@@ -105,12 +106,12 @@ The following are **not** implemented or claimed for ARM64:
 - SMP, GICv3 LPIs/MSIs, ACPI, device-tree interpretation, PSCI, secure
   monitor or virtualization support;
 - KVM, hardware-backed testing or physical ARM64 hardware validation;
-- any claim that the ARM64 boot marker is a working Plan2001-O system.
+- any claim that the ARM64 boot marker is a fully functioning Plan 2001-kernel system.
 
 The two architectures share the BootInfo ABI and the `oplanboot` early-boot
 logic only. They do not share a compiled kernel image, a device manifest or a
-boot policy. The amd64 build remains the canonical artifact and is verified
-separately.
+boot policy. The AMD64 build remains the current full-system artifact and is verified
+separately from the experimental ARM64 boot artifact.
 
 ## Verification record (2026-11-08)
 
