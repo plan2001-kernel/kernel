@@ -8,7 +8,7 @@
 
 typedef struct Obinding Obinding;
 typedef struct OContext OContext;
-struct Obinding { char name[Onamemax]; Ohand *grant; void *object; uvlong attachment; };
+struct Obinding { char name[Onamemax]; void *object; uvlong attachment; };
 struct OContext {
 	Ref ref;
 	Lock lk;
@@ -16,13 +16,12 @@ struct OContext {
 	Obinding b[Obindmax];
 };
 
-static int used(Obinding *b) {return b->grant!=nil || b->object!=nil;}
+static int used(Obinding *b) {return b->object!=nil;}
 static void retain(Obinding *b) {
- if(b->grant) incref(&b->grant->ref);
  if(b->object) vobjbindinghold(b->object);
 }
 static void release(Obinding *b) {
- ohandput(b->grant);vobjbindingput(b->object);
+ vobjbindingput(b->object);
 }
 
 void*
@@ -79,7 +78,7 @@ octxmember(void *v, Ohand *h)
  OContext *c=v; int i, found=0;
  if(c == nil) return 0;
  lock(&c->lk);
- for(i=0;i<Obindmax;i++) if(effective(c,i) && c->b[i].grant==h) found=1;
+ for(i=0;i<Obindmax;i++) if(effective(c,i) && vobjbindingcap(c->b[i].object)==h) found=1;
  unlock(&c->lk);
  return found;
 }
@@ -90,29 +89,12 @@ octxsnapshot(void *v, Ohand **out, int all)
  OContext *c=v; int i,n=0;
  if(c == nil) return 0;
  lock(&c->lk);
- for(i=0;i<Obindmax;i++) if(c->b[i].grant && (all || effective(c,i))){
-  out[n]=c->b[i].grant; incref(&out[n]->ref); n++;
+ for(i=0;i<Obindmax;i++) if(used(&c->b[i]) && (all || effective(c,i))){
+  Ohand *cap=vobjbindinggecap(c->b[i].object);
+  if(cap){out[n]=cap;incref(&cap->ref);n++;}
  }
  unlock(&c->lk); return n;
 }
-Ohand*
-octxlookup(void *v, char *name)
-{
-	OContext *c = v;
-	Ohand *h = nil;
-	int i;
-	if(c == nil)
-		error(Eperm);
-	lock(&c->lk);
- for(i=0;i<Obindmax;i++) if(used(&c->b[i]) && strcmp(c->b[i].name,name)==0){
-  h=c->b[i].grant;if(h) incref(&h->ref);break;
- }
-	unlock(&c->lk);
-	if(h == nil)
-		error("O: no binding");
-	return h;
-}
-
 /* Compose private flattened providers atomically. No provider/context links,
  * hence neither reference cycles nor recursive resolution are possible. */
 void
@@ -150,19 +132,6 @@ octxcompose(void *v, void *provider, int mode, uvlong attachment)
  unlock(&c->lk);
  for(i=0;i<Obindmax;i++) release(&old[i]);
 }
-void
-octxbindmode(void *v, char *name, Ohand *h, int mode)
-{
- OContext provider;
- memset(&provider,0,sizeof provider);
- strcpy(provider.b[0].name,name);provider.b[0].grant=h;
- octxcompose(v,&provider,mode,0);
-}
-void
-octxbind(void *v, char *name, Ohand *h)
-{
- octxbindmode(v,name,h,0);
-}
 static void
 removebindings(void *v, char *name, uvlong attachment)
 {
@@ -176,8 +145,8 @@ removebindings(void *v, char *name, uvlong attachment)
    old[k++]=c->b[i];
   else next[n++]=c->b[i];
  }
+ if(!k){unlock(&c->lk);error("O: no binding or attachment");}
  memmove(c->b,next,sizeof next);c->epoch++;unlock(&c->lk);
- if(!k) error("O: no binding or attachment");
  for(i=0;i<k;i++) release(&old[i]);
 }
 void octxunbind(void *v, char *name) {removebindings(v,name,0);}
@@ -195,11 +164,23 @@ octxsame(void *a, void *b)
 		if(!effective(x,i)) continue;
 		found = 0;
 		for(j = 0; j < Obindmax; j++)
-			if(y->b[j].grant == x->b[i].grant && y->b[j].object == x->b[i].object && strcmp(y->b[j].name, x->b[i].name) == 0)
+			if(y->b[j].object == x->b[i].object && strcmp(y->b[j].name, x->b[i].name) == 0)
 				found = 1;
 		if(!found) return 0;
 	}
 	return 1;
+}
+
+int
+octxshareable(void *v)
+{
+ OContext *c=v;int i,ok=1;
+ if(c==nil) return 0;
+ lock(&c->lk);
+ for(i=0;i<Obindmax;i++)
+  if(effective(c,i) && !vobjbindingdelegable(c->b[i].object)) ok=0;
+ unlock(&c->lk);
+ return ok;
 }
 
 /* Linearization point for explicitly sharing a mutable view. */
@@ -212,7 +193,7 @@ octxmatches(void *live, void *snapshot)
  same=1;
  for(int i=0;i<Obindmax;i++){
   OContext *p=snapshot;
-  if(c->b[i].grant!=p->b[i].grant || c->b[i].object!=p->b[i].object || c->b[i].attachment!=p->b[i].attachment ||
+  if(c->b[i].object!=p->b[i].object || c->b[i].attachment!=p->b[i].attachment ||
      strcmp(c->b[i].name,p->b[i].name)!=0) same=0;
  }
 	unlock(&c->lk);
@@ -225,29 +206,24 @@ uvlong octxepoch(void *v) {
  lock(&c->lk);e=c->epoch;unlock(&c->lk);return e;
 }
 
-/* Commit both representations at one spinlocked linearization point. All
- * fallible preparation happens before this call. Destructors run after it.
- * Generic COPY/SHARE replace the role; EXCLUSIVE rejects an existing role.
- * Native union composition remains available through the native interface. */
+/* Publish one authorized Handle for a role at one linearization point. */
 void
-octxbindobject(void *v, char *name, Ohand *grant, void *object, int mode, int remove)
+octxbindobject(void *v, char *name, void *object, int mode)
 {
  OContext *c=v;
  Obinding next[Obindmax],old[Obindmax];
  int i,n=0,exists=0;
- if(c==nil) error(Eperm);
+ if(c==nil || object==nil) error(Ebadarg);
  memset(next,0,sizeof next);
  lock(&c->lk);
  for(i=0;i<Obindmax;i++) if(used(&c->b[i])){
   if(strcmp(name,c->b[i].name)==0) exists=1;
   else next[n++]=c->b[i];
  }
- if(!remove && ((exists && mode==1) || n==Obindmax)){
+ if((exists && mode==1) || n==Obindmax){
   unlock(&c->lk);error(exists?"object: binding exists":"object: binding limit");
  }
- if(!remove){
-  strcpy(next[n].name,name);next[n].grant=grant;next[n].object=object;n++;
- }
+ strcpy(next[n].name,name);next[n].object=object;n++;
  for(i=0;i<n;i++) retain(&next[i]);
  memmove(old,c->b,sizeof old);memmove(c->b,next,sizeof next);c->epoch++;
  unlock(&c->lk);
@@ -277,6 +253,6 @@ octxcopybinding(void *dst, void *src, char *name)
  unlock(&c->lk);
  if(!used(&b)) error("object: no binding");
  if(waserror()){release(&b);nexterror();}
- octxbindobject(dst,name,b.grant,b.object,0,0);
+ octxbindobject(dst,name,b.object,0);
  poperror();release(&b);
 }

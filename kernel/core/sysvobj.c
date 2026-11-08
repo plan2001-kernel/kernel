@@ -1459,15 +1459,19 @@ int
 vobjrevoke(int handle)
 {
     Vhand *h;
-    Vfifo *f;
 
-    h = vlookup(handle, Vcontrol);
+    h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
-    f = vgetfifo(h);
-    if(f == nil)
+    if(h->obj->kind == VkindGe){
+        if((h->rights & Vdelegate) == 0 || h->obj->priv == nil)
+            error(Eperm);
+        osrevokehand(h->obj->priv);
+    }else if(h->obj->kind == VkindFifo){
+        if((h->rights & Vcontrol) == 0)
+            error(Eperm);
+        vfifoclose(h->obj, 1);
+    }else
         error(Ebadarg);
-    /* Preserve the existing user-visible duplicate-revoke error. */
-    vfifoclose(h->obj, 1);
     poperror();
     vhandput(h);
     return 0;
@@ -2956,7 +2960,7 @@ int
 vobjnamespacecreate(int control, char (*roles)[32], int nr)
 {
 	char names[Obindmax][Onamemax];
-	Ohand *view = nil, *grant;
+	Ohand *view = nil;
 	uvlong epoch;
 	int i, j, handle;
 
@@ -2988,14 +2992,8 @@ vobjnamespacecreate(int control, char (*roles)[32], int nr)
 		for(j=0; j<i; j++)
 			if(strcmp(names[i], names[j]) == 0)
 				error(Ebadarg);
-		grant = osviewrole(names[i]);
-		if(waserror()){
-			ohandput(grant);
-			nexterror();
-		}
-		octxbind(view->provider, names[i], grant);
-		poperror();
-		ohandput(grant);
+		oscheckrole(up->pgrp->ocontext, names[i], 1);
+		octxcopybinding(view->provider, up->pgrp->ocontext, names[i]);
 	}
 	if(epoch != octxepoch(up->pgrp->ocontext))
 		error("O: namespace changed; retry");
@@ -3535,45 +3533,66 @@ vrolename(char *dst, char *src, int n)
 			error(Ebadarg);
 }
 
+Ohand *vobjbindingcap(void *v) {
+ Vhand *h=v;
+ if(h==nil || h->obj==nil ||
+    (h->obj->kind!=VkindGe && h->obj->kind!=VkindSpace)) return nil;
+ return h->obj->priv;
+}
+Ohand *vobjbindinggecap(void *v) {
+ Vhand *h=v;
+ return h!=nil && h->obj!=nil && h->obj->kind==VkindGe ? h->obj->priv : nil;
+}
+int vobjbindingdelegable(void *v) {
+ Vhand *h=v;
+ return h!=nil && (h->rights & Vdelegate)!=0;
+}
 void vobjbindinghold(void *v) {if(v) incref(&((Vhand*)v)->ref);}
 void vobjbindingput(void *v) {vhandput(v);}
 
 int
 vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
 {
- Vhand *h,*nh=nil;
+ Vhand *h=nil,*nh=nil;
+ Vobj *bound=nil;
  Ohand *cap=nil;
  char name[Vnamemax];
  int m=mode & ObjBindModeMask,or=0;
  if(mode & ~(ObjBindModeMask|ObjBindRemove)) error(Ebadarg);
- if(m>ObjBindShare) error(Ebadarg);
  vrolename(name,role,rolelen);
+ if(up->pgrp==nil) error(Eperm);
+ if(mode & ObjBindRemove){
+  if(mode!=ObjBindRemove || handle!=0 || rights!=0) error(Ebadarg);
+  octxunbind(up->pgrp->ocontext,name);
+  return 0;
+ }
+ if(m>ObjBindShare) error(Ebadarg);
  h=vlookup(handle,Vdelegate);
- if(waserror()){oshandput(cap);vhandput(nh);vhandput(h);nexterror();}
- if(h->sub || up->pgrp==nil) error(Eperm);
+ if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
+ if(h->sub) error(Eperm);
  /* Preserve RFNOMNT/devmask extension restriction. */
  /* RFNOMNT forbids namespace extension, not removal of an existing role. */
- if(!(mode & ObjBindRemove)){
-  rlock(&up->pgrp->ns);
-  for(int i=0;i<sizeof up->pgrp->devmask;i++) or |= up->pgrp->devmask[i]^255;
-  runlock(&up->pgrp->ns);
-  if(or==0) error(Eperm);
- }
- if(!(mode & ObjBindRemove)){
-  if(rights==0) rights=h->rights;
-  if(rights & ~(uvlong)h->rights) error(Eperm);
+ rlock(&up->pgrp->ns);
+ for(int i=0;i<sizeof up->pgrp->devmask;i++) or |= up->pgrp->devmask[i]^255;
+ runlock(&up->pgrp->ns);
+ if(or==0) error(Eperm);
+ if(rights==0) rights=h->rights;
+ if(rights & ~(uvlong)h->rights) error(Eperm);
+ if(h->obj->kind==VkindGe){
+  cap=oscopycap(h->obj->priv,h->obj->oid);
+  vgecaplimit(cap,(int)rights);
+  bound=vobjnewkind(VkindGe,0);
+  if(bound==nil) error(Enomem);
+  bound->provider=VopenGe;
+  bound->oid=h->obj->oid;
+  bound->space=ossid(cap);
+  bound->priv=cap;cap=nil;
+  nh=vhandalloc(bound,nil,(int)rights);
+  vobjput(bound);bound=nil;
+ }else
   nh=vhandalloc(h->obj,nil,(int)rights);
-  if(h->obj->kind==VkindGe){
-   cap=oscopycap(h->obj->priv,h->obj->oid);or=0;
-   if(rights & Vread) or |= Oread;
-   if(rights & Vwrite) or |= Owrite;
-   if(rights & Vcommit) or |= Ocommit;
-   if(rights & Vdelegate) or |= Odelegate;
-   cap->rights &= or;
-  }
- }
- octxbindobject(up->pgrp->ocontext,name,cap,nh,m,(mode & ObjBindRemove)!=0);
- poperror();oshandput(cap);vhandput(nh);vhandput(h);return 0;
+ octxbindobject(up->pgrp->ocontext,name,nh,m);
+ poperror();vhandput(nh);vhandput(h);return 0;
 }
 
 int

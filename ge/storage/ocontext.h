@@ -19,24 +19,24 @@ void* octxnew(void);
 void* octxcopy(void*);
 void octxput(void*);
 int octxmember(void*, Ohand*);
-Ohand* octxlookup(void*, char*);
-void octxbind(void*, char*, Ohand*);
 void octxunbind(void*, char*);
 int octxsame(void*, void*);
+int octxshareable(void*);
 
 int octxmatches(void*, void*);
 
 int octxsnapshot(void*, Ohand**, int);
 void octxcompose(void*, void*, int, uvlong);
-void octxbindmode(void*, char*, Ohand*, int);
 void octxunmount(void*, uvlong);
 
 uvlong octxepoch(void*);
 
-/* One atomic namespace entry owns both its optional native GE view and
- * provider capability. COPY/SHARE use the same entry; no rollback mirror. */
-void octxbindobject(void*, char*, Ohand*, void*, int, int);
+/* Every role owns one authorized object Handle, including GE/O roles. */
+void octxbindobject(void*, char*, void*, int);
 void* octxobject(void*, char*);
+Ohand* vobjbindingcap(void*);
+Ohand* vobjbindinggecap(void*);
+int vobjbindingdelegable(void*);
 void vobjbindinghold(void*);
 void vobjbindingput(void*);
 

@@ -64,10 +64,17 @@ def run():
     waited, status = space.wait()
     assert waited == pid and status == ''
     print('T16-PASS child GE rights and process isolation')
-    space.obind('t16role', oid, 1 | 32, sh)
-    nh, sid, found, rights = space.olookup('t16role')
-    assert found == oid and p.obj_read(nh, 6) == b'T16-GE'
-    space.orevoke(nh)
+    source = p.obj_open_ge_space(sh, oid)
+    p.obj_bind(source, 't16role', p.VREAD | p.VMETA | p.VDELEGATE)
+    nh = p.obj_open_binding('t16role')
+    assert p.obj_info(nh)[2] == oid and p.obj_read(nh, 6) == b'T16-GE'
+    p.obj_revoke(nh)
+    try:
+        p.obj_open_binding('t16role')
+    except OSError:
+        pass
+    else:
+        raise AssertionError('revoked role reopened')
     try:
         p.obj_read(nh, 6)
     except OSError:
@@ -81,12 +88,16 @@ def run():
         pass
     else:
         raise AssertionError('stale namespace handle read')
+    assert p.obj_read(gh, 6) == b'T16-GE'
+    p.obj_close(source)
     print('T16-PASS namespace unified handle and stale denial')
     other, other_oid = p.obj_create_ge(sh, b'T16-OTHER')
     p.obj_commit(sh)
-    space.obind('t16view', oid, space.OREAD | space.ODELEGATE, sh)
+    view_source = p.obj_open_ge_space(sh, oid)
+    p.obj_bind(view_source, 't16view', p.VREAD | p.VMETA | p.VDELEGATE)
     view = space.view(('t16view',))
-    space.obind('t16view', other_oid, space.OREAD | space.ODELEGATE, sh)
+    other_source = p.obj_open_ge_space(sh, other_oid)
+    p.obj_bind(other_source, 't16view', p.VREAD | p.VMETA | p.VDELEGATE)
 
     def visible(target):
         return any(record[2] == target and record[3] & space.OREAD
@@ -108,9 +119,9 @@ def run():
     print('T16-PASS sealed view, attach precedence, detach and visible enumeration')
 
     token = space.mount(view, space.MAFTER)
-    vh, _, found, _ = space.olookup('t16view')
-    assert found == oid
-    space.orevoke(vh)
+    vh = p.obj_open_binding('t16view')
+    assert p.obj_info(vh)[2] == oid
+    p.obj_revoke(vh)
     p.obj_close(vh)
     assert not visible(oid)
     space.unmount(token)
@@ -150,7 +161,102 @@ def run():
     p.obj_close(control)
     p.obj_close(view)
     p.obj_close(other)
+    p.obj_close(view_source)
+    p.obj_close(other_source)
     print('T16-PASS namespace rights and process isolation')
+
+    def denied(action):
+        try:
+            action()
+        except OSError:
+            return
+        raise AssertionError('unauthorized object operation succeeded')
+
+    mask = p.VREAD | p.VWRITE | p.VCOMMIT | p.VMETA | p.VDELEGATE
+    authority = p.obj_open_ge_space(sh, oid)
+    independent = p.obj_open_ge_space(sh, oid)
+    p.obj_bind(authority, 't16binding', mask)
+    first = p.obj_open_binding('t16binding')
+    held = p.obj_open_binding('t16binding')
+    p.obj_close(first)
+    assert p.obj_read(held, 6) == b'T16-GE'
+    print('T16-PASS close preserves second Handle')
+
+    child = ("import plan9 as p\n"
+             "h=p.obj_open_binding('t16binding')\n"
+             "assert p.obj_read(h,6)==b'T16-GE'\n")
+    pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
+                      view=1, roles=('t16binding',))
+    waited, status = space.wait()
+    assert waited == pid and status == ''
+    print('T16-PASS role binding inherited by child')
+
+    denied(lambda: p.obj_bind(held, 't16binding', 0, p.OBJ_BIND_REMOVE))
+    denied(lambda: p.obj_bind(0, 't16binding', 1, p.OBJ_BIND_REMOVE))
+    p.obj_bind(0, 't16binding', 0, p.OBJ_BIND_REMOVE)
+    denied(lambda: p.obj_open_binding('t16binding'))
+    assert p.obj_read(held, 6) == b'T16-GE'
+    replacement = p.obj_open_ge_space(sh, other_oid)
+    p.obj_bind(replacement, 't16binding', p.VREAD | p.VMETA | p.VDELEGATE)
+    newest = p.obj_open_binding('t16binding')
+    assert p.obj_info(newest)[2] == other_oid
+    assert p.obj_read(newest, 9) == b'T16-OTHER'
+    assert p.obj_read(held, 6) == b'T16-GE'
+    p.obj_bind(0, 't16binding', 0, p.OBJ_BIND_REMOVE)
+    p.obj_close(newest)
+    p.obj_close(replacement)
+    print('T16-PASS unbind and rebind preserve prior Handle')
+
+    payload = p.obj_create(b'T16-VOLATILE')
+    p.obj_bind(payload, 't16bytes', p.VREAD | p.VMETA | p.VDELEGATE)
+    opened_payload = p.obj_open_binding('t16bytes')
+    assert p.obj_read(opened_payload, 12) == b'T16-VOLATILE'
+    child = ("import plan9 as p\n"
+             "h=p.obj_open_binding('t16bytes')\n"
+             "assert p.obj_read(h,12)==b'T16-VOLATILE'\n")
+    pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
+                      view=1, roles=('t16bytes',))
+    waited, status = space.wait()
+    assert waited == pid and status == ''
+    p.obj_bind(0, 't16bytes', 0, p.OBJ_BIND_REMOVE)
+    assert p.obj_read(opened_payload, 12) == b'T16-VOLATILE'
+    p.obj_close(opened_payload)
+    p.obj_close(payload)
+    print('T16-PASS volatile object resolves through role binding')
+
+    descendant = p.obj_open_handle(held, mask)
+    p.obj_bind(authority, 't16sibling', mask)
+    sibling = p.obj_open_binding('t16sibling')
+    weak = p.obj_open_handle(held, p.VREAD | p.VMETA)
+    denied(lambda: p.obj_revoke(weak))
+    denied(lambda: p.obj_open_handle(weak, mask))
+    denied(lambda: p.obj_revoke(oid))
+    assert p.obj_read(independent, 6) == b'T16-GE'
+    p.obj_revoke(held)
+    denied(lambda: p.obj_read(descendant, 6))
+    denied(lambda: p.obj_read(sibling, 6))
+    denied(lambda: p.obj_write(descendant, b'change'))
+    denied(lambda: p.obj_commit(descendant))
+    denied(lambda: p.obj_open_handle(descendant, mask))
+    assert p.obj_info(independent)[2] == oid
+    assert p.obj_read(independent, 6) == b'T16-GE'
+    p.obj_bind(0, 't16sibling', 0, p.OBJ_BIND_REMOVE)
+    for handle in (weak, descendant, sibling, held, authority, independent):
+        p.obj_close(handle)
+    print('T16-PASS GE revoke lineage, attenuation and independent authority')
+
+    fifo = p.obj_fifocreate()
+    p.obj_bind(fifo, 't16fifo', p.VSUBSCRIBE | p.VMETA | p.VCONTROL)
+    opened_fifo = p.obj_open_binding('t16fifo')
+    sub = p.obj_subscribe(opened_fifo, p.VRECV | p.VMETA)
+    p.obj_revoke(fifo)
+    assert p.obj_stat(fifo)[5] and p.obj_stat(sub)[6]
+    denied(lambda: p.obj_receive(sub, 0))
+    p.obj_bind(0, 't16fifo', 0, p.OBJ_BIND_REMOVE)
+    p.obj_close(opened_fifo)
+    p.obj_close(sub)
+    p.obj_close(fifo)
+    print('T16-PASS FIFO revoke closes subscriptions')
     for nr in (55, 59):
         try:
             p.sysraw(nr)
@@ -158,12 +264,12 @@ def run():
             pass
         else:
             raise AssertionError('retired O Space syscall active')
-    for nr in (101, 102, 103, 105):
+    for nr in (97, 98, 99, 101, 102, 103, 104, 105):
         child = "import plan9 as p\np.sysraw(" + str(nr) + ")\n"
         pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child))
         waited, status = space.wait()
         assert waited == pid and status != ''
-    print('T16-PASS retired O Space and namespace calls denied')
+    print('T16-PASS retired O Space, binding and namespace calls denied')
     p.obj_close(rh)
     p.obj_close(ro)
     p.obj_close(gh)

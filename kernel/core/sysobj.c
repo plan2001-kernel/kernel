@@ -336,6 +336,9 @@ sysobjinvoke(sysva_list list)
 			(int)bounded(c.arg0, 0x7fffffff, Ebadarg));
 		break;
 	case ObjOpRevoke:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg0 != 0 || c.arg1 != 0)
+			error(Ebadarg);
 		vobjrevoke(handle);
 		c.result = 0;
 		break;
