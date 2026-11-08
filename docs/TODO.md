@@ -1,6 +1,6 @@
 # Plan2001-O — TODO
 
-Tämä tiedosto sisältää vasta myöhemmin päätettäviä kehitystehtäviä. **Ei OpenCode-käsky eikä lupa tehdä muutoksia.** Kulloinenkin toteutustehtävä annetaan `TO_AGENTS.md`-tiedoston agenttikohtaisessa osiossa.
+Tämä tiedosto sisältää historiallisia ja myöhemmin päätettäviä kehitystehtäviä. **Ei OpenCode-käsky eikä lupa tehdä muutoksia.** Kulloinenkin toteutustehtävä tulee suoraan käyttäjältä tai kehitysympäristöstä.
 
 ## Buildin aikaleima GRUB-valikkoon ja kernelin bootin loppuun
 
@@ -19,7 +19,7 @@ Tavoite: käynnistysvaiheessa on voitava nähdä selvästi, mikä **nimenomainen
 - Toteutuksen yhteydessä korjaa `tools/host/gcc-o-install.sh`-asentimen `--plan`/`--install`/`--verify` ja GRUB-merkinnän tarkistukset ymmärtämään muuttuva otsake. Säilytä yksi entry, turvallinen rollback, Debianin GRUB-default, `plan9.ini`:n LF-lopetus ja nykyinen osioiden koskemattomuus.
 - Ei pysyvää debug-tilaa, uusia GRUB-merkintöjä tai ajonaikaista RTC-riippuvuutta. Käytännöllinen lisävarmistus myöhemmässä vaiheessa on kernelin lähdetunniste, mutta se ei ole osa tätä aikaleimatehtävää.
 
-**N11.7:n legacy-siivoamisinventaario on aiemmin käsitelty vanhassa OpenCode-tehtävänannossa.** Historiallinen TODO-merkintä ei ole uusi aktiivinen tehtävä; vain `TO_AGENTS.md` antaa uusia tehtäviä.
+**N11.7:n legacy-siivoamisinventaario on aiemmin käsitelty vanhassa OpenCode-tehtävänannossa.** Historiallinen TODO-merkintä ei ole uusi aktiivinen tehtävä; uusi tehtävä tulee käyttäjältä tai kehitysympäristöstä.
 
 ## Rename Plan2001-O-owned MicroPython abbreviation MP to MPY
 
