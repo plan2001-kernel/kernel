@@ -713,7 +713,6 @@ newproc(void)
 		kbdprocexit(p);
 		uartprocexit(p);
 	}
-	p->ohandles = nil;
 	p->vobjhandles = nil;
 	p->net6permit = 0;
 	p->stdoutpipe = 0;

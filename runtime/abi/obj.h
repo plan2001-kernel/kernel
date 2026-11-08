@@ -25,7 +25,7 @@
 enum {
 	ObjOpenTcpListen	= 1,
 	ObjOpenTcpConnect	= 2,
-	ObjOpenGe		= 3,
+	ObjOpenGe		= 3, /* reserved: use ObjOpenGeSpace */
 	ObjOpenHandle		= 4,
 	ObjOpenBinding		= 5,
 	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */

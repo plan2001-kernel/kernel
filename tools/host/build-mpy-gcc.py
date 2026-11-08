@@ -502,7 +502,7 @@ def main() -> int:
         for sym, num in (("_start", None), ("setjmp", None), ("longjmp", None)):
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing {sym}")
-        sysnums = {"ovolopen": "0x36", "ospaceopen": "0x37",
+        sysnums = {"ovolopen": "0x36", "objopen": "0x89",
                    "oexecute": "0x3c",
                    "errstr": "0x29", "_nsec": "0x35", "sleep": "0x11"}
         for sym, num in sysnums.items():

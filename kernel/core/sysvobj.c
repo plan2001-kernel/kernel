@@ -420,7 +420,7 @@ vobjput(Vobj *o)
 			ve->ep = nil;
 		}
 		free(ve);
-	}else if(o->kind == VkindGe || o->kind == VkindSpace){
+	}else if(o->kind == VkindGe || o->kind == VkindSpace || o->kind == VkindNamespaceView){
 		if(o->priv != nil)
 			oshandput(o->priv);
 	}
@@ -824,17 +824,24 @@ vobjcreat(int kind, uvlong space, void *buf, long n, VobjId *id)
  * volatile incarnation tag.  The new object gets its own capability copy so
  * later READ/WRITE/COMMIT use the same Ohand authority and gate.
  */
-static int
-vgerights(Ohand *cap)
+int
+vobjrightsfromo(int o)
 {
- int r = Vmeta, o = oshandrights(cap);
+ int r = Vmeta;
  if(o & Oread) r |= Vread;
  if(o & Owrite) r |= Vwrite;
  if(o & Ocreate) r |= Vcreate;
  if(o & Ocommit) r |= Vcommit;
  if(o & Oexecute) r |= Vexecute;
  if(o & Odelegate) r |= Vdelegate;
+ if(o & Orelate) r |= Vcontrol;
  return r;
+}
+
+static int
+vgerights(Ohand *cap)
+{
+ return vobjrightsfromo(oshandrights(cap));
 }
 
 /* Defense in depth for a newly opened native provider, before publication.
@@ -849,7 +856,41 @@ vgecaplimit(Ohand *cap, int rights)
  if(rights & Vcommit) r|=Ocommit;
  if(rights & Vexecute) r|=Oexecute;
  if(rights & Vdelegate) r|=Odelegate;
+ if(rights & Vcontrol) r|=Orelate;
  cap->rights &= r;
+}
+
+/* Namespace and GE share the OBJ handle table and its generation/rights checks. */
+int
+vobjinstallohand(Ohand *oh, int kind)
+{
+ Vobj *o;
+ int handle, rights;
+ if(oh == nil || (kind != VkindSpace && kind != VkindGe && kind != VkindNamespaceView)) error(Ebadarg);
+ rights = kind == VkindNamespaceView ? Vmeta|Vcontrol : vgerights(oh);
+ o = vobjalloc(kind, kind == VkindNamespaceView ? 0 : ossid(oh), 0);
+ if(o == nil) error(Enomem);
+ o->priv = oh;
+ o->oid = oh->oid;
+ o->provider = kind == VkindNamespaceView ? 0 : (kind == VkindSpace ? VopenSpace : VopenGe);
+ if(waserror()){o->priv=nil;vobjput(o);nexterror();}
+ handle = vobjinstallobj(o, rights);
+ poperror();
+ vobjput(o);
+ return handle;
+}
+
+Ohand*
+vobjholdohand(int handle, int kind, int rights)
+{
+ Vhand *h;
+ Ohand *oh;
+ h = vlookup(handle, rights);
+ if(h->obj->kind != kind || h->obj->priv == nil){vhandput(h);error(Ebadarg);}
+ oh = h->obj->priv;
+ incref(&oh->ref);
+ vhandput(h);
+ return oh;
 }
 
 int
@@ -3128,50 +3169,13 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		|| (provider == VopenTcpConnect && (rights & (Vread|Vwrite)) == 0))
 			error(Eperm);
 		o = vtcp_open(provider == VopenTcpListen, tr.addr, (int)tr.port);
-	}else if(provider == VopenGe){
-		if(req == nil || len != sizeof gr)
-			error(Ebadarg);
-		validaddr((uintptr)req, sizeof gr, 0);
-		memmove(&gr, req, sizeof gr);
-		if(gr.rights != 0) error(Ebadarg);
-		oh = osopenh(gr.ospace);
-		if(oh == nil)
-			error(Ebadarg);
-		{
-			Ohand *cap;
-			if(waserror()){
-				oshandput(oh);
-				nexterror();
-			}
-			cap = oscopycap(oh, gr.oid);
-			poperror();
-			oshandput(oh);
-			oh = cap;
-		}
-		defrights = vgerights(oh) & ~(Vcreate);
-		if(rights == 0)
-			rights = defrights;
-		if((rights & ~(uvlong)defrights) != 0){
-			oshandput(oh);
-			error(Eperm);
-		}
-		o = vobjnewkind(VkindGe, 0);
-		if(o == nil){
-			oshandput(oh);
-			error(Enomem);
-		}
-		vgecaplimit(oh,(int)rights);
-		o->provider = VopenGe;
-		o->oid = gr.oid;
-		o->space = ossid(oh);
-		vobjsetpriv(o, oh);
 	}else if(provider == VopenSpace){
 		Ohand *cap;
 		if(req == nil || len <= 0 || len >= 256)
 			error(Ebadarg);
 		cap = osopenspace((char*)req, (int)len);
 		oh = cap;
- oh->bootstrap = 0; oh->caps = 2; /* explicit Space capability */
+ /* Bootstrap authority remains bound to the original volume owner. */
 		defrights = vgerights(oh);
 		if(rights == 0)
 			rights = defrights;

@@ -4,11 +4,12 @@
  * The kernel supplies a pointer (in BP via otouser) to this argument block
  * in the user stack: the OID, the exact argv count and strings, the volume
  * spec and the native O Space name.  The loader uses only the existing user
- * native-O syscalls; it has no pathname, FD, console or writable global
+ * O volume and OBJ Space syscalls; it has no pathname, FD, console or writable global
  * state.
  */
 #include <u.h>
 #include <libc.h>
+#include "../../runtime/abi/obj.h"
 
 enum {
 	Maxargv	= 8,
@@ -25,8 +26,8 @@ struct Oargs
 };
 
 extern long ovolopen(char*, int);
-extern long ospaceopen(int, char*, int);
-extern long ospaceclose(int);
+extern long objopen(unsigned long long, void*, long, unsigned long long, void*);
+extern long objclose(int);
 extern long oexecute(int, uvlong, char**, int);
 
 void
@@ -38,9 +39,9 @@ _main(struct Oargs *a)
 
 	if(ovolopen(a->volspec, a->vollen) != 1)
 		exits("ovolopen");
-	h = ospaceopen(1, a->space, 4);
+	h = objopen(ObjOpenSpace, a->space, 4, 0, nil);
 	if(h < 0)
-		exits("ospaceopen");
+		exits("objopen");
 	if(a->argc < 0 || a->argc > Maxargv)
 		exits("oargc");
 	for(i = 0; i < a->argc; i++)
@@ -48,6 +49,6 @@ _main(struct Oargs *a)
 	av[a->argc] = nil;
 	oexecute(h, a->oid, av, a->argc);
 	/* Failed load leaves ownership here; release the actual Space handle. */
-	ospaceclose(h);
+	objclose(h);
 	exits("oexecute");
 }

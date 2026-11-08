@@ -41,6 +41,8 @@ newseg(int type, uintptr base, ulong size)
 	s->base = base;
 	s->top = base+(size*BY2PG);
 	s->used = 0;
+	s->sema.prev = &s->sema;
+	s->sema.next = &s->sema;
 
 	if((type & SG_TYPE) == SG_PHYSICAL){
 		s->map = nil;
@@ -72,7 +74,8 @@ putseg(Segment *s)
 		return;
 	if(decref(&s->ref) != 0)
 		return;
-
+	assert(s->sema.prev == &s->sema);
+	assert(s->sema.next == &s->sema);
 
 	if(s->mapsize > 0){
 		Pte **pte, **emap;
@@ -633,6 +636,19 @@ segflush(void *va, uintptr len)
 			goto more;
 		qunlock(&s->qlk);
 	}
+}
+
+uintptr
+syssegflush(sysva_list list)
+{
+	void *va;
+	ulong len;
+
+	va = sysva_arg(list, void*);
+	len = sysva_arg(list, ulong);
+	segflush(va, len);
+	flushmmu();
+	return 0;
 }
 
 void

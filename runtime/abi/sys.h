@@ -13,7 +13,7 @@
 #define	_FSESSION	9 /* reserved */
 #define	FAUTH		10 /* reserved */
 #define	_FSTAT		11 /* reserved */
-#define	SEGBRK		12 /* reserved */
+#define	SEGBRK		12
 #define	_MOUNT		13 /* reserved */
 #define	OPEN		14 /* reserved */
 #define	_READ		15 /* reserved */
@@ -36,16 +36,16 @@
  * retired. */
 #define	NOTIFY		28
 #define	NOTED		29
-#define	SEGATTACH	30 /* reserved */
-#define	SEGDETACH	31 /* reserved */
-#define	SEGFREE		32 /* reserved */
-#define	SEGFLUSH	33 /* reserved */
-#define	RENDEZVOUS	34 /* reserved */
+#define	SEGATTACH	30
+#define	SEGDETACH	31
+#define	SEGFREE		32
+#define	SEGFLUSH	33
+#define	RENDEZVOUS	34
 #define	UNMOUNT		35 /* reserved */
 /* _WAIT(36) is RESERVED: use OBJINVOKE(ObjOpWait). */
 #define	_WAIT		36 /* reserved */
-#define	SEMACQUIRE	37 /* reserved */
-#define	SEMRELEASE	38 /* reserved */
+#define	SEMACQUIRE	37
+#define	SEMRELEASE	38
 #define	SEEK		39 /* reserved */
 #define	FVERSION	40 /* reserved */
 #define	ERRSTR		41
@@ -58,14 +58,14 @@
 #define	AWAIT		47 /* reserved */
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */
-#define	TSEMACQUIRE	52 /* reserved */
+#define	TSEMACQUIRE	52
 #define _NSEC		53
 #define	OVOLOPEN	54
-#define	OSPACEOPEN	55
+#define	OSPACEOPEN	55 /* reserved */
 #define	OSPACEGET	56 /* reserved */
 #define	OSPACEPUT	57 /* reserved */
 #define	OSPACECOMMIT	58 /* reserved */
-#define	OSPACECLOSE	59
+#define	OSPACECLOSE	59 /* reserved */
 #define	OEXECUTE	60
 #define	OSPACECREATE	61 /* reserved */
 #define	IOWRITE		62 /* reserved */

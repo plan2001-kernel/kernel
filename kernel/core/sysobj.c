@@ -95,8 +95,6 @@ sysobjopen(sysva_list list)
 	case ObjOpenTcpListen:
 	case ObjOpenTcpConnect:
         error("obj: kernel network protocols disabled; use raw device");
-	case ObjOpenGe:
-		return vobjopenstream(provider, req, len, rights, (VobjId*)id);
 	case ObjOpenHandle:
 		if(req == nil || len != sizeof hr)
 			error(Ebadarg);

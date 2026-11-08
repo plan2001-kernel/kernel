@@ -152,7 +152,9 @@ long	vtcp_write(Vobj*, void*, long);
 void	vtcp_release(Vobj*);
 
 /* GE/O provider helpers implemented in sysgefs.c. */
-Ohand*	osopenh(int handle);
+int	vobjrightsfromo(int rights);
+int	vobjinstallohand(Ohand*, int kind);
+Ohand*	vobjholdohand(int handle, int kind, int rights);
 Ohand*	osopenspace(char *name, int n);
 void	oshandput(Ohand*);
 long	osreadhand(Ohand*, uvlong oid, void *buf, long n, uvlong *ver);

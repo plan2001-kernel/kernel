@@ -1,7 +1,7 @@
 /*
  * MicroPython persistent Space implementation (p9image.c): O-only.
  *
- * The native O path (-O VOLUME -S SPACE) directly calls the GE/O syscalls
+ * The native O path (-O VOLUME -S SPACE) calls the GE/O object interface
  * to load the Environment, immutable code objects and OID_GRAPH from the
  * volume (docs/O-FORMAT.md). The Python object graph is one serialized
  * OID_GRAPH object; logical Python OIDs and aliases are not independently
@@ -19,10 +19,8 @@
 #include "p9space.h"
 #include "p9console.h"
 
-// Stage 4: the native O calls (sys.h, devgefs.c's sysospace*)
+// Stage 4: volume bootstrap followed by OBJ Space handles
 extern long ovolopen(char *, int);
-extern long ospaceopen(int, char *, int);
-extern long ospaceclose(int);
 extern long oterminate(long);
 
 /* Shared exact OSPAWN layout, including the optional extension. */
@@ -159,15 +157,6 @@ enum {
  * (ObjOpenSpace) and one OBJOPEN (ObjOpenGeSpace) capability per OID for
  * reads.  T2 stages writes to named OIDs through OBJINVOKE(ObjOpPutOid) and
  * commits them through OBJINVOKE(ObjOpCommit) on the same Space handle. */
-static long objgeopen_legacy(int sh, unsigned long long oid) {
-    VobjGeReq req;
-
-    memset(&req, 0, sizeof req);
-    req.ospace = sh;
-    req.oid = oid;
-    return obj_open(ObjOpenGe, &req, sizeof req, 0, NULL);
-}
-
 static long objgeopen_space(int sh, unsigned long long oid) {
     ObjOpenGeSpaceReq req;
 
@@ -720,20 +709,12 @@ static mp_obj_t ospace_open(size_t n_args, const mp_obj_t *args) {
     if (n_args > 1 && args[1] != mp_const_none) {
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("space: O: versions are not supported"));
     }
-    if ((osp = ospaceopen(ovol, (char *)name, strlen(name))) < 0) {
+    if ((spread = obj_open(ObjOpenSpace, (void *)name, strlen(name), 0, NULL)) < 0)
         raise_err();
-    }
-    /* The same authorized Space through the canonical object boundary, for
-     * the T1 read path.  The legacy handle stays for writes and commits. */
-    if ((spread = obj_open(ObjOpenSpace, (void *)name, strlen(name), 0, NULL)) < 0) {
-        ospaceclose(osp);
-        osp = -1;
-        raise_err();
-    }
+    osp = spread;
     if (nlr_push(&nlr) != 0) {
         obj_close(spread);
         spread = -1;
-        ospaceclose(osp);
         osp = -1;
         p9_image_reset();
         nlr_jump(nlr.ret_val);
@@ -1569,7 +1550,7 @@ static mp_obj_t space_orevoke(mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(space_orevoke_obj,space_orevoke);
 static mp_obj_t space_hclose(mp_obj_t h) {
-    hcheck(ospaceclose(mp_obj_get_int(h))); return mp_const_none;
+    hcheck(obj_close(mp_obj_get_int(h))); return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(space_hclose_obj,space_hclose);
 static mp_obj_t space_hget(mp_obj_t h, mp_obj_t oid) {
@@ -1578,8 +1559,8 @@ static mp_obj_t space_hget(mp_obj_t h, mp_obj_t oid) {
     long r, size, gh;
 
     /* The explicit legacy Space Handle is converted through OBJOPEN
-     * (ObjOpenGe), which applies exactly the same Ohand authority. */
-    gh = objgeopen_legacy(mp_obj_get_int(h), obyteoid(oid));
+     * (ObjOpenGeSpace), which applies the same Ohand authority. */
+    gh = objgeopen_space(mp_obj_get_int(h), obyteoid(oid));
     hcheck(gh);
     size = obj_read_version(gh, nil, 0, 0, &ver);
     if(size < 0){ obj_close(gh); hcheck(size); }
@@ -1637,7 +1618,7 @@ static mp_obj_t space_bindx(size_t n,const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_bindx_obj,4,5,space_bindx);
 static mp_obj_t space_open_handle(mp_obj_t name) {
- const char *s=mp_obj_str_get_str(name);long h=ospaceopen(1,(char*)s,strlen(s));
+ const char *s=mp_obj_str_get_str(name);long h=obj_open(ObjOpenSpace,(void*)s,strlen(s),0,NULL);
  hcheck(h);return mp_obj_new_int(h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(space_open_handle_obj,space_open_handle);
@@ -1647,16 +1628,16 @@ static MP_DEFINE_CONST_FUN_OBJ_1(space_open_handle_obj,space_open_handle);
  * through the existing O Space handle and GE/O provider.  Identity is the
  * persistent OID, not a new volatile OID. */
 static mp_obj_t space_openobj(mp_obj_t oid_obj) {
-    VobjGeReq req;
+    ObjOpenGeSpaceReq req;
     long h;
     if (!mp_obj_is_int(oid_obj))
         mp_raise_TypeError(MP_ERROR_TEXT("space.openobj: oid must be an int"));
     if (osp < 0)
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("space.openobj: no O Space"));
     memset(&req, 0, sizeof req);
-    req.ospace = osp;
+    req.space = osp;
     req.oid = (unsigned long long)mp_obj_get_uint(oid_obj);
-    h = obj_open(ObjOpenGe, &req, sizeof req, 0, NULL);
+    h = obj_open(ObjOpenGeSpace, &req, sizeof req, 0, NULL);
     if (h < 0) raise_err();
     return mp_obj_new_int(h);
 }

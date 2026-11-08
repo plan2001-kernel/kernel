@@ -535,8 +535,8 @@ USER_SYSCALLS = [
     ("sleep", 1, "SLEEP"),
     ("exits", 1, "EXITS"),
     ("ovolopen", 2, "OVOLOPEN"),
-    ("ospaceopen", 3, "OSPACEOPEN"),
-    ("ospaceclose", 1, "OSPACECLOSE"),
+    ("objopen", 5, "OBJOPEN"),
+    ("objclose", 1, "OBJCLOSE"),
     ("oexecute", 4, "OEXECUTE"),
 ]
 

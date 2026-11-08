@@ -521,15 +521,6 @@ static mp_obj_t p9_objopentcp(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopentcp_obj,2,3,p9_objopentcp);
 
-static mp_obj_t p9_objopenge(size_t n,const mp_obj_t *a){
- VobjGeReq req;unsigned long long rights=n>2?(unsigned long long)mp_obj_get_int(a[2]):0;
- memset(&req,0,sizeof req);
- req.ospace=mp_obj_get_int(a[0]);
- req.oid=(unsigned long long)mp_obj_get_uint(a[1]);
- return check(obj_open(ObjOpenGe,&req,sizeof req,rights,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenge_obj,2,3,p9_objopenge);
-
 /* Persistent GE/O through the five-operation ABI only. */
 static mp_obj_t p9_objopenspace(mp_obj_t name){
  const char *n=mp_obj_str_get_str(name);
@@ -1075,6 +1066,34 @@ static MP_DEFINE_CONST_FUN_OBJ_1(p9_kbdclose_obj,p9_kbdclose);
 static mp_obj_t p9_kbdleds(mp_obj_t leds){check(obj_kbd_leds(0,(unsigned int)mp_obj_get_int(leds)));return mp_const_none;}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_kbdleds_obj,p9_kbdleds);
 
+/* Direct memory services operate on user segments and byte buffers. */
+static mp_obj_t p9_segattach(mp_obj_t name, mp_obj_t size){
+ const char *s=mp_obj_str_get_str(name);
+ return check(segattach(0,(char*)s,0,mp_obj_get_int(size)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_segattach_obj,p9_segattach);
+static mp_obj_t p9_segbrk(mp_obj_t addr,mp_obj_t top){
+ return check(segbrk(mp_obj_get_int(addr),mp_obj_get_int(top)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_segbrk_obj,p9_segbrk);
+static mp_obj_t p9_segfree(mp_obj_t addr,mp_obj_t size){check(segfree(mp_obj_get_int(addr),mp_obj_get_int(size)));return mp_const_none;}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_segfree_obj,p9_segfree);
+static mp_obj_t p9_segflush(mp_obj_t addr,mp_obj_t size){check(segflush((void*)(uintptr_t)mp_obj_get_int(addr),mp_obj_get_int(size)));return mp_const_none;}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_segflush_obj,p9_segflush);
+static mp_obj_t p9_segdetach(mp_obj_t addr){check(segdetach(mp_obj_get_int(addr)));return mp_const_none;}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_segdetach_obj,p9_segdetach);
+static long* p9_semaddr(mp_obj_t word){
+ mp_buffer_info_t b;mp_get_buffer_raise(word,&b,MP_BUFFER_WRITE);
+ if(b.len<sizeof(long) || ((uintptr_t)b.buf & (sizeof(long)-1))) mp_raise_ValueError(MP_ERROR_TEXT("aligned semaphore word required"));
+ return (long*)b.buf;
+}
+static mp_obj_t p9_semacquire(mp_obj_t word,mp_obj_t block){return check(semacquire(p9_semaddr(word),mp_obj_get_int(block)));}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_semacquire_obj,p9_semacquire);
+static mp_obj_t p9_semrelease(mp_obj_t word,mp_obj_t delta){return check(semrelease(p9_semaddr(word),mp_obj_get_int(delta)));}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_semrelease_obj,p9_semrelease);
+static mp_obj_t p9_tsemacquire(mp_obj_t word,mp_obj_t ms){return check(tsemacquire(p9_semaddr(word),mp_obj_get_int(ms)));}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_tsemacquire_obj,p9_tsemacquire);
+
 /* Diagnostic raw-syscall trampoline for ABI retirement tests.  It adds no
  * kernel entry point: the number is chosen by the caller exactly as the
  * generated per-call stubs do.  Optional arguments let a test form a real
@@ -1090,6 +1109,15 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_sysraw_obj,1,6,p9_sysraw);
 static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_plan9) },
     { MP_ROM_QSTR(MP_QSTR_sysraw), MP_ROM_PTR(&p9_sysraw_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_attach), MP_ROM_PTR(&p9_segattach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_brk), MP_ROM_PTR(&p9_segbrk_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_free), MP_ROM_PTR(&p9_segfree_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_flush), MP_ROM_PTR(&p9_segflush_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_detach), MP_ROM_PTR(&p9_segdetach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sem_acquire), MP_ROM_PTR(&p9_semacquire_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sem_release), MP_ROM_PTR(&p9_semrelease_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sem_timed_acquire), MP_ROM_PTR(&p9_tsemacquire_obj) },
+
     { MP_ROM_QSTR(MP_QSTR_pipenew), MP_ROM_PTR(&p9_pipenew_obj) },
     { MP_ROM_QSTR(MP_QSTR_piperead), MP_ROM_PTR(&p9_piperead_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
@@ -1173,7 +1201,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_kbd_read), MP_ROM_PTR(&p9_kbdread_obj) },
     { MP_ROM_QSTR(MP_QSTR_kbd_close), MP_ROM_PTR(&p9_kbdclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_kbd_leds), MP_ROM_PTR(&p9_kbdleds_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_open_ge), MP_ROM_PTR(&p9_objopenge_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_space), MP_ROM_PTR(&p9_objopenspace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
@@ -1202,7 +1229,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_TCP_LISTEN), MP_ROM_INT(ObjOpenTcpListen) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_TCP_CONNECT), MP_ROM_INT(ObjOpenTcpConnect) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE), MP_ROM_INT(ObjOpenGe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_BINDING), MP_ROM_INT(ObjOpenBinding) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
@@ -1288,7 +1314,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VIO_WRITE), MP_ROM_INT(VioWrite) },
     { MP_ROM_QSTR(MP_QSTR_VOPEN_TCP_LISTEN), MP_ROM_INT(VopenTcpListen) },
     { MP_ROM_QSTR(MP_QSTR_VOPEN_TCP_CONNECT), MP_ROM_INT(VopenTcpConnect) },
-    { MP_ROM_QSTR(MP_QSTR_VOPEN_GE), MP_ROM_INT(VopenGe) },
     { MP_ROM_QSTR(MP_QSTR_VOPEN_SPACE), MP_ROM_INT(VopenSpace) },
     { MP_ROM_QSTR(MP_QSTR_VOPEN_GE_SPACE), MP_ROM_INT(VopenGeSpace) },
     { MP_ROM_QSTR(MP_QSTR_RFNAMEG), MP_ROM_INT(RFNAMEG) },

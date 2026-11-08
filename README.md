@@ -44,7 +44,7 @@ One amd64 `pc64` configuration, booted from a normal ESP through GRUB:
 UEFI -> GRUB -> Clang 19/LLD PE32+ EFI loader (bootx64.efi)
      -> GCC 14 ELF kernel (9pc64.elf, no embedded interpreter)
      -> native GE/O volume on partition 5, selected by PARTUUID
-     -> OVOLOPEN / OSPACEOPEN / OEXECUTE
+     -> OVOLOPEN / OBJOPEN(ObjOpenSpace) / OEXECUTE
      -> GCC 14 MicroPython ELF stored in GE/O at OID 0x4f45584543000003
      -> restored init Space, init.run(), GE/O commit, interactive REPL
 ```
