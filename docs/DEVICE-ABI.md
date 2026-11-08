@@ -216,7 +216,9 @@ an explicitly authorized focused test, not a new kernel probe or boot profile.
 IN/OUT USB administration request through `OBJINVOKE(ObjOpDeviceCtl)` on a
 `ObjOpenUsb` service or control-endpoint Handle. It requires `Vcontrol` on the
 Handle. A default metadata service Handle cannot invoke control or open an
-endpoint; trusted bootstrap may request `Vcreate|Vcontrol` explicitly. Endpoint
+endpoint; trusted bootstrap may request `Vcreate|Vcontrol` explicitly.
+Opening a USBCTL endpoint requires both `Vcreate` and `Vcontrol` on the same
+service Handle; opening a USBDATA endpoint still requires `Vcreate`. Endpoint
 rights are derived from its kind and mode. `ObjOpDeviceCtl` continues to use
 operation 1 for USB clear-halt on a common Device session; the Handle kind
 selects the provider contract. The old USBOPEN..USBCLOSE numbers are reserved.

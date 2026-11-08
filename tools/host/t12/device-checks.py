@@ -142,11 +142,15 @@ def run():
 
     # Existing USBIOCTL performs bus enumeration only; all peripheral data
     # transfers below exercise the T12 OBJ device session and actual HCI ring.
-    svc = p.obj_usb_open(2184)
+    svc = p.obj_usb_open(2248)
     meta_svc = p.obj_usb_open()
     deny(lambda: p.obj_usb_ctl(meta_svc, 1, bytearray(4)), perm)
     deny(lambda: p.obj_usb_epopen(meta_svc, dev, 0, 1, 2), perm)
     p.obj_close(meta_svc)
+    data_svc = p.obj_usb_open(2184)
+    deny(lambda: p.obj_usb_epopen(data_svc, dev, 0, 1, 2), perm)
+    deny(lambda: p.obj_usb_epopen(data_svc, 9999, 0, 0, 2), bad)
+    p.obj_close(data_svc)
     ctl = p.obj_usb_epopen(svc, dev, 0, 1, 2)
     denied_ctl = p.obj_grant(ctl, 8)
     deny(lambda: p.obj_usb_ctl(denied_ctl, 8, bytearray()), perm)
@@ -312,6 +316,12 @@ p.obj_write(out,b'SENT')
     p.obj_close(ctl)
     p.obj_close(svc)
     p.obj_close(d)
+    data_svc = p.obj_usb_open(2184)
+    data_ep = p.obj_usb_epopen(data_svc, dev, 0, 0, 2)
+    ok(p.obj_info(data_ep)[8] == p.VKIND_USB_EP,
+       'Vcreate-only service retains USBDATA endpoint open')
+    p.obj_close(data_ep)
+    p.obj_close(data_svc)
     p.obj_close(c)
     shared.n = 1
     print('T12-FINISH', n[0], 'PASS')

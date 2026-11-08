@@ -53,11 +53,13 @@ functions over the remaining operations. `space.hput/hcommit/hcreate` were
 removed; the normal Space persistence path already uses OBJ.
 
 USB enumeration, endpoint ownership and control now use the common Vhand table.
-`plan9.obj_usb_open(2184)` requests `Vmeta|Vdelegate|Vcreate|Vcontrol` from
-the trusted bootstrap process. The default open is metadata-only. A control
-endpoint uses `plan9.obj_usb_ctl` over `ObjOpDeviceCtl`, whose USB branch
-requires `Vcontrol`, bounds the in/out buffer to 4096 bytes, and calls the
-same `usbcore_ioctl` provider. Common Device session clear-halt remains its
+`plan9.obj_usb_open(2248)` requests `Vmeta|Vdelegate|Vcreate|Vcontrol` from
+the trusted bootstrap process. A `Vcreate` service Handle without `Vcontrol`
+can open data endpoints but cannot open USBCTL endpoints. The default open is
+metadata-only. A control endpoint uses `plan9.obj_usb_ctl` over
+`ObjOpDeviceCtl`, whose USB branch requires `Vcontrol`, bounds the in/out
+buffer to 4096 bytes, and calls the same `usbcore_ioctl` provider. Common
+Device session clear-halt remains its
 own operation on the same router, selected by Handle kind. `plan9.usb_*`
 legacy bindings are removed; `plan9.obj_usb_*` is the public family.
 

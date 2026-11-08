@@ -2274,23 +2274,24 @@ vobjusbepopen(int handle, void *req)
 	Vusbep *ve;
 	Ep *ep;
 	ObjUsbEpReq r;
-	int h, opened, rights;
+	int h, opened, rights, need;
 
 	if(req == nil || !okaddr((uintptr)req, sizeof r, 0))
 		error(Ebadarg);
 	memmove(&r, req, sizeof r);
 	if(r.flags != 0 || r.reserved != 0)
 		error(Ebadarg);
-	sh = vlookup(handle, Vcreate);
+	if(r.kind != USBDATA && r.kind != USBCTL)
+		error(Ebadarg);
+	if(r.mode != OREAD && r.mode != OWRITE && r.mode != ORDWR)
+		error(Ebadarg);
+	need = Vcreate | (r.kind == USBCTL ? Vcontrol : 0);
+	sh = vlookup(handle, need);
 	if(sh->obj->kind != VkindUsb){
 		vhandput(sh);
 		error(Ebadarg);
 	}
 	vhandput(sh);
-	if(r.kind != USBDATA && r.kind != USBCTL)
-		error(Ebadarg);
-	if(r.mode != OREAD && r.mode != OWRITE && r.mode != ORDWR)
-		error(Ebadarg);
 	if(vobjhandlesbykind(up, VkindUsbEp) >= Vusbepslotmax)
 		error("too many USB endpoint handles");
 	ep = usbcore_getep(r.devno, r.epno);
