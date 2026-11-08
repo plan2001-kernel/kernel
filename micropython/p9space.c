@@ -1302,18 +1302,6 @@ static int iswriter(void) {
     return sp.isopen && getpid() == sp.writer;
 }
 
-/* GE R1 shares the active native Space, not the serialized Python graph.
- * Keep the PoC single-writer rule and do not implicitly commit an atomic block.
- */
-int p9_space_relation_writer(void) {return iswriter();}
-int p9_space_relation_handle(void) {
-    obyteopen();
-    if(!iswriter())mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ge: active Space writer required"));
-    if(atomicdepth)mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ge: unavailable inside space.atomic"));
-    if(p9_space_commit(0)<0)mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ge: Python Space commit failed"));
-    return osp;
-}
-
 /*
  * Stage 4: a commit to O.  p9_image_commit's changed-object records are
  * turned into the OID_GRAPH byte stream and
@@ -1644,7 +1632,6 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_MREPL), MP_ROM_INT(0) },
     { MP_ROM_QSTR(MP_QSTR_MBEFORE), MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_MAFTER), MP_ROM_INT(2) },
-    { MP_ROM_QSTR(MP_QSTR_ORELATE), MP_ROM_INT(64) },
     { MP_ROM_QSTR(MP_QSTR_hclose), MP_ROM_PTR(&space_hclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_hget), MP_ROM_PTR(&space_hget_obj) },
     { MP_ROM_QSTR(MP_QSTR_hexecute), MP_ROM_PTR(&space_hexecute_obj) },

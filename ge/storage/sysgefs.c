@@ -14,9 +14,6 @@
 #include "../../kernel/core/sd.h"
 #include "ocontext.h"
 #include "../../kernel/core/vobjint.h"
-#include "../../runtime/abi/namespace.h"
-#define GR_KERNEL 1
-#include "../../runtime/ge_relations/relations.h"
 
 /*
  * Plan2001: a GE instance (this directory's engine, per-volume instance model in kern.c) is opaque here:
@@ -797,27 +794,10 @@ ocontextspawn(Proc *child, int mode, char (*roles)[32], int nr)
 	octxput(snapshot);
 }
 
-/* NS4: kernel-mediated R1 reads. Raw metadata never crosses this ABI. */
-static QLock relationlock;
-static void nsid(Ohand *h,NsIdentity *id) {
- memmove(id->volume,volumeid,16);id->space=h->sid;id->oid=h->oid;
-}
-static int nsidentity(Ohand *h,NsIdentity *id) {
- return memcmp(id->volume,volumeid,16)==0 && id->space==h->sid && id->oid==h->oid;
-}
+/* Current object-ABI namespace visibility. */
 static int nsreadable(Ohand *h,int rights) {
  return !h->provider && !h->bootstrap && !h->revoked && !(h->origin && h->origin->revoked) && (h->rights&rights)==rights &&
   up->pgrp && octxmember(up->pgrp->ocontext,h);
-}
-static void nsout(NsOutput *user,void *bytes,usize n) {
- NsOutput out;
- validaddr((uintptr)user,sizeof out,1);memmove(&out,user,sizeof out);
- if(out.capacity>GR_MAX_DATA) error(Ebadarg);
- if(out.buffer){
-  if(out.capacity<n) error(Eshort);
-  validaddr((uintptr)out.buffer,n,1);memmove((void*)(uintptr)out.buffer,bytes,n);
- }else if(out.capacity) error(Ebadarg);
- out.count=n;memmove(user,&out,sizeof out);
 }
 /* Lock grants in address order, with duplicates removed, then verify an
  * unchanged map epoch. Never hold the context spinlock during I/O or sleep.
@@ -840,182 +820,4 @@ osvisibility(Ohand **source,int n,int *allowed)
  stable=epoch==(up->pgrp?octxepoch(up->pgrp->ocontext):0);
  for(i=k;i>0;i--) qunlock(&ordered[i-1]->gate);
  return stable;
-}
-/* Backends catch native GE errors: no kernel longjmp through the pure C library. */
-static int nrread(void *sp,uint64_t oid,void *buf,size_t cap,size_t *size) {
- long n;uvlong ver=0;
- if(waserror()) return -1;
- n=onativeget(sp,oid,nil,0,&ver);
- if(n<0){poperror();return 1;}
- *size=n;
- if(buf){if(n>cap){poperror();return -1;}if(onativeget(sp,oid,buf,n,&ver)!=n){poperror();return -1;}}
- poperror();return 0;
-}
-static int nrcreate(void *sp,const void *buf,size_t n,uint64_t *oid) {
- if(waserror()) return -1;
- if(onativecreate(sp,(void*)buf,n,oid)<0){poperror();return -1;}poperror();return 0;
-}
-static int nrwrite(void *sp,uint64_t oid,const void *buf,size_t n) {
- if(waserror()) return -1;onativeput(sp,oid,(void*)buf,n);poperror();return 0;
-}
-static int nrcommit(void *sp) {
- if(waserror()) return -1;onativecommit(sp);poperror();return 0;
-}
-static void nrcheck(int rc) {if(rc<0) error(rc==GR_INVALID?Ebadarg:"GE relation operation failed");}
-/* Private DB and native Space handle; the process never receives either. */
-static GrDB *nropen(Ohand *h,void **sp) {
- GrDB *d;GrBackend b;
- *sp=onativeopen(ovol,h->space);
- if(onativesid(*sp)!=h->sid){onativeclose(*sp);*sp=nil;error(Eperm);}
- d=smalloc(sizeof *d);
- if(waserror()){free(d);nexterror();}
- b.arg=*sp;b.read=nrread;b.create=nrcreate;b.write=nrwrite;b.commit=nrcommit;
- nrcheck(gr_open(d,&b));poperror();return d;
-}
-/* Bootstrap R1 client operations use the same transaction lock as delegated
- * mutations. NS_BOOT is privileged by original process identity AND a local
- * bootstrap Space handle; its selector is explicitly NsAuthority, not OID. */
-static uintptr
-nrbootstrap(int op,NsAuthority *user,char *text,int len,NsOutput *output)
-{
- NsAuthority authority;Ohand *h;GrDB *d=nil;void *sp=nil;
- uchar *data=nil;char *input=nil;uvlong values[GR_MAX_OBJECTS],oid;
- usize n=0,bytes=0;int locked=0,gate=0,i;
- if(!oboot()) error(Eperm);
- if(op<NS_FIND || op>NS_CREATE || len<0 || len>(op==NS_CREATE?GR_MAX_DATA:4096)) error(Ebadarg);
- validaddr((uintptr)user,sizeof authority,0);memmove(&authority,user,sizeof authority);
- h=ogetspace(authority.handle, VkindSpace, vobjrightsfromo(Oread | (op==NS_CREATE ? Ocreate|Ocommit : (op==NS_ADD || op==NS_REMOVE ? Owrite|Ocommit : 0))));
- if(waserror()){
-  if(gate) qunlock(ohgate(h));
-  if(sp) onativeclose(sp);
-  if(locked) qunlock(&relationlock);
-  ohandput(h);free(d);free(data);free(input);nexterror();
- }
- if(len){validaddr((uintptr)text,len,0);input=smalloc(len+1);memmove(input,text,len);input[len]=0;}
- qlock(&relationlock);locked=1;
- qlock(ohgate(h));gate=1;
- if(!h->bootstrap) error(Eperm);
- oauthorize(h,authority.oid,Oread);
- d=nropen(h,&sp);
- if(op==NS_FIND){
-  nrcheck(gr_find(d,input?input:"",len,values,GR_MAX_OBJECTS,&n));
-  data=smalloc(n*sizeof(NsIdentity)+1);
-  for(i=0;i<n;i++){
-   NsIdentity id;nsid(h,&id);id.oid=values[i];memmove(data+i*sizeof id,&id,sizeof id);
-  }
-  nsout(output,data,n*sizeof(NsIdentity));
- }else if(op==NS_GET){
-  nrcheck(gr_get(d,authority.oid,nil,0,&n));if(n>GR_MAX_DATA) error(Ebadarg);
-  data=smalloc(n+1);nrcheck(gr_get(d,authority.oid,data,n,&n));nsout(output,data,n);
- }else if(op==NS_TAGS){
-  nrcheck(gr_tags(d,authority.oid,values,GR_MAX_TAGS,&n));
-  data=smalloc(GR_MAX_TAGS*(GR_MAX_NAME+4));
-  for(i=0;i<n;i++){
-   char *name=(char*)gr_tag_name(d,values[i]);uint length=strlen(name);
-   memmove(data+bytes,&length,4);bytes+=4;memmove(data+bytes,name,length);bytes+=length;
-  }
-  nsout(output,data,bytes);
- }else if(op==NS_CREATE){
-  oauthorize(h,0,Ocreate|Ocommit);nrcheck(gr_create(d,input,len,&oid));nsout(output,&oid,sizeof oid);
- }else{
-  oauthorize(h,authority.oid,Owrite|Ocommit);
-  nrcheck(op==NS_ADD?gr_add(d,authority.oid,input,len):gr_remove(d,authority.oid,input,len));nsout(output,nil,0);
- }
- onativeclose(sp);sp=nil;
- gate=0;qunlock(ohgate(h));locked=0;qunlock(&relationlock);
- poperror();ohandput(h);free(d);free(data);free(input);return 0;
-}
-uintptr
-sysoquery(sysva_list list)
-{
- int op=sysva_arg(list,int);
- NsIdentity *selector=sysva_arg(list,NsIdentity*),id;
- char *text=sysva_arg(list,char*),*input=nil;
- int len=sysva_arg(list,int);
- NsOutput *output=sysva_arg(list,NsOutput*);
- Ohand *h[Obindmax],*selected=nil;
- NsIdentity result[Obindmax];
- GrDB *d=nil;void *sp=nil;uchar *data=nil;
- uvlong matches[GR_MAX_OBJECTS],tags[GR_MAX_TAGS];
- usize count=0,bytes=0;int n,i,j,k=0,gate=0,locked=0;uvlong epoch;
- if(op&NS_BOOT) return nrbootstrap(op&~NS_BOOT,(NsAuthority*)selector,text,len,output);
- if(op<NS_FIND || op>NS_REMOVE || len<0 || len>4096) error(Ebadarg);
- if(selector){validaddr((uintptr)selector,sizeof id,0);memmove(&id,selector,sizeof id);}
- else if(op!=NS_FIND) error(Ebadarg);
- if(len){validaddr((uintptr)text,len,0);input=smalloc(len+1);memmove(input,text,len);input[len]=0;}
- epoch=up->pgrp?octxepoch(up->pgrp->ocontext):0;
- n=up->pgrp?octxsnapshot(up->pgrp->ocontext,h,0):0;
- if(waserror()){
-  if(gate) qunlock(ohgate(selected));
-  if(locked) qunlock(&relationlock);
-  if(sp) onativeclose(sp);
-  free(d);free(input);free(data);
-  for(i=0;i<n;i++) ohandput(h[i]);nexterror();
- }
- qlock(&relationlock);locked=1;
- if(op==NS_FIND){
-  for(i=0;i<n;i++){
-   qlock(ohgate(h[i]));
-   if(nsreadable(h[i],Oread)){
-    /* Loading only authorized Spaces prevents metadata existence disclosure. */
-    selected=h[i];gate=1;
-    if(!d || sp==nil || onativesid(sp)!=h[i]->sid){
-     if(sp) onativeclose(sp);sp=nil;free(d);d=nil;
-     d=nropen(h[i],&sp);
-     nrcheck(gr_find(d,input?input:"",len,matches,GR_MAX_OBJECTS,&count));
-    }
-    for(j=0;j<count;j++) if(matches[j]==h[i]->oid){
-     int t;for(t=0;t<k;t++) if(nsidentity(h[i],&result[t])) break;
-     if(t==k) nsid(h[i],&result[k++]);break;
-    }
-    gate=0;
-   }
-   qunlock(ohgate(h[i]));
-  }
-  /* Revalidate all retained grants in one stable visibility epoch. */
-  {int allowed[Obindmax];
-   if(!osvisibility(h,n,allowed) || epoch!=(up->pgrp?octxepoch(up->pgrp->ocontext):0)) error("O: namespace changed; retry");
-   for(i=0;i<k;){
-    int found=0;
-    for(j=0;j<n;j++) if(allowed[j] && nsidentity(h[j],&result[i])) found=1;
-    if(!found) result[i]=result[--k];else i++;
-   }
-  }
-  nsout(output,result,k*sizeof result[0]);
- }else{
-  int rights=Oread | ((op==NS_ADD || op==NS_REMOVE)?Orelate:0);
-  for(i=0;i<n;i++) if(nsidentity(h[i],&id)){
-   qlock(ohgate(h[i]));
-   if(nsreadable(h[i],rights)){selected=h[i];gate=1;break;}
-   qunlock(ohgate(h[i]));
-  }
-  if(!selected) error(Eperm);
-  if(op==NS_GET){
-   long size;uvlong version;
-   size=onativeget(selected->sp,id.oid,nil,0,&version);
-   if(size<0 || size>GR_MAX_DATA) error(Eio);
-   data=smalloc(size?size:1);
-   if(onativeget(selected->sp,id.oid,data,size,&version)!=size) error(Eio);
-   nsout(output,data,size);
-  }else{
-   d=nropen(selected,&sp);
-   if(op==NS_TAGS){
-    int rc=gr_tags(d,id.oid,tags,GR_MAX_TAGS,&count);
-    if(rc==GR_NOTFOUND) count=0;else nrcheck(rc);
-    data=smalloc(GR_MAX_TAGS*(GR_MAX_NAME+4));
-    for(i=0;i<count;i++){
-     char *name=(char*)gr_tag_name(d,tags[i]);uint len=strlen(name);
-     memmove(data+bytes,&len,4);bytes+=4;memmove(data+bytes,name,len);bytes+=len;
-    }
-    nsout(output,data,bytes);
-   }else {
-    nrcheck(op==NS_ADD?gr_add(d,id.oid,input,len):gr_remove(d,id.oid,input,len));
-    nsout(output,nil,0);
-   }
-  }
-  gate=0;qunlock(ohgate(selected));
- }
- if(sp) onativeclose(sp);sp=nil;free(d);d=nil;
- locked=0;qunlock(&relationlock);
- poperror();free(input);free(data);for(i=0;i<n;i++) ohandput(h[i]);return 0;
 }

@@ -230,11 +230,10 @@ def sources() -> list[tuple[str, pathlib.Path]]:
         if n == "modjson":
             continue
         out.append((f"py_{n}", MPY / "py" / (n + ".c")))
-    for n in ("main", "modplan9", "modge", "modcbor", "modaesgcm", "p9space", "p9image", "p9sha",
+    for n in ("main", "modplan9", "modcbor", "modaesgcm", "p9space", "p9image", "p9sha",
               "p9builtin", "p9math", "p9console", "p9hal"):
         out.append((n, MPY / (n + ".c")))
     out.append(("extmod_modjson", MPY / "extmod/modjson.c"))
-    out.append(("ge_relations", ROOT / "runtime/ge_relations/relations.c"))
     out.append(("cbor", ROOT / "runtime/cbor/cbor.c"))
     out.append(("oenv", ROOT / "runtime/cbor/oenv.c"))
     out.append(("readline", MPY / "shared/readline/readline.c"))
@@ -389,7 +388,7 @@ def main() -> int:
     # rebuild together; source timestamps alone can silently misbind modules.
     signature=hashlib.sha256("\n".join(CFLAGS).encode())
     headers=set(GENHDR.glob("*.h"))
-    for base in (MPY,ROOT/"runtime/abi",ROOT/"runtime/ge_relations",ROOT/"runtime/cbor",ROOT/"runtime/ikecrypto"):
+    for base in (MPY,ROOT/"runtime/abi",ROOT/"runtime/cbor",ROOT/"runtime/ikecrypto"):
         headers.update(base.rglob("*.h"))
     for header in sorted(headers):
         signature.update(str(header.relative_to(ROOT)).encode())
