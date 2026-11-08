@@ -12,8 +12,26 @@
 > T11 is validated and PASS (2026-11-06) with one FIFO infinite-timeout
 > sentinel fix and a strengthened-validation follow-up PASS (2026-11-07, no
 > kernel change); T12 passes its emulated USB endpoint integration gate
-> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15 passes its minimal ESP integration gate (13 guest / 43 peer assertions); T16 remains **PLANNED**; see
+> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15 passes its minimal ESP integration gate (13 guest / 43 peer assertions); T16 passes its emulated USB/Ethernet consolidation gate (fresh 66/55); see
 > [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+
+## T16: common USB/Ethernet Device ABI (2026-11-08, emulated gate PASS)
+
+[T16-DEVICE-RESULT](T16-DEVICE-RESULT.md) records a source-backed contract /
+provider / legacy inventory, canonical builds and **fresh** T12 USB 66/66 plus
+T13 Ethernet 55/55 checks on the exact T16 implementation tree. Both boots
+reach normal GE/O commit/parent REPL. No runtime, ABI, driver or test changes
+were needed; documentation now separates USB completion from Ethernet FIFO
+semantics and clarifies control authorization/open-admission bounds.
+USBIOCTL enumeration/preparation remains a demonstrated dependency, with a
+separate legacy handle policy; no universal USB sandbox claim is made.
+
+T16 explicitly excludes **all Wi-Fi** implementation/emulation/firmware/family/
+service/tests; later work is unspecified and separately assigned. T11 is the
+FIFO prerequisite; T14/T15 and TCP/UDP are not. T14/T15 reruns are NOT RUN
+because there is no common-code change. Physical devices, combined-device
+single-boot campaign and unforced failure/race cases are NOT RUN. Earlier
+stage reports below remain dated evidence, not fresh T16 results.
 
 ## T15: minimal userspace ESP integration (2026-11-08, emulated gate PASS)
 
@@ -27,7 +45,7 @@ MPY aesgcm binding reuses existing BearSSL/espcrypto code in userspace; no
 kernel networking/syscall/ABI/provider is added. Fixed public demo SAs are
 TEST-ONLY, with no security across restart/reuse or production guarantees.
 No persistent bundle, lifecycle/replay-window or VPN work. Physical NIC and
-production security tests NOT RUN; T16 remains PLANNED. Current scope:
+production security tests were NOT RUN in that round; current T16 is above. Scope:
 [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md), superseding the earlier expansive proposal.
 
 ## T14: userspace IPv6 (2026-11-08, minimal emulated gate PASS)

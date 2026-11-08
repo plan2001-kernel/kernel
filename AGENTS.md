@@ -36,7 +36,7 @@ not a checklist. Fixed demo keys/counters carry no production, restart or
 key-reuse security claim. IKEv2 remains entirely excluded; no negotiation,
 key exchange or extra daemon. No new syscall, protocol kernel provider/FIFO,
 pathname/Chan/fd adapter or restored native network stack. UDP/TCP and T16
-are independent; T16 is not assigned.
+are independent; the later T16 assignment below applies.
 
 T13 and T14 have their recorded emulated gates; T15 now passes its minimal
 [ESP integration gate](docs/T15-ESP-RESULT.md) (13 guest / 43 peer assertions).
@@ -45,6 +45,22 @@ Native IP startup/OBJ TCP/UDP opens remain disabled. Preserve actual boot/MPY/
 driver dependencies, with no unused-stack compatibility obligation. In reports
 call the executor **agentti** and inspect the actual host/test environment.
 GitHub-first branch/PR/readback/MCP reporting above remains in force.
+
+## T16 scope decision (2026-11-08)
+
+T16 only consolidates/audits and freshly verifies existing T12 USB control
+and T13 raw Ethernet Device ABI paths, depending on T11 ObjectFIFO evidence.
+It requires no T14/T15 or TCP/UDP implementation. **No Wi-Fi** driver,
+firmware/emulator, 802.11, new family, service, management stack or tests;
+Wi-Fi is deferred to an unspecified separately assigned stage. The old
+USB/Wi-Fi T16 wording is superseded. Preserve USB synchronous completion and
+Ethernet accepted-L2/asynchronous FIFO semantics. Fix only demonstrated
+inconsistencies or unsafe ownership/rights/lifecycle with focused regression
+proof; do not invent code changes if the existing contract is coherent.
+Canonical builds and fresh T12/T13 tests, common/provider/legacy dependency
+matrix and owner-review PR/readback/MCP reporting define this task. No merge.
+The [T16 result](docs/T16-DEVICE-RESULT.md) now records fresh 66/55 emulated
+checks and builds PASS, with zero runtime/ABI changes. No physical test claim.
 
 ## plan2001.com: current infrastructure (2026-11-03)
 

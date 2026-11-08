@@ -10,7 +10,8 @@ T13 is merged and passes its emulated integration gate (55 T13 checks and a
 fresh 66-check USB regression; physical NIC NOT RUN). T14 now passes the
 minimal emulated IPv6 gate (24 guest / 245 external-peer assertions);
 T15 now passes the minimal ESP integration gate (13 guest / 43 peer
-assertions); T16 remains PLANNED. This document itself implements no stage.** T7 is the previous partial result. This roadmap records
+assertions); T16 passes the emulated USB/Ethernet consolidation gate (fresh 66/55
+checks; no Wi-Fi). This document itself implements no stage.** T7 is the previous partial result. This roadmap records
 architectural decisions and staged acceptance gates; T8 was completed under a
 separately assigned task and its observed result is recorded below and in
 [SYSCALL-T8-MULTIPROCESS](SYSCALL-T8-MULTIPROCESS.md). This document does not
@@ -117,7 +118,7 @@ in T11, not assumed from this summary.
 
 ### 2.3 One general authorized device model
 
-USB, Ethernet, Wi-Fi and similar devices share **one** general authorized device
+USB and Ethernet share **one** general authorized device
 model:
 
 - discovery and selection;
@@ -139,8 +140,8 @@ compatibility layer.
 Network device access is raw and protocol-independent:
 
 - Ethernet access transfers whole Ethernet frames.
-- Wi-Fi access uses the frame/mode exposed by the driver, not an invented
-  Ethernet-only contract.
+- Any future separately assigned Wi-Fi integration would use its driver
+  frame/mode; it is not implemented or required by T16.
 
 Network protocols live **primarily in userspace**. T14 first proves IPv6,
 ICMPv6, Neighbor Discovery and addressing. UDP and TCP are independent later
@@ -565,34 +566,50 @@ storage, production VPN or exhaustive security testing. Demo credentials and
 counters are confined to disposable tests; no restart/key-reuse security,
 production security or full RFC 4106 compliance is claimed. No IKE or T16 work.
 
-### T16 — Generalize to USB and Wi-Fi
+### T16 — Consolidate and verify the common USB/Ethernet Device ABI
 
-**Depends on:** the T12 common device contract and the relevant T11
-ObjectFIFO/T13 device-integration validation. It does not require completed T15
-userspace ESP or independent TCP/UDP work.
+**Owner decision (2026-11-08):** this replaces the former USB/Wi-Fi stage.
+**No Wi-Fi** is part of T16: no driver/firmware/emulator, 802.11, family,
+management stack, service or tests. It is deferred to an unspecified later,
+separately authorized stage; omitting it is not missing T16 coverage.
 
-**Scope (PLANNED):**
+**Depends on:** T11 ObjectFIFO validation, existing T12 USB control-endpoint
+and T13 raw Ethernet integration. T14/T15 and TCP/UDP are not prerequisites.
 
-Demonstrate that the T12 model handles different device payload and metadata
-formats while reusing the existing Handle/capability/ObjectFIFO machinery.
+**Result (2026-11-08):** [T16-DEVICE-RESULT](T16-DEVICE-RESULT.md) records
+canonical builds and fresh T12 66/66 / T13 55/55 PASS, normal GE/O boot/commit/
+REPL, an end-to-end contract/legacy inventory and zero runtime/ABI changes.
+Physical hardware and unforced fault/race cases remain NOT RUN.
 
-- Keep drivers and hardware-specific control in the kernel.
-- Do not create separate device-type FIFOs.
-- Do not create a hierarchical device filesystem.
+**Scope: audit and freshly verify the existing common contract.**
 
-**Acceptance conditions (verifiable):**
+Inspect actual runtime/libc/kernel/usbcore/ethercore/MPY call paths and focused
+tests. Record common rights, non-amplification, identity, ownership, lifetime,
+errors and cleanup versus genuinely provider-specific payload/control and
+completion semantics. Inventory residual legacy APIs, including USBIOCTL
+preparation, from real callers; retain actual boot/MPY/driver dependencies.
+Fix only demonstrable correctness/ownership/validation/lifecycle defects or
+needless generic duplication with minimal regression-covered changes. Zero
+kernel code changes is a valid result if audit and fresh tests justify it.
 
-- At least one USB path and one Wi-Fi path demonstrate the same general device
-  ABI with their genuinely different payload/metadata formats.
-- Handles, rights, authorization, ownership, completion and teardown use the
-  shared machinery; differences are device-specific data, not separate FIFO
-  families.
-- Hardware-specific control remains in the kernel and is authorized.
-- No path hierarchy, fake files or `fd` compatibility layer is introduced.
-- Results are honest about which hardware/driver modes were and were not run.
+**Acceptance conditions:**
 
-**NOT in scope:** universal driver unification for its own sake, a device
-filesystem, or claiming all USB/Wi-Fi hardware is covered.
+- Both existing families reuse the same Object/Handle/capability machinery.
+- USB SEND has one synchronous pending completion returned by RECV; Ethernet
+  SEND accepts complete L2 bytes and RECV exposes the existing asynchronous
+  ObjectFIFO. Do not invent a universal completion or device FIFO family.
+- Verify catalog/open/close, authorization/control, complete-message bounds,
+  metadata/errors, aliases/processes/owner exit, stale Handles and teardown.
+- Run canonical kernel/MPY/EFI/host builds and fresh T12/T13 focused tests on
+  the exact T16 tree; run T14/T15 only if a real shared-code change can affect
+  them. Confirm normal parent GE/O boot/commit/REPL and record NOT RUN limits.
+- Deliver an evidence-backed common/provider/legacy matrix, exact source and
+  artifact references, honest results, branch/PR and independent readback.
+
+**NOT in scope:** Wi-Fi, new device families/subsystems/frameworks, protocol or
+crypto work, new syscall/ABI numbering/layout, separate queues/FIFOs,
+pathname/Chan/fd adapters, GE/O format changes, disabled native-IP restoration,
+physical device requirements or unrelated cleanup. Main remains owner-reviewed.
 
 ## 5. Dependency and delivery rules
 
@@ -668,7 +685,9 @@ T14 **passes its minimal emulated IPv6 gate** (24 guest / 245 external-peer
 assertions, fresh T13 regression and persistence PASS); see
 [T14-IPV6-RESULT](T14-IPV6-RESULT.md). T15 now **passes the minimal emulated
 ESP interface gate** (13 guest / 43 peer assertions, T13/T14 regressions);
-see [T15-ESP-RESULT](T15-ESP-RESULT.md). T16 remains **PLANNED**. T15 is only
+see [T15-ESP-RESULT](T15-ESP-RESULT.md). T16 **passes its emulated USB/Ethernet consolidation gate**, with fresh
+66/55 checks and zero runtime changes; see [T16-DEVICE-RESULT](T16-DEVICE-RESULT.md).
+Wi-Fi is explicitly excluded. T15 is only
 a minimal fixed-SA userspace ESP integration test,
 not the superseded persistent-bundle or negotiation design. T7 is the previous partial
 result. The roadmap itself does not authorize implementation; T12 was
