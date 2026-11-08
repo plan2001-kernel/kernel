@@ -19,6 +19,11 @@ The loader is intentionally built with the approved Clang/LLD COFF toolchain;
 the kernel and MicroPython use GCC. These are separate builds; changing the
 kernel does not rebuild the loader or the interpreter.
 
+The experimental AArch64 boot kernel and its `BOOTAA64.EFI` loader are
+different artifacts with their own Clang/LLD manifests. They are not part of
+the amd64 build above and are described in
+[ARCHITECTURE-SUPPORT](ARCHITECTURE-SUPPORT.md).
+
 ## Build
 
 Prerequisites: GCC 14, Clang 19 and LLD (`clang-19`, `lld-link-19`), Python 3,

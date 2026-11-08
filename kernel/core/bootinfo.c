@@ -1,5 +1,6 @@
 #include "u.h"
 #include "../core/lib.h"
+#include <oplanboot.h>
 #include "mem.h"
 #include "dat.h"
 #include "fns.h"
@@ -79,20 +80,6 @@ bootinforand(void *p, ulong n)
 	hwrandbuf = bootinforandnext;
 }
 
-/* does the section [off, off+len) lie within the blob, after the header? */
-static int
-bootinfoin(BootInfo *b, uvlong off, uvlong len)
-{
-	return off >= b->headersize && off <= b->totalsize && len <= b->totalsize - off;
-}
-
-/* do [a, a+al) and [b, b+bl), both within the blob, share a byte? */
-static int
-bootinfooverlap(uvlong a, uvlong al, uvlong b, uvlong bl)
-{
-	return al != 0 && bl != 0 && a < b + bl && b < a + al;
-}
-
 /* the memory map's entries, before bootinfo is set */
 static BootMem*
 bootmemof(BootInfo *b, uchar *blob, int i)
@@ -132,20 +119,13 @@ bootoverram(BootInfo *b, uchar *blob, uvlong base, uvlong len)
 	return 0;
 }
 
-static ulong
-bootbe32(uchar *p)
-{
-	return (ulong)p[0]<<24 | p[1]<<16 | p[2]<<8 | p[3];
-}
-
 void
 bootinfoinit(void)
 {
 	BootInfo *b;
 	uchar *blob;
-	uvlong off[4], len[4], need;
-	uchar *fdt;
-	int i, j;
+	uvlong need;
+	char err[OplanBootErrLen];
 
 	if(bootinfopa == 0 || (bootinfopa & (BY2PG-1)) != 0)
 		bootinfohalt();
@@ -164,33 +144,11 @@ bootinfoinit(void)
 	|| b->totalsize < b->headersize)
 		bootinfohalt();
 	memmove(b, blob, b->headersize < sizeof *b ? b->headersize : sizeof *b);
-	if(b->arch != BootInfoArch)		/* a blob made for another ISA */
-		bootinfohalt();
 	if(bootearlymap(bootinfopa, b->totalsize) != blob)
 		bootinfohalt();
-
-	/* every section after the header, within the blob, none overlapping */
-	off[0] = b->configoff, len[0] = b->configlen;
-	off[1] = b->logoff, len[1] = b->loglen;
-	off[2] = b->fdtoff, len[2] = b->fdtlen;
-	off[3] = b->mmapoff, len[3] = (uvlong)b->mmapcount * b->mmapentsize;
-	for(i = 0; i < nelem(off); i++){
-		if(!bootinfoin(b, off[i], len[i]))
-			bootinfohalt();
-		for(j = 0; j < i; j++)
-			if(bootinfooverlap(off[i], len[i], off[j], len[j]))
-				bootinfohalt();
-	}
-	if(b->configlen == 0 || ((char*)blob)[b->configoff + b->configlen - 1] != '\0'
-	|| b->mmapcount == 0 || b->mmapentsize < sizeof(BootMem))
+	if(!oplanbootvalidate(b, (u64int)(uintptr)blob, BootInfoArch,
+	    err, sizeof err))
 		bootinfohalt();
-
-	/* a device tree, if there is one, is a whole one */
-	if(b->fdtlen != 0){
-		fdt = blob + b->fdtoff;
-		if(b->fdtlen < 40 || bootbe32(fdt) != 0xd00dfeed || bootbe32(fdt+4) > b->fdtlen)
-			bootinfohalt();
-	}
 
 	/*
 	 * what lies outside the blob, by the map: the root's image is memory
@@ -232,23 +190,12 @@ bootmem(int i)
 int
 bootmemclass(u32int type)
 {
-	switch(type){
-	case BootMemLoaderCode:
-	case BootMemLoaderData:
-	case BootMemBootCode:
-	case BootMemBootData:
-	case BootMemConventional:
+	switch(oplanbootmemclass(type)){
+	case OplanBootRAM:
 		return BootClassRAM;
-	case BootMemACPIReclaim:
+	case OplanBootACPI:
 		return BootClassACPI;
-	case BootMemReserved:
-	case BootMemRuntimeCode:
-	case BootMemRuntimeData:
-	case BootMemUnusable:
-	case BootMemACPINVS:
-	case BootMemMMIO:
-	case BootMemMMIOPort:
-	case BootMemPalCode:
+	case OplanBootReserved:
 		return BootClassReserved;
 	}
 	return -1;

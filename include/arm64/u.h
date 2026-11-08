@@ -60,6 +60,14 @@ union FPdbleword
 	};
 };
 
+#ifdef PLAN2001_GCC
+/* the compiler's AAPCS64 builtin varargs ABI, as include/amd64/u.h does */
+typedef	__builtin_va_list	va_list;
+#define va_start(list, start)	__builtin_va_start(list, start)
+#define va_end(list)		__builtin_va_end(list)
+#define va_arg(list, mode)	__builtin_va_arg(list, mode)
+#define va_copy(dst, src)	__builtin_va_copy(dst, src)
+#else
 typedef	char*	va_list;
 #define va_start(list, start) list =\
 	(sizeof(start) < 8?\
@@ -75,3 +83,4 @@ typedef	char*	va_list;
 	(sizeof(mode) == 4)?\
 		((list += 8), (mode*)list)[-2]:\
 		((list += sizeof(mode)), (mode*)list)[-1])
+#endif
