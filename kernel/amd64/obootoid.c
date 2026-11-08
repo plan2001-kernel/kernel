@@ -26,7 +26,7 @@ struct Oargs
 
 extern long ovolopen(char*, int);
 extern long ospaceopen(int, char*, int);
-extern long ospaceget(int, uvlong, void*, long, uvlong*);
+extern long ospaceclose(int);
 extern long oexecute(int, uvlong, char**, int);
 
 void
@@ -47,8 +47,7 @@ _main(struct Oargs *a)
 		av[i] = a->argv[i];
 	av[a->argc] = nil;
 	oexecute(h, a->oid, av, a->argc);
-	/* Failed load: the process-local handle must still be usable. */
-	if(ospaceget(1, 0xffffffff00000000ULL, nil, 0, nil) >= 0)
-		exits("oexecute: handle");
+	/* Failed load leaves ownership here; release the actual Space handle. */
+	ospaceclose(h);
 	exits("oexecute");
 }

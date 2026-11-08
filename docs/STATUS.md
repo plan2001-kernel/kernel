@@ -1,5 +1,10 @@
 # Plan2001-O — current status
 
+## Syscall consolidation (2026-11-08)
+
+The proposed branch is documented in [SYSCALL-CONSOLIDATION](SYSCALL-CONSOLIDATION.md). It reduces the active amd64 dispatch table from 62 to 33 entries. The 135 assigned numbers remain allocated; 102 are reserved and reject with `Ebadarg`. The T9/T10 counts below are historical measurements.
+
+
 > **Architecture note (2026-11-06):** older wording that the kernel boundary is
 > “exactly five syscalls” is **superseded**. The five universal operations
 > `OBJCREATE/OPEN/CLOSE/BIND/INVOKE` (136–140) are the general *object*

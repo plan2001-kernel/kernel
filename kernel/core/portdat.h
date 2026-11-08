@@ -32,7 +32,6 @@ typedef struct Sargs	Sargs;
 typedef struct Schedq	Schedq;
 typedef struct Segment	Segment;
 typedef struct Segio	Segio;
-typedef struct Sema	Sema;
 typedef struct Sysstat	Sysstat;
 typedef struct Timer	Timer;
 typedef struct Timers	Timers;
@@ -289,15 +288,6 @@ struct Physseg
 	uintptr	size;			/* Maximum segment size in bytes */
 };
 
-struct Sema
-{
-	Rendez rz;
-	long	*addr;
-	int	waiting;
-	Sema	*next;
-	Sema	*prev;
-};
-
 struct Segment
 {
 	Ref ref;
@@ -317,7 +307,6 @@ struct Segment
 
 	ulong	used;		/* pages in use */
 
-	Sema	sema;
 };
 
 struct Segio
@@ -539,7 +528,6 @@ struct Proc
 	Egrp 	*egrp;		/* Environment group */
 	Ref	*fdgrp;		/* legacy RFORK FD-group presence token, nil = absent */
 	void	*ohandles;	/* Process-local native O Space handles */
-	void	*usbhandles;	/* Process-local native USB handles */
 	int	net6permit;	/* explicit UDP6 authority, never rfork inherited */
 	int	stdoutpipe;	/* explicit Pipe-backed IOWRITE route, otherwise 0 */
 	void	*vobjhandles;	/* Process-local object/Pipe/UART/KBD handles */

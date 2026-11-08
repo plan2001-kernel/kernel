@@ -67,18 +67,17 @@ callinit(ObjCall *c, unsigned int op)
  * synchronizing; PutOid only stages one named OID and never commits. */
 long
 obj_create_persist(int space, void *data, unsigned long long len,
-		unsigned long long *oid)
+                   unsigned long long *oid)
 {
-	ObjCall c;
+    ObjId id;
+    long h;
 
-	if(oid == nil)
-		return -1;
-	callinit(&c, ObjOpCreatePersist);
-	c.in = data;
-	c.inlen = len;
-	c.out = oid;
-	c.outlen = sizeof *oid;
-	return obj_invoke(space, &c, sizeof c);
+    if(oid == nil){werrstr("bad arg in system call");return -1;}
+    h = obj_create(space, ObjKindGe, data, len, &id);
+    if(h < 0) return h;
+    obj_close(h);
+    *oid = id.oid;
+    return 0;
 }
 
 long
@@ -228,11 +227,10 @@ obj_accept(int listener, unsigned long long timeout)
 long
 obj_grant(int handle, unsigned long long rights)
 {
-	ObjCall c;
+    ObjOpenHandleReq req = {handle, 0};
 
-	callinit(&c, ObjOpGrant);
-	c.arg0 = rights;
-	return obj_invoke(handle, &c, sizeof c);
+    if(rights == 0 || rights > Vall){werrstr("bad arg in system call");return -1;}
+    return obj_open(ObjOpenHandle, &req, sizeof req, rights, nil);
 }
 
 long
@@ -503,6 +501,20 @@ obj_usb_epopen(int handle, int devno, int epno, int kind, int mode)
 	c.in = &r;
 	c.inlen = sizeof r;
 	return obj_invoke(handle, &c, sizeof c);
+}
+
+/* USB enumeration/administration shares the existing DeviceCtl operation;
+ * its bounded buffer is IN/OUT, and the Handle must carry Vcontrol. */
+long
+obj_usb_ctl(int handle, unsigned int operation, void *data, unsigned long long len)
+{
+    ObjCall c;
+
+    callinit(&c, ObjOpDeviceCtl);
+    c.arg0 = operation;
+    c.out = data;
+    c.outlen = len;
+    return obj_invoke(handle, &c, sizeof c);
 }
 
 long

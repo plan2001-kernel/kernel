@@ -317,19 +317,11 @@ int p9_console_write(const char *data, size_t size) {
         }
         return 0;
     }
-    while (size) {
-        n = write(1, (void *)data, size > 8192 ? 8192 : (long)size);
-        if (n <= 0) return -1;
-        data += n;
-        size -= n;
-    }
-    return 0;
+    return -1;
 }
 
 /*
- * Bounded diagnostic formatter.  In the native-output boot it uses the
- * process-local DIAGNOSTIC stream; otherwise it preserves the legacy
- * fprint(2,...) behavior exactly.  No fallback from native to fd 2.
+ * Bounded diagnostic formatter using the authorized DIAGNOSTIC Handle.
  */
 void
 p9_dprintf(char *fmt, ...)
@@ -342,13 +334,10 @@ p9_dprintf(char *fmt, ...)
     n = vsnprint(buf, sizeof buf, fmt, va);
     va_end(va);
     if (n <= 0) return;
-    if (p9_native_output()) {
-        if (diagh < 0)
-            diagh = console_open(Iohdiag);
-        if (diagh < 0 || obj_write(diagh, buf, (unsigned long long)n, 0) != n)
-            return;
-    } else
-        fprint(2, "%s", buf);
+    if (diagh < 0)
+        diagh = console_open(Iohdiag);
+    if (diagh >= 0)
+        obj_write(diagh, buf, (unsigned long long)n, 0);
 }
 
 unsigned long long p9_console_msec(void) {

@@ -22,9 +22,6 @@
 // Stage 4: the native O calls (sys.h, devgefs.c's sysospace*)
 extern long ovolopen(char *, int);
 extern long ospaceopen(int, char *, int);
-extern long ospaceput(int, unsigned long long, void *, long);
-extern long ospacecreate(int, void *, long, unsigned long long *);
-extern long ospacecommit(int, unsigned long long *);
 extern long ospaceclose(int);
 extern long oterminate(long);
 
@@ -247,9 +244,7 @@ static int oreadobj(unsigned long long oid, vstr_t *v, unsigned long long *ver) 
  * (including OID_GRAPH/Environment/code before they are published) without
  * committing, so all writes of one commit stay in the same Space
  * transaction.  CreatePersist is the existing atomic allocate+payload+sync
- * operation and keeps the 1 MiB direct-object PoC limit.  The legacy
- * explicit-Ohand API (space.h*) still uses OSPACEPUT/OSPACECOMMIT/
- * OSPACECREATE and is a separate T2b target. */
+ * operation and keeps the 1 MiB direct-object PoC limit.  The old explicit Ohand write wrappers have been retired. */
 static void
 objputoid_space(unsigned long long oid, void *buf, long n)
 {
@@ -901,8 +896,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(space_oid_obj, space_oid);
  * OID and not the OID_GRAPH payload.  Reads go through the canonical
  * OBJOPEN/OBJINVOKE/OBJCLOSE boundary.  The automatic persistent path uses
  * OBJINVOKE(ObjOpPutOid/ObjOpCommit/ObjOpCreatePersist) on the authorized
- * Space handle (T2).  The explicit legacy Handle API space.h* below still
- * uses the old ospaceput/ospacecreate/ospacecommit calls (T2b target).
+ * Space handle (T2).
  * A numeric value may coincide with a Python graph OID; the two namespaces
  * are independent.
  */
@@ -1539,7 +1533,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     );
 
 /* Experimental native object views. Rights are enforced by the kernel. */
-extern long obind(int, unsigned long long, char*, int, int);
+extern long obindx(int, unsigned long long, char*, int, int);
 extern long olookup(char*, int, unsigned long long*);
 extern long ounbind(char*, int);
 extern long orevoke(int);
@@ -1548,7 +1542,7 @@ extern long oexecute(int, unsigned long long, char**, int);
 static void hcheck(long r) { if(r < 0) raise_err(); }
 static mp_obj_t space_obind(size_t n, const mp_obj_t *a) {
     const char *role = mp_obj_str_get_str(a[0]);
-    hcheck(obind(n>3 ? mp_obj_get_int(a[3]) : osp, obyteoid(a[1]),
+    hcheck(obindx(n>3 ? mp_obj_get_int(a[3]) : osp, obyteoid(a[1]),
                                                     (char*)role, strlen(role), mp_obj_get_int(a[2])));
     return mp_const_none;
 }
@@ -1605,27 +1599,6 @@ static mp_obj_t space_hget(mp_obj_t h, mp_obj_t oid) {
     return mp_obj_new_bytes_from_vstr(&v);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(space_hget_obj,space_hget);
-static mp_obj_t space_hput(mp_obj_t h, mp_obj_t oid, mp_obj_t data) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
-    hcheck(ospaceput(mp_obj_get_int(h),obyteoid(oid),b.buf,b.len));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(space_hput_obj,space_hput);
-static mp_obj_t space_hcommit(mp_obj_t h) {
-    unsigned long long ver;
-    hcheck(ospacecommit(mp_obj_get_int(h),&ver));
-    return mp_obj_new_int_from_ull(ver);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_hcommit_obj,space_hcommit);
-static mp_obj_t space_hcreate(mp_obj_t h, mp_obj_t data) {
-    mp_buffer_info_t b;
-    unsigned long long oid;
-    mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
-    hcheck(ospacecreate(mp_obj_get_int(h),b.buf,b.len,&oid));
-    return mp_obj_new_int_from_ull(oid);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(space_hcreate_obj,space_hcreate);
 static mp_obj_t space_hexecute(mp_obj_t h, mp_obj_t oid) {
     hcheck(oexecute(mp_obj_get_int(h),obyteoid(oid),nil,0));
     return mp_const_none;
@@ -1707,9 +1680,6 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_orevoke), MP_ROM_PTR(&space_orevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_hclose), MP_ROM_PTR(&space_hclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_hget), MP_ROM_PTR(&space_hget_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hput), MP_ROM_PTR(&space_hput_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hcommit), MP_ROM_PTR(&space_hcommit_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hcreate), MP_ROM_PTR(&space_hcreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_hexecute), MP_ROM_PTR(&space_hexecute_obj) },
     { MP_ROM_QSTR(MP_QSTR_OREAD), MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_OWRITE), MP_ROM_INT(2) },

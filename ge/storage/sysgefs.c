@@ -543,141 +543,6 @@ sysospaceopen(sysva_list list)
 }
 
 uintptr
-sysospaceget(sysva_list list)
-{
-	Ohand *oh;
-	char *buf;
-	uvlong oid, v, *ver;
-	long n, r;
-	int h;
-
-	h = sysva_arg(list, int);
-	oid = sysva_arg(list, uvlong);
-	buf = sysva_arg(list, char*);
-	n = sysva_arg(list, long);
-	ver = sysva_arg(list, uvlong*);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oid, Oread);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 1);	/* written */
-	if(ver != nil)
-		validaddr((uintptr)ver, sizeof *ver, 1);
-	v = 0;
-	r = onativeget(oh->sp, oid, buf, n, &v);
-	if(ver != nil)
-		memmove(ver, &v, sizeof v);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return r;
-}
-
-uintptr
-sysospaceput(sysva_list list)
-{
-	Ohand *oh;
-	char *buf;
-	uvlong oid;
-	long n;
-	int h;
-
-	h = sysva_arg(list, int);
-	oid = sysva_arg(list, uvlong);
-	buf = sysva_arg(list, char*);
-	n = sysva_arg(list, long);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oid, Owrite);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 0);	/* read */
-	onativeput(oh->sp, oid, buf, n);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
-}
-
-uintptr
-sysospacecreate(sysva_list list)
-{
-	Ohand *oh;
-	char *buf;
-	uvlong oid, *p;
-	long n;
-	int h;
-
-	h = sysva_arg(list, int);
-	buf = sysva_arg(list, char*);
-	n = sysva_arg(list, long);
-	p = sysva_arg(list, uvlong*);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oh->oid, Ocreate);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 0);	/* read */
-	if(p == nil)
-		error(Ebadarg);
-	validaddr((uintptr)p, sizeof *p, 1);	/* written */
-	oid = 0;
-	onativecreate(oh->sp, buf, n, &oid);
-	memmove(p, &oid, sizeof oid);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
-}
-
-uintptr
-sysospacecommit(sysva_list list)
-{
-	Ohand *oh;
-	uvlong v, *ver;
-	int h;
-
-	h = sysva_arg(list, int);
-	ver = sysva_arg(list, uvlong*);
-	oh = ogetspace(h);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oh->oid, Ocommit);
-	if(ver != nil)
-		validaddr((uintptr)ver, sizeof *ver, 1);
-	v = onativecommit(oh->sp);
-	if(ver != nil)
-		memmove(ver, &v, sizeof v);
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
-}
-
-uintptr
 sysospaceclose(sysva_list list)
 {
 	Ohtab *ht = up->ohandles;
@@ -983,7 +848,7 @@ onscanextend(void)
  if(denied) error(Eperm);
 }
 static uintptr
-obinding(sysva_list list, int extended)
+obinding(sysva_list list)
 {
 	Ohand *source, *grant;
 	char name[Onamemax], *p;
@@ -994,7 +859,7 @@ obinding(sysva_list list, int extended)
 	p = sysva_arg(list, char*);
 	n = sysva_arg(list, int);
 	rights = sysva_arg(list, int);
- if(extended){mode=(unsigned)rights>>8;rights &= 255;}
+ mode=(unsigned)rights>>8;rights &= 255;
  if(mode>2) error(Ebadarg);
  onscanextend();
 	orolename(name, p, n);
@@ -1033,11 +898,8 @@ obinding(sysva_list list, int extended)
 }
 
 uintptr
-sysobind(sysva_list list)
-{return obinding(list,0);}
-uintptr
 sysobindx(sysva_list list)
-{return obinding(list,1);}
+{return obinding(list);}
 
 /* A view handle is process-local and cannot be used as a storage handle.
  * Export freezes only authorized roles; attachments retain actual grants. */

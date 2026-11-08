@@ -31,6 +31,8 @@ operation must not be forced through the object calls merely to preserve a
 count. Historical T0–T7 reports are evidence of their rounds, not current
 quotas.
 
+**Current syscall consolidation (2026-11-08):** 33 active numbers, 102 reserved. See [SYSCALL-CONSOLIDATION](SYSCALL-CONSOLIDATION.md). Historical counts below describe the earlier implementation.
+
 **T12 implementation addition (2026-11-07):** the common message-device ABI
 and one native USB control-endpoint integration are defined in
 [DEVICE-ABI](DEVICE-ABI.md), with current validation in

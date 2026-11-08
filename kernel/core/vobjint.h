@@ -58,7 +58,6 @@ int	vobjcommit(int handle, uvlong *ver);
 int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
 int	vobjprocessselfopen(uvlong rights, VobjId *id);
-int	vobjtimenow(int handle, uvlong *ns);
 
 /* Process-lifecycle providers.  The OBJINVOKE operations validate the
  * caller's own ProcessSelf or Space capability, then call the shared kernel
@@ -81,7 +80,6 @@ int	vobjfifostat(int handle, VobjFifostat *out);
 int	vobjfifosub(int fifoh, uvlong rights, long capacity);
 int	vobjfifosend(int fifoh, int objh, void *env, long envlen);
 int	vobjfiforecv(int subh, void *env, long envlen, int timeout, long *got);
-int	vobjgrant(int handle, uvlong rights);
 int	vobjrevoke(int handle);
 long	vobjio(int handle, uvlong op, void *buf, long n, long timeout);
 long	vobjreadver(int handle, void *buf, long n, long timeout, uvlong *ver);

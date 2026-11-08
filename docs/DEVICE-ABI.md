@@ -212,14 +212,17 @@ It seeds the check module through mkovol's existing SOURCE argument and uses
 the sanctioned QEMU O-boot runner with a disposable xHCI/mouse device. This is
 an explicitly authorized focused test, not a new kernel probe or boot profile.
 
-`plan9.usb_ioctl(handle, operation, writable_buffer)` is a bounded buffer-packing
-adapter over the existing legacy USBIOCTL syscall, used only to prepare and
-remove the downstream device through normal USB administration. Its 4096-byte
-buffer cap and the legacy kernel's direction, Handle and operation validation
-remain in effect. It adds no controller logic or new syscall, and does not
-change legacy USB authorization. Peripheral data transfer, completion and
-rights checks then use the T12 session operations. Root-hub emulation and
-actual peripheral HCI data are reported separately.
+`plan9.obj_usb_ctl(handle, operation, writable_buffer)` sends a bounded
+IN/OUT USB administration request through `OBJINVOKE(ObjOpDeviceCtl)` on a
+`ObjOpenUsb` service or control-endpoint Handle. It requires `Vcontrol` on the
+Handle. A default metadata service Handle cannot invoke control or open an
+endpoint; trusted bootstrap may request `Vcreate|Vcontrol` explicitly. Endpoint
+rights are derived from its kind and mode. `ObjOpDeviceCtl` continues to use
+operation 1 for USB clear-halt on a common Device session; the Handle kind
+selects the provider contract. The old USBOPEN..USBCLOSE numbers are reserved.
+The `usbcore` enumeration and detach operations remain synchronous, with the
+same 4096-byte bound. This administration path is separate from the common
+message-device transfer path above.
 
 
 ## T13 raw Ethernet provider
@@ -298,16 +301,10 @@ attenuation/delegation is through Grant/OpenHandle/OSPAWN. Generic FIFO
 publication is not a promise to transfer every device I/O/control right;
 its existing ceiling does not propagate those operational device bits.
 
-The common ABI coexists with active legacy USB administration and stream
-APIs. T12's actual downstream fixture uses USBIOCTL new-device/address/detach
-through its legacy USB handles to prepare/remove the endpoint, then all
-peripheral data/completions use the common Device session. The old and new
-DATA paths share the same usbcore exclusive inuse claim; there is no second
-HCI. This dependency is preserved, not relabeled as dead code. The legacy
-USB handle table/policy remains distinct; this PoC does not claim all USB
-access is exclusively controlled by the new OBJ catalog rights. Broader
-legacy retirement/authorization is not silently implemented by this audit.
-
-No runtime, ABI layout/number, generic FIFO, driver or test logic change was
-needed. T16 only narrows the specification, clarifies these existing semantics
-and freshly verifies USB/Ethernet. Wi-Fi and new device families are excluded.
+T12's downstream fixture uses the `ObjOpenUsb` service and control-endpoint
+Handles for synchronous `usbcore` new-device/address/detach administration,
+then uses the common Device session for all peripheral data and completions.
+Both paths share the USB core's exclusive endpoint claim and HCI state.
+Control requires `Vcontrol` on its own Handle. The old USB syscall table and
+its separate Handle table are retired; the focused gate now exercises this
+OBJ route directly.

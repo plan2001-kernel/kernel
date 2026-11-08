@@ -23,6 +23,8 @@ import shutil
 import subprocess
 import sys
 
+from syscall_abi import syscall_entries
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 MPY = ROOT / "micropython"
 BUILD = ROOT / "build/gcc/mpy"
@@ -127,30 +129,16 @@ def gen_stubs() -> pathlib.Path:
     slots; RBP is preserved around the call.
     """
     GEN.mkdir(parents=True, exist_ok=True)
-    text = (ROOT / "runtime/abi/sys.h").read_text()
     lines = [".text"]
     seen = set()
-    for line in text.splitlines():
-        m = re.match(r"#define\s+([A-Z0-9_]+)\s+([0-9]+)", line)
-        if not m:
+    for name, num, reserved in syscall_entries():
+        if reserved:
             continue
-        name, num = m.group(1), int(m.group(2))
         sym = name.lower()
         if sym in ("exits", "nsec"):
             sym = "_" + sym
         if re.match(r"^_x[0-9]+$", sym):
             sym = "sysdeath"
-        if sym == "errstr":
-            # errstr() is now a real libc function over OBJINVOKE
-            # (ObjOpErrstrExchange); a generated ERRSTR(41) stub would be a
-            # duplicate symbol and keep the retired trap linkable.
-            continue
-        if sym in ("_wait", "await", "ospawn"):
-            # _WAIT(36), AWAIT(47) and OSPAWN(92) remain reserved.
-            # wait() is a real libc adapter over ObjOpWait and spawn is a
-            # p9space adapter over obj_ospawn, so no generated stub for these
-            # retired numbers may remain linkable.
-            continue
         if sym in seen:
             continue
         seen.add(sym)
@@ -270,27 +258,21 @@ LIBC_SOURCES = [
     "9sys/abort.c",
     "9sys/convD2M.c",
     "9sys/convM2D.c",
-    "9sys/errstr.c",
     "9sys/getenv.c",
     "9sys/getpid.c",
     "9sys/nsec.c",
     "9sys/privalloc.c",
-    "9sys/read.c",
     "9sys/rerrstr.c",
     "9sys/sbrk.c",
     "9sys/wait.c",
     "9sys/werrstr.c",
-    "9sys/write.c",
     "fmt/dofmt.c",
     "fmt/errfmt.c",
     "fmt/fltfmt.c",
     "fmt/fmt.c",
-    "fmt/fmtfd.c",
     "fmt/fmtlock.c",
-    "fmt/fprint.c",
     "fmt/snprint.c",
     "fmt/sprint.c",
-    "fmt/vfprint.c",
     "fmt/vseprint.c",
     "fmt/vsnprint.c",
     "port/_assert.c",
@@ -521,9 +503,8 @@ def main() -> int:
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing {sym}")
         sysnums = {"ovolopen": "0x36", "ospaceopen": "0x37",
-                   "ospaceget": "0x38", "ospaceput": "0x39",
-                   "ospacecommit": "0x3a", "oexecute": "0x3c",
-                   "iowrite": "0x3e", "sleep": "0x11"}
+                   "oexecute": "0x3c",
+                   "errstr": "0x29", "_nsec": "0x35", "sleep": "0x11"}
         for sym, num in sysnums.items():
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing syscall stub {sym}")
@@ -548,15 +529,22 @@ def main() -> int:
                     "obj_process_self_sleep"):
             if re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"retired OBJ adapter still present {sym}")
-        retired = {"_wait": "0x24", "await": "0x2f", "ospawn": "0x5c"}
-        for sym, num in retired.items():
-            if (f"mov    $0x{int(num,16):x},%rbp" in dis
-                    or f"movq   $0x{int(num,16):x},%rbp" in dis):
-                checks.append(f"retired syscall stub still present {sym}")
+        # Every retired number must be absent from generated wrappers and
+        # from syscall-bearing functions in the linked image.  Inspect each
+        # function separately; unrelated RBP constants are not syscall use.
+        blocks = re.split(r"(?m)^[0-9a-f]+ <([^>]+)>:\n", dis)
+        retired = {number for _, number, reserved in syscall_entries() if reserved}
+        for i in range(1, len(blocks), 2):
+            sym, body = blocks[i:i+2]
+            if "syscall" not in body or sym == "sysraw":
+                continue
+            for value in re.findall(r"movq?\s+\$(0x[0-9a-f]+),%rbp", body):
+                if int(value, 16) in retired:
+                    checks.append(f"retired syscall stub still present {sym}")
         if not any("missing syscall stub" in c or "no RBP" in c
                    or "missing OBJ adapter" in c
                    or "retired OBJ adapter still present" in c
-                   or "retired stub still present" in c for c in checks):
+                   or "retired syscall stub still present" in c for c in checks):
             checks.append("syscall stubs: direct RBP numbers, OBJ wait/ospawn adapters and _start alignment verified")
         badchecks = [c for c in checks if c in ("NOT ET_EXEC", "dynamic/interp present",
                                                 "expected exactly 2 PT_LOAD",
@@ -564,7 +552,8 @@ def main() -> int:
                                                 "entry outside user range", "no entry",
                                                 "no output", "startup stack not 16-byte aligned")
                      or c.startswith("missing ") or "no RBP" in c
-                     or "retired OBJ adapter still present" in c]
+                     or "retired OBJ adapter still present" in c
+                     or "retired syscall stub still present" in c]
         if badchecks:
             for c in badchecks:
                 print("CHECK FAIL:", c)

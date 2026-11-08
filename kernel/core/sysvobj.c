@@ -1377,40 +1377,6 @@ vobjfifostat(int handle, VobjFifostat *out)
 	return 0;
 }
 
-int
-vobjgrant(int handle, uvlong rights)
-{
-	Vhand *h;
-	Vhand *nh;
-	Vhtab *t;
-	int result;
-
-	if(rights == 0 || rights > Vall)
-		error(Ebadarg);
-	h = vlookup(handle, Vdelegate);
-	if(h->sub != nil){
-		vhandput(h);
-		error("vobj: subscription handles cannot be duplicated");
-	}
-	if((rights & ~(uvlong)h->rights) != 0){
-		vhandput(h);
-		error(Eperm);
-	}
-	if((t = vgettab(1)) == nil){
-		vhandput(h);
-		error(Enomem);
-	}
-	nh = vhandalloc(h->obj, nil, (int)rights);
-	result = vinstall(t, nh);
-	if(result < 0){
-		vhandput(nh);
-		vhandput(h);
-		error("vobj: too many handles");
-	}
-	vhandput(h);
-	return result;
-}
-
 static void
 vfifoclose(Vobj *o, int strict)
 {
@@ -2147,7 +2113,7 @@ usbsvcmaxrights(void)
 
 	r = usbsvcrights();
 	if(iseve())
-		r |= Vcreate;
+		r |= Vcreate|Vcontrol;
 	return r;
 }
 
@@ -2694,6 +2660,73 @@ vobjdevicerecv(int handle, void *out)
 	return result;
 }
 
+static long
+usbioargmin(int req)
+{
+	switch(req){
+	case USBnew:
+		return sizeof(struct Usbnew);
+	case USBnewdev:
+		return sizeof(struct Usbnewdev);
+	case USBhub:
+		return sizeof(struct Usbhub);
+	case USBdebug:
+	case USBmaxpkt:
+	case USBntds:
+	case USBpollival:
+	case USBtimeout:
+	case USBhz:
+	case USBsamplesz:
+	case USBsampledelay:
+	case USBuframes:
+		return sizeof(int);
+	case USBname:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+/* Provider-private USB administration.  The caller pins the Vhand and checks
+ * Vcontrol.  A copied IN/OUT buffer never escapes this synchronous call. */
+static long
+vusbctl(Vobj *o, uvlong operation, void *arg, long narg)
+{
+    Vusbep *ve;
+    char *buf;
+    long r;
+    int req;
+
+    if(operation < USBdebug || operation > USBinfo)
+        error(Ebadarg);
+    req = (int)operation;
+    ve = nil;
+    if(o->kind == VkindUsb){
+        if(req != USBdebug) error(Ebadarg);
+    }else{
+        ve = o->priv;
+        if(ve == nil || ve->kind != USBCTL) error(Ebadarg);
+    }
+    if(narg < 0 || narg > 4096 || narg < usbioargmin(req)
+    || (narg > 0 && arg == nil))
+        error(Ebadarg);
+    buf = nil;
+    if(waserror()){free(buf);nexterror();}
+    if(narg > 0){
+        validaddr((uintptr)arg, narg, 0);
+        validaddr((uintptr)arg, narg, 1);
+        buf = smalloc(narg);
+        memmove(buf, arg, narg);
+    }
+    r = ve == nil ? usbcore_globalioctl(req, buf, narg)
+                   : usbcore_ioctl(ve->ep, req, buf, narg);
+    if(r < 0) error(up->errstr[0] != 0 ? up->errstr : Eio);
+    if(narg > 0) memmove(arg, buf, narg);
+    poperror();
+    free(buf);
+    return r;
+}
+
 int
 vobjdevicectl(int handle, uvlong op, void *out, long len)
 {
@@ -2702,6 +2735,14 @@ vobjdevicectl(int handle, uvlong op, void *out, long len)
 
     h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
+    if(h->obj->kind == VkindUsb || h->obj->kind == VkindUsbEp){
+        long r;
+        if(!(h->rights & Vcontrol)) error(Eperm);
+        r = vusbctl(h->obj, op, out, len);
+        poperror();
+        vhandput(h);
+        return r;
+    }
     d = vdevice(h);
     if(d->family == ObjDeviceEthernet){
         if(op == ObjDeviceEtherStatus){
@@ -2785,23 +2826,16 @@ vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id)
 	return h;
 }
 
-/*
- * Native process-self heap-break provider.  The Handle represents only the
- * calling process's own BSEG; it carries Vcontrol and no delegation right.
- * The actual break change uses the existing ibrk(addr, BSEG) validation, not
- * a second segment implementation.
- */
+/* ProcessSelf is the caller's typed child-wait capability (Vcontrol). */
 int
 vobjprocessselfopen(uvlong rights, VobjId *id)
 {
 	Vobj *o;
 	int h, defrights, allowed;
 
-	/* The default Handle remains the T3 heap-break capability (Vcontrol).
-	 * Vmeta is the least privilege needed to read the caller's own time;
-	 * neither right names another process or any other memory. */
+	/* The sole ProcessSelf operation is typed child wait (Vcontrol). */
 	defrights = Vcontrol;
-	allowed = Vcontrol|Vmeta;
+	allowed = Vcontrol;
 	if(rights == 0)
 		rights = defrights;
 	if((rights & ~(uvlong)allowed) != 0)
@@ -2823,27 +2857,6 @@ vobjprocessselfopen(uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return h;
-}
-
-/*
- * Read the caller's time through the same kernel todget(nil,nil) source as
- * _NSEC(53).  The Handle is the caller's own VkindProcessSelf with Vmeta;
- * the value is a full 64-bit nanosecond count with the existing epoch and
- * precision.  No object, Handle or other process is affected.
- */
-int
-vobjtimenow(int handle, uvlong *ns)
-{
-	Vobj *o;
-
-	o = vobjholdobj(handle, Vmeta);
-	if(o->kind != VkindProcessSelf){
-		vobjput(o);
-		error(Ebadarg);
-	}
-	*ns = todget(nil, nil);
-	vobjput(o);
-	return 0;
 }
 
 /*
@@ -3279,7 +3292,7 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 	 * an independent subscription instead. */
 	if(s->sub != nil){
 		vhandput(s);
-		error("object: subscription handles cannot be duplicated");
+		error("vobj: subscription handles cannot be duplicated");
 	}
 	if(rights == 0)
 		rights = (uvlong)s->rights;

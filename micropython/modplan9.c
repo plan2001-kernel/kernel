@@ -1,5 +1,5 @@
 /*
- * Plan 9 compatibility module for the remaining fd, process, timing and
+ * Plan 9 compatibility module for the process, timing and
  * error operations.  The inherited pathname open/create/remove, mount,
  * stat/dirread, exec and console helpers are gone; the native GE/O
  * object interface is the space module (docs/O-FORMAT.md).
@@ -43,74 +43,12 @@ static const char *str(mp_obj_t o) {
     return mp_obj_str_get_str(o);
 }
 
-static mp_obj_t p9_close(mp_obj_t fd) {
-    check(close(mp_obj_get_int(fd)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_close_obj, p9_close);
-
 // alarm(ms) -> the ms the one before had left; at its end the note
 // "alarm" cuts a blocked call short (OSError, interrupted); 0 cancels
 static mp_obj_t p9_alarm(mp_obj_t ms) {
     return mp_obj_new_int(alarm(mp_obj_get_int(ms)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_alarm_obj, p9_alarm);
-
-// read(fd, n=8192) -> bytes, b'' at the end
-static mp_obj_t p9_read(size_t n, const mp_obj_t *a) {
-    vstr_t v;
-    long r;
-
-    p9_space_rest();
-    vstr_init_len(&v, n > 1 ? mp_obj_get_int(a[1]) : 8192);
-    r = read(mp_obj_get_int(a[0]), v.buf, v.len);
-    if (r < 0) {
-        vstr_clear(&v);
-        raise_err();
-    }
-    v.len = r;
-    return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_read_obj, 1, 2, p9_read);
-
-// write(fd, str or bytes) -> count
-static mp_obj_t p9_write(mp_obj_t fd, mp_obj_t data) {
-    mp_buffer_info_t b;
-
-    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
-    return check(write(mp_obj_get_int(fd), b.buf, b.len));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_write_obj, p9_write);
-
-// seek(fd, offset, type=0) -> offset
-static mp_obj_t p9_seek(size_t n, const mp_obj_t *a) {
-    vlong r;
-
-    r = seek(mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), n > 2 ? mp_obj_get_int(a[2]) : 0);
-    if (r < 0) {
-        raise_err();
-    }
-    return mp_obj_new_int(r);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_seek_obj, 2, 3, p9_seek);
-
-// dup(old, new=-1) -> fd
-static mp_obj_t p9_dup(size_t n, const mp_obj_t *a) {
-    return check(dup(mp_obj_get_int(a[0]), n > 1 ? mp_obj_get_int(a[1]) : -1));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_dup_obj, 1, 2, p9_dup);
-
-// pipe() -> (fd, fd)
-static mp_obj_t p9_pipe(void) {
-    int p[2];
-    mp_obj_t t[2];
-
-    check(pipe(p));
-    t[0] = mp_obj_new_int(p[0]);
-    t[1] = mp_obj_new_int(p[1]);
-    return mp_obj_new_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_pipe_obj, p9_pipe);
 
 // wait() -> (pid, status): status '' if the child succeeded
 static mp_obj_t p9_wait(void) {
@@ -922,13 +860,6 @@ static mp_obj_t p9_objkbdleds(mp_obj_t h,mp_obj_t leds){
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objkbdleds_obj,p9_objkbdleds);
 
-/* USB service metadata over OBJOPEN/OBJINVOKE/OBJCLOSE.  No endpoint is
- * opened and no USB data or control request crosses this binding. */
-extern long usbopen(void);
-extern long usblist(int,void*,long);
-extern long usbepopen(int,int,int,int,int);
-extern long usbclose(int);
-
 static mp_obj_t usbentrytuple(const ObjUsbEntry *e){
  mp_obj_t a[10];int i;char name[129];
  for(i=0;i<128&&e->name[i];i++)name[i]=e->name[i];
@@ -1077,52 +1008,13 @@ static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_deviceetherinfo_obj,p9_deviceetherinfo);
 
-/* Legacy USBLIST path, kept as a thin compatibility adapter for tests. */
-static mp_obj_t p9_usbopen(void){return check(usbopen());}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_usbopen_obj,p9_usbopen);
-static mp_obj_t p9_usblist(size_t n,const mp_obj_t *a){
- int h=mp_obj_get_int(a[0]);
- long max=n>1?mp_obj_get_int(a[1]):OBJ_USB_LISTMAX;
- long total,r,i;struct Usbentry *e;mp_obj_t *recs,t[2];
- if(max<0)mp_raise_ValueError(MP_ERROR_TEXT("USB list limit"));
- if(max>OBJ_USB_LISTMAX)max=OBJ_USB_LISTMAX;
- total=usblist(h,NULL,0);
- if(total<0)raise_err();
- if(max>total)max=total;
- e=m_new(struct Usbentry,max?max:1);
- r=max?usblist(h,e,max):0;
- if(r<0){m_del(struct Usbentry,e,max?max:1);raise_err();}
- recs=m_new(mp_obj_t,r?r:1);
- for(i=0;i<r;i++)recs[i]=usbentrytuple((ObjUsbEntry*)&e[i]);
- m_del(struct Usbentry,e,max?max:1);
- t[1]=mp_obj_new_tuple(r,recs);
- m_del(mp_obj_t,recs,r?r:1);
- t[0]=mp_obj_new_int(total);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_usblist_obj,1,2,p9_usblist);
-static mp_obj_t p9_usbepopen(size_t n,const mp_obj_t *a){
- if(n!=5)mp_raise_TypeError(MP_ERROR_TEXT("usb_epopen needs 5 args"));
- return check(usbepopen(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
-  mp_obj_get_int(a[2]),mp_obj_get_int(a[3]),mp_obj_get_int(a[4])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_usbepopen_obj,5,5,p9_usbepopen);
-static mp_obj_t p9_usbclose(mp_obj_t h){
- check(usbclose(mp_obj_get_int(h)));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_usbclose_obj,p9_usbclose);
-
-/* Pack the existing legacy USBIOCTL's bounded IN/OUT buffer.  This is
- * used for ordinary USB enumeration before opening a T12 session; it adds
- * no kernel operation, controller logic or alternative Handle table. */
-extern long usbioctl(int, int, void*, long);
-static mp_obj_t p9_usbioctl(mp_obj_t handle, mp_obj_t operation, mp_obj_t data){
+static mp_obj_t p9_objusbctl(mp_obj_t handle, mp_obj_t operation, mp_obj_t data){
  mp_buffer_info_t b;
  mp_get_buffer_raise(data,&b,MP_BUFFER_WRITE);
  if(b.len>4096)mp_raise_ValueError(MP_ERROR_TEXT("USB control buffer limit"));
- return check(usbioctl(mp_obj_get_int(handle),mp_obj_get_int(operation),b.buf,b.len));
+ return check(obj_usb_ctl(mp_obj_get_int(handle),mp_obj_get_int(operation),b.buf,b.len));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(p9_usbioctl_obj,p9_usbioctl);
+static MP_DEFINE_CONST_FUN_OBJ_3(p9_objusbctl_obj,p9_objusbctl);
 
 /* Historical native names are userland adapters over OBJOPEN/INVOKE/CLOSE;
  * they make no retired syscall. */
@@ -1203,13 +1095,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipeclose), MP_ROM_PTR(&p9_pipeclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipeinherit), MP_ROM_PTR(&p9_pipeinherit_obj) },
-    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&p9_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&p9_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&p9_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_seek), MP_ROM_PTR(&p9_seek_obj) },
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_dup), MP_ROM_PTR(&p9_dup_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pipe), MP_ROM_PTR(&p9_pipe_obj) },
     { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&p9_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },
@@ -1275,11 +1161,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_usb_list), MP_ROM_PTR(&p9_objusblist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_usb_list_bytes), MP_ROM_PTR(&p9_objusblistbytes_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_usb_epopen), MP_ROM_PTR(&p9_objusbepopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usb_open), MP_ROM_PTR(&p9_usbopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usb_list), MP_ROM_PTR(&p9_usblist_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usb_epopen), MP_ROM_PTR(&p9_usbepopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usb_ioctl), MP_ROM_PTR(&p9_usbioctl_obj) },
-    { MP_ROM_QSTR(MP_QSTR_usb_close), MP_ROM_PTR(&p9_usbclose_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_usb_ctl), MP_ROM_PTR(&p9_objusbctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_uart_count), MP_ROM_PTR(&p9_uartcount_obj) },
     { MP_ROM_QSTR(MP_QSTR_uart_open), MP_ROM_PTR(&p9_uartopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_uart_read), MP_ROM_PTR(&p9_uartread_obj) },
@@ -1326,10 +1208,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_SPACE), MP_ROM_INT(ObjOpenGeSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_PROCESS_SELF), MP_ROM_INT(ObjOpenProcessSelf) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_HEAP_BREAK), MP_ROM_INT(ObjOpHeapBreak) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_ERRSTR_EXCHANGE), MP_ROM_INT(ObjOpErrstrExchange) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NOTIFY_REGISTER), MP_ROM_INT(ObjOpNotifyRegister) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NOTED), MP_ROM_INT(ObjOpNoted) },
     { MP_ROM_QSTR(MP_QSTR_NCONT), MP_ROM_INT(NCONT) },
     { MP_ROM_QSTR(MP_QSTR_NDFLT), MP_ROM_INT(NDFLT) },
     { MP_ROM_QSTR(MP_QSTR_NSAVE), MP_ROM_INT(NSAVE) },
@@ -1367,7 +1245,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_UART_ORDWR), MP_ROM_INT(UARTORDWR) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_UDP6_MAXPAYLOAD), MP_ROM_INT(OBJ_UDP6_MAXPAYLOAD) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_GE), MP_ROM_INT(ObjKindGe) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_CREATE_PERSIST), MP_ROM_INT(ObjOpCreatePersist) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_COMMIT), MP_ROM_INT(ObjOpCommit) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PUT_OID), MP_ROM_INT(ObjOpPutOid) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_INFO), MP_ROM_INT(ObjOpInfo) },
@@ -1378,7 +1255,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_RECV), MP_ROM_INT(ObjOpRecv) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SUBSCRIBE), MP_ROM_INT(ObjOpSubscribe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_ACCEPT), MP_ROM_INT(ObjOpAccept) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_GRANT), MP_ROM_INT(ObjOpGrant) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_LIST), MP_ROM_INT(ObjOpList) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_COPY), MP_ROM_INT(ObjBindCopy) },

@@ -38,7 +38,7 @@ enum {
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
-	ObjOpenProcessSelf	= 14,	/* caller's own BSEG heap break */
+	ObjOpenProcessSelf	= 14,	/* caller's typed child wait */
 };
 
 /* obj_create kinds.  The first two are volatile and ObjKindPipe is a native
@@ -73,10 +73,10 @@ enum {
 	ObjOpRecv	= 6,
 	ObjOpSubscribe	= 7,
 	ObjOpAccept	= 8,
-	ObjOpGrant	= 9,
+	ObjOpGrant	= 9,	/* RETIRED: OBJOPEN(ObjOpenHandle) */
 	ObjOpRevoke	= 10,
 	ObjOpList	= 11,
-	ObjOpCreatePersist = 12,	/* Space handle: create committed GE object */
+	ObjOpCreatePersist = 12,	/* RETIRED: OBJCREATE(ObjKindGe) */
 	ObjOpCommit	= 13,	/* Space/GE handle: commit pending writes */
 	ObjOpSendTo	= 14,	/* UDP6 handle: send one complete datagram */
 	ObjOpRecvFrom	= 15,	/* UDP6 handle: receive one complete datagram */
@@ -91,10 +91,9 @@ enum {
 	ObjOpNet6Addr	= 24,	/* no Handle: authorized IPv6 link-local lookup */
 	ObjOpPutOid	= 25,	/* Space handle: replace one named OID, no commit */
 	ObjOpHeapBreak	= 26,	/* RETIRED: direct BRK_(24) is used */
-	ObjOpTimeNow	= 27,	/* ProcessSelf: 64-bit ns from todget(nil,nil) */
-				/* (retained provider; libc nsec() uses _NSEC) */
+	ObjOpTimeNow	= 27,	/* RETIRED: direct _NSEC(53) */
 	ObjOpSleep	= 28,	/* RETIRED: direct SLEEP(17) is used */
-	ObjOpErrstrExchange = 29,	/* no Handle: swap the caller's error text */
+	ObjOpErrstrExchange = 29,	/* RETIRED: direct ERRSTR(41) */
 	ObjOpNotifyRegister = 30,	/* RETIRED: direct NOTIFY(28) is used */
 	ObjOpNoted	= 31,	/* RETIRED: direct NOTED(29) is used */
 	ObjOpRfork	= 32,	/* RETIRED: direct RFORK(19) is used */
@@ -206,6 +205,8 @@ long obj_device_open(int catalog, unsigned int family, int selector0,
 long obj_device_send(int device, void *message, unsigned long long length);
 long obj_device_recv(int device, ObjDeviceResult *completion);
 long obj_device_ctl(int device, unsigned int operation);
+long obj_usb_ctl(int handle, unsigned int operation, void *data,
+                 unsigned long long len);
 
 /* obj_invoke(ObjOpPutOid): replace the content of one explicitly named
  * persistent OID through a VkindSpace Handle carrying Vwrite.  arg0 is the
@@ -215,7 +216,7 @@ long obj_device_ctl(int device, unsigned int operation);
  * payload bound is the native object transaction bound (64 MiB), not the
  * 1 MiB single-call OBJ-I/O bound, so a whole OID_GRAPH keeps its former
  * maximum size.  This is not a new syscall number and it never allocates an
- * OID; creation remains ObjOpCreatePersist / OBJCREATE(ObjKindGe). */
+ * OID; creation uses OBJCREATE(ObjKindGe). */
 #define OBJ_PUT_OID_MAX (64ULL*1024*1024)
 
 /* Scope-qualified object identity, layout-compatible with VobjId. */
@@ -236,39 +237,11 @@ typedef struct ObjOpenConsoleReq {
 } ObjOpenConsoleReq;
 
 /* obj_open(ObjOpenProcessSelf): bind the calling process's own process state.
- * req is NULL and len is zero.  The returned Handle carries Vcontrol (or
- * Vmeta for the time service); it grants no delegation and cannot name
+ * req is NULL and len is zero.  The returned Handle carries Vcontrol;
+ * it grants no delegation and cannot name
  * another process or any other memory.  Heap break, sleep, note registration,
  * note return, rfork, oterminate and exits use their direct historical
  * syscalls and no longer have OBJINVOKE variants. */
-
-/* obj_invoke(ObjOpTimeNow): read the current 64-bit nanosecond count from the
- * same kernel todget(nil,nil) source as _NSEC(53).  The provider Handle must
- * be a VkindProcessSelf Handle carrying Vmeta.  out points to one 8-byte
- * unsigned value; in==NULL and inlen==0.  The result is 0.  It conveys no
- * authority over another process and allocates no OID or syscall number.
- * Retained as the typed OBJ operation for raw OBJINVOKE users; libc nsec()
- * now uses direct _NSEC(53) and no longer opens ProcessSelf. */
-
-/* obj_invoke(ObjOpErrstrExchange): replace the caller's errstr syscall with a
- * typed OBJINVOKE operation.  The caller passes handle 0; it needs no object
- * Handle at all, because the operation only affects the calling process's own
- * error state.  out points to the one IN/OUT user buffer and outlen is its
- * exact length in [1,ERRMAX].  in==NULL, inlen==0, arg0==0 and arg1==0.
- *
- * The kernel reuses generrstr(), the same implementation behind ERRSTR(41) and
- * _ERRSTR(1): it validates the buffer, copies the caller's new text into the
- * previous error area, returns the current error text in out, and exchanges
- * the two per-process error buffers.  This preserves the two-swap protocol
- * used by rerrstr() and the formatting contract of werrstr().  A successful
- * lookup does not raise a new error, allocate an OID or Handle, or depend on
- * Handle-table capacity.  ERRSTR(41) and _ERRSTR(1) remain active for legacy
- * callers. */
-#ifdef ERRMAX
-#define OBJ_ERRSTR_MAX ERRMAX
-#else
-#define OBJ_ERRSTR_MAX 128
-#endif
 
 /* obj_open(ObjOpenHandle): the source capability and an optional attenuation.
  * rights==0 copies the source rights.  Knowing the numeric Handle alone in

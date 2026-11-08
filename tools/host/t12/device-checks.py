@@ -142,9 +142,17 @@ def run():
 
     # Existing USBIOCTL performs bus enumeration only; all peripheral data
     # transfers below exercise the T12 OBJ device session and actual HCI ring.
-    svc = p.usb_open()
-    ctl = p.usb_epopen(svc, dev, 0, 1, 2)
-    total, usb_entries = p.usb_list(svc)
+    svc = p.obj_usb_open(2184)
+    meta_svc = p.obj_usb_open()
+    deny(lambda: p.obj_usb_ctl(meta_svc, 1, bytearray(4)), perm)
+    deny(lambda: p.obj_usb_epopen(meta_svc, dev, 0, 1, 2), perm)
+    p.obj_close(meta_svc)
+    ctl = p.obj_usb_epopen(svc, dev, 0, 1, 2)
+    denied_ctl = p.obj_grant(ctl, 8)
+    deny(lambda: p.obj_usb_ctl(denied_ctl, 8, bytearray()), perm)
+    p.obj_close(denied_ctl)
+    deny(lambda: p.obj_usb_ctl(ctl, 3, bytearray(1)), bad)
+    total, usb_entries = p.obj_usb_list(svc)
     port = 0
     print('T12-USB-ENTRIES', usb_entries)
     for candidate in range(1, 9):
@@ -163,11 +171,11 @@ def run():
     newdev = bytearray(24)
     newdev[0] = speed
     newdev[4] = port
-    ok(p.usb_ioctl(ctl, 3, newdev) == 0, 'legacy enumeration prepares real child endpoint')
+    ok(p.obj_usb_ctl(ctl, 3, newdev) == 0, 'OBJ administration prepares real child endpoint')
     name = bytes(newdev[8:]).split(b'\x00')[0].decode()
     child = int(name[2:].split('.')[0])
-    child_ctl = p.usb_epopen(svc, child, 0, 1, 2)
-    p.usb_ioctl(child_ctl, 8, bytearray())  # existing USBaddress
+    child_ctl = p.obj_usb_epopen(svc, child, 0, 1, 2)
+    p.obj_usb_ctl(child_ctl, 8, bytearray())  # existing USBaddress
     peripheral = p.obj_device_open(c, 1, child, 0)
     descriptor_req = bytes((128, 6, 0, 1, 0, 0, 18, 0))
     descriptor = exchange(peripheral, descriptor_req)
@@ -294,15 +302,15 @@ p.obj_write(out,b'SENT')
     # old aliases.  HCI transfers interrupted by hot unplug are not simulated.
     seq = p.obj_device_send(peripheral, descriptor_req)
     detached_reply, got, fam, length = p.obj_device_recv(peripheral)
-    p.usb_ioctl(child_ctl, 4, bytearray())  # existing USBdetach
+    p.obj_usb_ctl(child_ctl, 4, bytearray())  # existing USBdetach
     deny(lambda: p.obj_device_send(peripheral, descriptor_req), 'device is detached')
     deny(lambda: p.obj_device_send(peripheral, descriptor_req), failed)
     p.obj_close(peripheral)
-    p.usb_close(child_ctl)
+    p.obj_close(child_ctl)
     ok(p.obj_read(detached_reply, 4096) == descriptor, 'response survives actual native detach and close')
     p.obj_close(detached_reply)
-    p.usb_close(ctl)
-    p.usb_close(svc)
+    p.obj_close(ctl)
+    p.obj_close(svc)
     p.obj_close(d)
     p.obj_close(c)
     shared.n = 1
