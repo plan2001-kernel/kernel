@@ -233,27 +233,11 @@ oblockopenpart(char *guid, char *dev, int ndev, vlong *off, vlong *size)
  */
 static Proc *bootowner;
 static ulong bootpid;
-static ulong onextgen;
-static Lock ogenlock;
 
 static int
 oboot(void)
 {
 	return up == bootowner && up->pid == bootpid;
-}
-
-static int
-ogeneration(void)
-{
-	ulong g;
-	lock(&ogenlock);
-	if(onextgen == 0x7fffff){
-		unlock(&ogenlock);
-		error("O: handle generations exhausted");
-	}
-	g = ++onextgen;
-	unlock(&ogenlock);
-	return g;
 }
 
 static Gefs *ovol;
@@ -786,66 +770,42 @@ uintptr
 sysobindx(sysva_list list)
 {return obinding(list);}
 
-/* A view handle is process-local and cannot be used as a storage handle.
- * Export freezes only authorized roles; attachments retain actual grants. */
-uintptr
-sysonsview(sysva_list list)
+/* Low-level grant admission for the NamespaceControl provider.  The
+ * provider owns the sealed view and attachment lifecycle in sysvobj.c. */
+void
+osviewpermitted(void)
 {
- char (*roles)[32],name[32],names[32][32]; int nr,i,j,result;uvlong epoch; Ohand *view,*h;
- roles=sysva_arg(list,char (*)[32]); nr=sysva_arg(list,int);
  onscanextend();
- if(nr<=0 || nr>Obindmax) error(Ebadarg);
- validaddr((uintptr)roles,nr*32,0);
- memmove(names,roles,nr*32);roles=names;
- view=smalloc(sizeof *view); view->ref.ref=1;
- if(waserror()){ohandput(view);nexterror();}
- view->provider=octxnew(); if(view->provider==nil) error(Enomem);
- epoch=octxepoch(up->pgrp->ocontext);
- for(i=0;i<nr;i++){
-  if(memchr(roles[i],0,32)==nil) error(Ebadarg);
-  strcpy(name,roles[i]);
-  if(name[0]==0) error(Ebadarg);
-  for(j=0;name[j];j++) if(!((name[j]>='a'&&name[j]<='z') ||
-   (name[j]>='A'&&name[j]<='Z') || (name[j]>='0'&&name[j]<='9') || name[j]=='_' || name[j]=='-')) error(Ebadarg);
-  for(j=0;j<i;j++) if(strcmp(roles[i],roles[j])==0) error(Ebadarg);
-  h=octxlookup(up->pgrp->ocontext,name); qlock(ohgate(h));
-  if(waserror()){qunlock(ohgate(h));ohandput(h);nexterror();}
-  oauthorize(h,h->oid,oboot()?0:Odelegate);
-  octxbind(view->provider,name,h);
-  poperror();qunlock(ohgate(h));ohandput(h);
- }
- if(epoch!=octxepoch(up->pgrp->ocontext)) error("O: namespace changed; retry");
- result=vobjinstallohand(view, VkindNamespaceView);poperror();return result;
 }
-uintptr
-sysonmount(sysva_list list)
+
+Ohand*
+osviewrole(char *name)
 {
- Ohand *view,*grants[Obindmax]; int handle,mode,n=0,i; uvlong attachment;
- handle=sysva_arg(list,int);mode=sysva_arg(list,int);
- onscanextend();if(mode<0 || mode>2) error(Ebadarg);
- view=ogetspace(handle, VkindNamespaceView, Vcontrol);
- if(waserror()){for(i=0;i<n;i++) ohandput(grants[i]);ohandput(view);nexterror();}
- if(view->provider==nil) error(Ebadarg);
- n=octxsnapshot(view->provider,grants,1);
- for(i=0;i<n;i++){
-  qlock(ohgate(grants[i]));
-  if(grants[i]->revoked || (grants[i]->origin && grants[i]->origin->revoked)){
-   qunlock(ohgate(grants[i]));error(Eperm);
-  }
-  qunlock(ohgate(grants[i]));
- }
- attachment=ogeneration();
- octxcompose(up->pgrp->ocontext,view->provider,mode,attachment);
- poperror();for(i=0;i<n;i++) ohandput(grants[i]);ohandput(view);
- return attachment;
-}
-uintptr
-sysonunmount(sysva_list list)
-{
- uvlong id=sysva_arg(list,uvlong);
+ Ohand *h;
  if(up->pgrp==nil) error(Eperm);
- octxunmount(up->pgrp->ocontext,id);return 0;
+ if(waserror()){poperror();error(Eperm);}
+ h=octxlookup(up->pgrp->ocontext,name);
+ poperror();
+ qlock(ohgate(h));
+ if(waserror()){
+  qunlock(ohgate(h));ohandput(h);poperror();error(Eperm);
+ }
+ oauthorize(h,h->oid,oboot()?0:Odelegate);
+ poperror();qunlock(ohgate(h));
+ return h;
 }
+
+void
+osviewgrantvalid(Ohand *h)
+{
+ if(h==nil) error(Ebadarg);
+ qlock(ohgate(h));
+ if(h->revoked || (h->origin && h->origin->revoked)){
+  qunlock(ohgate(h));error(Eperm);
+ }
+ qunlock(ohgate(h));
+}
+
 uintptr
 sysolookup(sysva_list list)
 {
@@ -991,8 +951,8 @@ static void nsout(NsOutput *user,void *bytes,usize n) {
 /* Lock grants in address order, with duplicates removed, then verify an
  * unchanged map epoch. Never hold the context spinlock during I/O or sleep.
  * This provides a linearizable visibility snapshot without granting handles. */
-static int
-nsvisibility(Ohand **source,int n,int *allowed)
+int
+osvisibility(Ohand **source,int n,int *allowed)
 {
  Ohand *ordered[Obindmax],*tmp;int i,j,k=0,stable;uvlong epoch;
  for(i=0;i<n;i++){
@@ -1009,25 +969,6 @@ nsvisibility(Ohand **source,int n,int *allowed)
  stable=epoch==(up->pgrp?octxepoch(up->pgrp->ocontext):0);
  for(i=k;i>0;i--) qunlock(&ordered[i-1]->gate);
  return stable;
-}
-uintptr
-sysonsvisible(sysva_list list)
-{
- NsOutput *out=sysva_arg(list,NsOutput*); Ohand *h[Obindmax];
- NsVisible result[Obindmax];int n,i,j,k=0;uvlong epoch;
- epoch=up->pgrp?octxepoch(up->pgrp->ocontext):0;
- n=up->pgrp?octxsnapshot(up->pgrp->ocontext,h,0):0;
- if(waserror()){for(i=0;i<n;i++) ohandput(h[i]);nexterror();}
- { int allowed[Obindmax];
- if(!nsvisibility(h,n,allowed) || epoch!=(up->pgrp?octxepoch(up->pgrp->ocontext):0)) error("O: namespace changed; retry");
- for(i=0;i<n;i++) if(allowed[i]){
-   for(j=0;j<k;j++) if(nsidentity(h[i],&result[j].object)) break;
-   if(j==k){nsid(h[i],&result[k].object);result[k].rights=0;result[k].reserved=0;k++;}
-   result[j].rights|=h[i]->rights;
- }
- }
- nsout(out,result,k*sizeof result[0]);
- poperror();for(i=0;i<n;i++) ohandput(h[i]);return k;
 }
 /* Backends catch native GE errors: no kernel longjmp through the pure C library. */
 static int nrread(void *sp,uint64_t oid,void *buf,size_t cap,size_t *size) {
@@ -1162,7 +1103,7 @@ sysoquery(sysva_list list)
   }
   /* Revalidate all retained grants in one stable visibility epoch. */
   {int allowed[Obindmax];
-   if(!nsvisibility(h,n,allowed) || epoch!=(up->pgrp?octxepoch(up->pgrp->ocontext):0)) error("O: namespace changed; retry");
+   if(!osvisibility(h,n,allowed) || epoch!=(up->pgrp?octxepoch(up->pgrp->ocontext):0)) error("O: namespace changed; retry");
    for(i=0;i<k;){
     int found=0;
     for(j=0;j<n;j++) if(allowed[j] && nsidentity(h[j],&result[i])) found=1;

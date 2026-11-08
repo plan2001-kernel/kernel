@@ -32,6 +32,7 @@
 #include	"../../runtime/abi/sys.h"
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
+#include	"../../runtime/abi/namespace.h"
 #include	"../core/vobjint.h"
 #include	"ocontext.h"
 
@@ -420,6 +421,8 @@ vobjput(Vobj *o)
 			ve->ep = nil;
 		}
 		free(ve);
+	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
+		closepgrp(o->priv);
 	}else if(o->kind == VkindGe || o->kind == VkindSpace || o->kind == VkindNamespaceView){
 		if(o->priv != nil)
 			oshandput(o->priv);
@@ -2899,6 +2902,194 @@ vobjprocessselfopen(uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return h;
+}
+
+int
+vobjnamespaceopen(uvlong rights, VobjId *id)
+{
+	Vobj *o;
+	int h;
+
+	if(id != nil)
+		validaddr((uintptr)id, sizeof *id, 1);
+	if(up->pgrp == nil)
+		error(Eperm);
+	if(rights == 0)
+		rights = Vcontrol|Vmeta|Vdelegate;
+	if((rights & Vcontrol) == 0 ||
+	   (rights & ~(uvlong)(Vcontrol|Vmeta|Vdelegate)) != 0)
+		error(Eperm);
+	o = vobjnewkind(VkindNamespaceControl, 0);
+	if(o == nil)
+		error(Enomem);
+	o->provider = ObjOpenNamespaceCurrent;
+	o->priv = up->pgrp;
+	incref(&up->pgrp->ref);
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	h = vobjinstallobj(o, (int)rights);
+	poperror();
+	if(id != nil){
+		id->incarnation = o->incarnation;
+		id->space = o->space;
+		id->oid = o->oid;
+	}
+	vobjput(o);
+	return h;
+}
+
+static void
+vobjnamespacecheck(int handle)
+{
+	Vobj *o = vobjholdobj(handle, Vcontrol);
+	int ok = o->kind == VkindNamespaceControl && o->priv == up->pgrp;
+	vobjput(o);
+	if(!ok)
+		error(Eperm);
+}
+
+/* NamespaceControl is tied to the caller's current process group.  A copied
+ * Handle cannot operate on a child or another namespace. */
+int
+vobjnamespacecreate(int control, char (*roles)[32], int nr)
+{
+	char names[Obindmax][Onamemax];
+	Ohand *view = nil, *grant;
+	uvlong epoch;
+	int i, j, handle;
+
+	vobjnamespacecheck(control);
+	osviewpermitted();
+	if(roles == nil || nr <= 0 || nr > Obindmax)
+		error(Ebadarg);
+	validaddr((uintptr)roles, nr*Onamemax, 0);
+	memmove(names, roles, nr*Onamemax);
+	view = smalloc(sizeof *view);
+	view->ref.ref = 1;
+	if(waserror()){
+		ohandput(view);
+		nexterror();
+	}
+	view->provider = octxnew();
+	if(view->provider == nil)
+		error(Enomem);
+	epoch = octxepoch(up->pgrp->ocontext);
+	for(i=0; i<nr; i++){
+		if(memchr(names[i], 0, Onamemax) == nil || names[i][0] == 0)
+			error(Ebadarg);
+		for(j=0; names[i][j]; j++)
+			if(!((names[i][j]>='a' && names[i][j]<='z') ||
+			     (names[i][j]>='A' && names[i][j]<='Z') ||
+			     (names[i][j]>='0' && names[i][j]<='9') ||
+			      names[i][j]=='_' || names[i][j]=='-'))
+				error(Ebadarg);
+		for(j=0; j<i; j++)
+			if(strcmp(names[i], names[j]) == 0)
+				error(Ebadarg);
+		grant = osviewrole(names[i]);
+		if(waserror()){
+			ohandput(grant);
+			nexterror();
+		}
+		octxbind(view->provider, names[i], grant);
+		poperror();
+		ohandput(grant);
+	}
+	if(epoch != octxepoch(up->pgrp->ocontext))
+		error("O: namespace changed; retry");
+	handle = vobjinstallohand(view, VkindNamespaceView);
+	view = nil;
+	poperror();
+	return handle;
+}
+
+uvlong
+vobjnamespaceattach(int control, int handle, int mode)
+{
+	Ohand *view, *grants[Obindmax];
+	uvlong token;
+	int n=0, i;
+
+	vobjnamespacecheck(control);
+	osviewpermitted();
+	if(mode < 0 || mode > 2)
+		error(Ebadarg);
+	view = vobjholdohand(handle, VkindNamespaceView, Vcontrol);
+	if(waserror()){
+		for(i=0; i<n; i++) ohandput(grants[i]);
+		ohandput(view);
+		nexterror();
+	}
+	if(view->provider == nil)
+		error(Ebadarg);
+	n = octxsnapshot(view->provider, grants, 1);
+	for(i=0; i<n; i++)
+		osviewgrantvalid(grants[i]);
+	token = voidget();
+	octxcompose(up->pgrp->ocontext, view->provider, mode, token);
+	poperror();
+	for(i=0; i<n; i++) ohandput(grants[i]);
+	ohandput(view);
+	return token;
+}
+
+void
+vobjnamespacedetach(int control, uvlong token)
+{
+	vobjnamespacecheck(control);
+	if(token == 0 || up->pgrp == nil)
+		error(Ebadarg);
+	octxunmount(up->pgrp->ocontext, token);
+}
+
+int
+vobjnamespacevisible(int control, void *out, long bytes)
+{
+	Ohand *grants[Obindmax];
+	NsVisible records[Obindmax];
+	NsIdentity id;
+	int allowed[Obindmax], n, i, j, count=0;
+	uvlong epoch;
+
+	vobjnamespacecheck(control);
+	if(bytes < 0 || bytes > sizeof records || bytes % sizeof records[0] ||
+	   (out == nil && bytes != 0))
+		error(Ebadarg);
+	epoch = octxepoch(up->pgrp->ocontext);
+	n = octxsnapshot(up->pgrp->ocontext, grants, 0);
+	if(waserror()){
+		for(i=0; i<n; i++) ohandput(grants[i]);
+		nexterror();
+	}
+	if(!osvisibility(grants, n, allowed) ||
+	   epoch != octxepoch(up->pgrp->ocontext))
+		error("O: namespace changed; retry");
+	for(i=0; i<n; i++) if(allowed[i]){
+		osvolumeid(grants[i], id.volume);
+		id.space = grants[i]->sid;
+		id.oid = grants[i]->oid;
+		for(j=0; j<count; j++)
+			if(memcmp(&records[j].object, &id, sizeof id) == 0)
+				break;
+		if(j == count){
+			records[count].object = id;
+			records[count].rights = 0;
+			records[count].reserved = 0;
+			count++;
+		}
+		records[j].rights |= grants[i]->rights;
+	}
+	if(count*sizeof records[0] > bytes)
+		error(Eshort);
+	if(count){
+		validaddr((uintptr)out, count*sizeof records[0], 1);
+		memmove(out, records, count*sizeof records[0]);
+	}
+	poperror();
+	for(i=0; i<n; i++) ohandput(grants[i]);
+	return count;
 }
 
 /*

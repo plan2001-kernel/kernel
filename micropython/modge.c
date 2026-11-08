@@ -6,9 +6,11 @@
 #ifndef NO_QSTR
 #include "../runtime/ge_relations/relations.h"
 #include "../runtime/abi/namespace.h"
+#include "../runtime/abi/vobj.h"
+#include "../runtime/abi/obj.h"
 #endif
 extern int p9_space_relation_handle(void),p9_space_relation_writer(void);
-extern long oquery(int,void*,void*,int,void*),onsvisible(void*);
+extern long oquery(int,void*,void*,int,void*);
 static void qcheck(long rc) {
  if(rc<0)mp_raise_msg(&mp_type_OSError,MP_ERROR_TEXT("GE namespace authorization/query denied"));
 }
@@ -25,9 +27,13 @@ static uint64_t oid_arg(mp_obj_t value) {
 static NsIdentity identity_arg(mp_obj_t value) {
  NsIdentity id;memset(&id,0,sizeof id);
  if(mp_obj_is_int(value)){
-  NsVisible visible[32];NsOutput out={(uintptr_t)visible,sizeof visible,0};
-  qcheck(onsvisible(&out));int found=0;
-  for(size_t i=0;i<out.count/sizeof visible[0];i++)if(visible[i].object.oid==mp_obj_get_uint(value)){
+  NsVisible visible[32];ObjCall call={0};
+  long control=obj_open(ObjOpenNamespaceCurrent,NULL,0,Vcontrol,NULL);qcheck(control);
+  call.version=OBJ_ABI_VERSION;call.op=ObjOpNamespaceVisible;
+  call.out=visible;call.outlen=sizeof visible;
+  long count=obj_invoke(control,&call,sizeof call);obj_close(control);qcheck(count);
+  int found=0;
+  for(size_t i=0;i<(size_t)count;i++)if(visible[i].object.oid==mp_obj_get_uint(value)){
    if(found)mp_raise_ValueError(MP_ERROR_TEXT("ambiguous OID; use qualified identity"));
    id=visible[i].object;found=1;
   }

@@ -534,6 +534,11 @@ static mp_obj_t p9_objopenprocessself(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenprocessself_obj,0,1,p9_objopenprocessself);
 
+static mp_obj_t p9_objopennamespacecurrent(void){
+ return check(obj_open(ObjOpenNamespaceCurrent,nil,0,0,NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_objopennamespacecurrent_obj,p9_objopennamespacecurrent);
+
 static mp_obj_t p9_objcreatege(size_t n,const mp_obj_t *a){
  mp_buffer_info_t b;ObjId id;long h;
  b.buf=NULL;b.len=0;
@@ -1205,6 +1210,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_process_self), MP_ROM_PTR(&p9_objopenprocessself_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_open_namespace_current), MP_ROM_PTR(&p9_objopennamespacecurrent_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_bind), MP_ROM_PTR(&p9_objbind_obj) },
@@ -1234,6 +1240,12 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_SPACE), MP_ROM_INT(ObjOpenGeSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_PROCESS_SELF), MP_ROM_INT(ObjOpenProcessSelf) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_NAMESPACE_CURRENT), MP_ROM_INT(ObjOpenNamespaceCurrent) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_NAMESPACE_CONTROL), MP_ROM_INT(VkindNamespaceControl) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_CREATE), MP_ROM_INT(ObjOpNamespaceCreate) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_ATTACH), MP_ROM_INT(ObjOpNamespaceAttach) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_DETACH), MP_ROM_INT(ObjOpNamespaceDetach) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_VISIBLE), MP_ROM_INT(ObjOpNamespaceVisible) },
     { MP_ROM_QSTR(MP_QSTR_NCONT), MP_ROM_INT(NCONT) },
     { MP_ROM_QSTR(MP_QSTR_NDFLT), MP_ROM_INT(NDFLT) },
     { MP_ROM_QSTR(MP_QSTR_NSAVE), MP_ROM_INT(NSAVE) },

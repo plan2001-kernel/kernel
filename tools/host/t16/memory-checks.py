@@ -82,14 +82,83 @@ def run():
     else:
         raise AssertionError('stale namespace handle read')
     print('T16-PASS namespace unified handle and stale denial')
-    for nr in (55, 59):
+    other, other_oid = p.obj_create_ge(sh, b'T16-OTHER')
+    p.obj_commit(sh)
+    space.obind('t16view', oid, space.OREAD | space.ODELEGATE, sh)
+    view = space.view(('t16view',))
+    space.obind('t16view', other_oid, space.OREAD | space.ODELEGATE, sh)
+
+    def visible(target):
+        return any(record[2] == target and record[3] & space.OREAD
+                   for record in space.visible())
+
+    assert visible(other_oid) and not visible(oid)
+    for mode, expected in ((space.MAFTER, other_oid),
+                           (space.MBEFORE, oid), (space.MREPL, oid)):
+        token = space.mount(view, mode)
+        assert token > 0 and visible(expected)
+        if expected == oid:
+            assert not visible(other_oid)
+        else:
+            assert not visible(oid)
+        space.unmount(token)
+        if mode != space.MREPL:
+            assert visible(other_oid) and not visible(oid)
+    assert not visible(oid) and not visible(other_oid)
+    print('T16-PASS sealed view, attach precedence, detach and visible enumeration')
+
+    token = space.mount(view, space.MAFTER)
+    vh, _, found, _ = space.olookup('t16view')
+    assert found == oid
+    space.orevoke(vh)
+    p.obj_close(vh)
+    assert not visible(oid)
+    space.unmount(token)
+    try:
+        space.mount(view, space.MAFTER)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('revoked sealed view attached')
+    print('T16-PASS view revocation lineage')
+
+    control = p.obj_open_namespace_current()
+    weak = p.obj_open_handle(control, p.VDELEGATE)
+    try:
+        p.obj_invoke(weak, p.OBJ_OP_NAMESPACE_VISIBLE)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('attenuated namespace control enumerated')
+    p.obj_close(weak)
+    child = ("import plan9 as p, space\n"
+             "control=0\n"
+             "for h in p.obj_list():\n"
+             "    if p.obj_info(h)[8]==p.VKIND_NAMESPACE_CONTROL: control=h\n"
+             "assert control\n"
+             "try: p.obj_invoke(control, p.OBJ_OP_NAMESPACE_VISIBLE)\n"
+             "except OSError: pass\n"
+             "else: raise AssertionError('parent namespace control used by child')\n"
+             "assert not space.visible()\n"
+             "try: space.view(('t16view',))\n"
+             "except OSError: pass\n"
+             "else: raise AssertionError('child exported unauthorized role')\n")
+    pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
+                      vhandles=((control, p.VCONTROL | p.VMETA),))
+    waited, status = space.wait()
+    assert waited == pid and status == ''
+    p.obj_close(control)
+    p.obj_close(view)
+    p.obj_close(other)
+    print('T16-PASS namespace rights and process isolation')
+    for nr in (55, 59, 101, 102, 103, 105):
         try:
             p.sysraw(nr)
         except OSError:
             pass
         else:
             raise AssertionError('retired O Space syscall active')
-    print('T16-PASS retired O Space calls denied')
+    print('T16-PASS retired O Space and namespace calls denied')
     p.obj_close(rh)
     p.obj_close(ro)
     p.obj_close(gh)

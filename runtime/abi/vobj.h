@@ -50,7 +50,8 @@ enum {
 	VkindConsole	= 11,	/* native process output stream */
 	VkindDevices = 13,	/* common device discovery/open authority */
 	VkindDevice = 14,
-	VkindNamespaceView = 15,	/* one native message device session */
+	VkindNamespaceView = 15,	/* sealed role grants */
+	VkindNamespaceControl = 16,	/* caller's current namespace */
 	VkindProcessSelf = 12,	/* caller's own BSEG heap break */
 };
 

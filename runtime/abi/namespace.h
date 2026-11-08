@@ -9,11 +9,7 @@ typedef struct { unsigned long long buffer,capacity,count; } NsOutput;
 enum { NS_REPL=0, NS_BEFORE=1, NS_AFTER=2,
  NS_FIND=1, NS_GET=2, NS_TAGS=3, NS_ADD=4, NS_REMOVE=5,
  NS_CREATE=6, NS_BOOT=256 };
-/* Existing amd64 syscall stubs use these signatures; no path arguments. */
-long onsview(void *,int);
-long onmount(int,int);
-long onunmount(unsigned long long);
+/* The namespace view operations use typed OBJ handles. */
 long obindx(int,unsigned long long,char *,int,int);
-long onsvisible(void *);
 long oquery(int,void *,void *,int,void *);
 #endif
