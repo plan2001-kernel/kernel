@@ -42,6 +42,40 @@ GE/O revocation follows the existing shared origin: sibling copies of the
 same origin are affected, while independently opened grants to the same OID
 remain valid. Persistent object identity and bytes remain intact.
 
+## Persistent namespace and set semantics (architectural target)
+
+The persistent relational namespace is a GE/O object with its own scoped OID.
+Explicit membership relations connect it to member OIDs, including other
+namespaces. This is distinct from the currently implemented process-group
+`OContext` capability/role view described above: persistent membership
+describes *which objects belong to a set*; `OContext` determines *which
+objects the process can see and use*. Attaching a namespace or learning an
+OID must not grant capabilities implicitly.
+
+The minimal set model supports membership testing, union, intersection, and
+difference (`A \\ B`, or "in A and not in B"). It does not require an
+unbounded universal complement. Dynamic namespace expressions reference
+other namespaces and are evaluated against their later memberships; initial
+implementations may reject cyclic expression dependencies. A query result
+must be restricted to the caller's authorized visibility, without exposing
+unauthorized object identities or granting access by set membership alone.
+
+An object's optional name (at most one) is separate from its identity,
+persistent membership, and process namespace role. Multiple OIDs may have
+the same name; finding by name within a namespace can return zero, one, or
+several authorized identities. `OBJBIND` roles are capability-binding labels,
+not alternate stored-object names or hashtag tags.
+
+The kernel should expose only minimal OID relation/storage and authorization
+mechanisms through the existing object ABI where appropriate. Union,
+intersection, difference, and higher-level query parsing do not each need a
+new syscall; user programs may evaluate complex expressions. Hashtag/tag
+parsing, tag-specific indexes, and application query syntax do not belong in
+the kernel. Existing GE R1/`OQUERY` hashtag behavior is legacy to remove,
+not a requirement for the new set model. No compatibility migration of that
+metadata is needed when the experimental volume is reamed and objects are
+reimported. This section is a target contract, not a claim of implementation.
+
 ## Device messages and ObjectFIFO
 
 ObjectFIFO is the common capability-aware transport for framed messages and

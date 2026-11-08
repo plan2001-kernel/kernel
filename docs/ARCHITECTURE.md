@@ -23,6 +23,33 @@ instruction-set architectures.
   program. Additional userspace facilities are not prerequisites for basic
   kernel progress.
 
+## Persistent relational and set-based namespaces (target, not yet implemented)
+
+A persistent namespace is itself a GE/O object with an OID. Its membership
+consists of explicit OID-to-OID relations to stored objects and other namespace
+objects, not hashtags, alternative names, or directory entries. A stored
+occurrence may belong to multiple namespaces without changing its identity,
+bytes, or name. Its name is optional (at most one per object), is not unique
+across OIDs, and never determines identity or storage location.
+
+Namespaces may hold explicit membership sets or dynamic expressions referencing
+other namespaces. The basic algebra is union (`A ∪ B`), intersection
+(`A ∩ B`), and difference (`A \\ B`). Dynamic expressions reflect changes
+to their referenced sets on later queries; an initial implementation may reject
+cyclic dependencies. Set operations compare fully scoped object identities,
+including volume identity when crossing volumes, rather than comparing names.
+A hierarchical filesystem can be constructed as one optional userspace view,
+not as a native kernel abstraction.
+
+Membership and authority are separate: possession of an OID or knowledge of a
+namespace does not confer access to its members. Effective query visibility is
+limited by the process's authorized object view. The kernel's responsibility is
+identity, persistent membership relations, and rights enforcement; richer
+expression interpretation and application-specific labels belong in userspace.
+The legacy GE R1 hashtag system is not the target model and requires no
+on-volume migration: experimental volumes may be reamed and objects reimported.
+This section specifies architectural intent, not already implemented behavior.
+
 ## Architecture status
 
 **AMD64:** The current full-system implementation includes UEFI boot,

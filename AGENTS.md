@@ -10,6 +10,16 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 - Persistent identity: GE/O `(SpaceID, OID)`. There is no native hierarchical
   filesystem namespace. Runtime objects, capabilities, and stored occurrences
   are different concepts.
+- Persistent namespaces are OID-identified GE/O objects with explicit
+  OID membership relations, not directory trees. The target set algebra is
+  membership, union, intersection, and difference; process `OContext`
+  visibility and capabilities remain separate from stored membership.
+- Never implement or restore kernel hashtag/tag semantics: no `#`-tag
+  validation, tag-name objects, tag-specific indexes or tag query parsers.
+  Application-specific tags and query languages belong in userspace. An OID
+  or set membership never grants authority. Do not preserve legacy GE R1
+  hashtag metadata for compatibility: experimental volumes may be reamed
+  and objects reimported.
 - Object operations belong to resources with object/capability semantics.
   Direct scalar syscalls are allowed. **There is no fixed syscall-count goal.**
 - ObjectFIFO is the generic framed device/IPC mechanism. Keep USB control
