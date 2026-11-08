@@ -37,13 +37,18 @@ What exists today:
   a 39-bit VA translation regime with a 2 GiB identity map and a 2 GiB
   high-half (`KZERO`) map. RAM is mapped Normal write-back; the QEMU virt
   GIC/PL011/RTC window at `0x08000000..0x0a000000` is Device-nGnRnE.
-- A PL011 console, GICv2/GICv3 detection and the EL1 physical timer.
+- A PL011 console, GICv2/GICv3 detection and the EL1 physical timer. GICv3
+  places PPI 30 in Group 1, enables it through the redistributor and uses the
+  Group 1 system-register interface. QEMU's GICv3 model zeroes the
+  distributor ID registers, so detection falls back to a nonzero
+  `GICR_TYPER` when `GICD_PIDR2` is zero.
 - A page-granular physical allocator over the memory map: it clamps RAM to
   the mapped window, reserves the kernel image and the BootInfo blob to whole
   pages, returns zeroed 4 KiB pages and keeps a LIFO free list. It tracks
   allocated pages, so a page can be freed only once, and it refuses to report
   a free range that overlaps the kernel or the blob. A boot self-test
-  allocates, inspects, frees and re-allocates 16 pages.
+  allocates 16 pages, dirties them, frees them, then takes all 16 again
+  before freeing any, proving that every page is distinct and zeroed.
 - The shared `include/oplanboot.h` / `kernel/core/oplanboot.c` module, which
   validates the BootInfo blob, classifies its memory map, computes RAM, and
   prints the architecture-independent handoff. The same module is compiled
@@ -62,7 +67,7 @@ PLAN2001-O: shared boot: arch ARM64
 PLAN2001-O: shared boot: RAM 506 MiB
 PLAN2001-O: ARM64 MEM: 506 MiB free
 PLAN2001-O: ARM64 MEM: allocator self-test passed
-PLAN2001-O: ARM64: GICv2
+PLAN2001-O: ARM64: GICv2          # or GICv3 with -M virt,gic-version=3
 PLAN2001-O: ARM64: CNTFRQ 62500000 Hz
 PLAN2001-O: ARM64 BOOT: shared kernel initialization reached
 PLAN2001-O: ARM64 timer: 3 ticks, interrupts working
@@ -74,13 +79,18 @@ Build and boot:
 tools/build-arm64.sh -j 8          # build/arm64/9karm64.elf
 tools/host/build-efi-arm64.sh -j 8 # build/arm64/bootaa64.efi
 tools/qemu-arm64-boot.sh           # builds both, boots QEMU virt, checks markers
+QEMU_ARM64_GIC=3 tools/qemu-arm64-boot.sh   # the same gate on GICv3
 ```
 
 `tools/qemu-arm64-boot.sh` uses the local AArch64 EDK2 firmware and QEMU's
 `vvfat` drive for a disposable ESP under `build/arm64/esp`. Set
-`QEMU_ARM64_NOBUILD=1` to boot existing artifacts, `QEMU_ARM64_FIRMWARE` to
-name another firmware file, or `QEMU_ARM64_TIMEOUT` to change the bounded
-timeout. It writes only under `build/arm64`.
+`QEMU_ARM64_GIC=3` for `-M virt,gic-version=3`; the gate checks that the
+kernel actually reports that GIC version, so a GICv2 boot cannot pass as a
+GICv3 one. Logs are `build/arm64/qemu/serial-gic2.log` and `serial-gic3.log`.
+Set `QEMU_ARM64_NOBUILD=1` to boot existing artifacts,
+`QEMU_ARM64_FIRMWARE` to name another firmware file, or
+`QEMU_ARM64_TIMEOUT` to change the bounded timeout. It writes only under
+`build/arm64`.
 
 ## ARM64: not implemented
 
@@ -110,9 +120,11 @@ Executed in the repository worktree with the local host toolchain:
 | --- | --- |
 | ARM64 kernel compile/link (`tools/build-arm64.sh`) | PASS |
 | ARM64 UEFI loader compile/link (`tools/host/build-efi-arm64.sh`) | PASS |
-| QEMU `virt` boot, shared BootInfo, page allocator, marker and timer (`tools/qemu-arm64-boot.sh`) | PASS |
-| amd64 kernel compile/link (`tools/build-gcc.sh --kernel`) | PASS on a Debian x86-64 GCC host in the earlier round; NOT RUN on this AArch64 host, which has no x86-64 GCC/binutils cross toolchain |
-| amd64 boot | NOT RUN in this round |
+| QEMU `virt` GICv2 boot: BootInfo, allocator self-test, marker, timer (`QEMU_ARM64_GIC=2 tools/qemu-arm64-boot.sh`) | PASS |
+| QEMU `virt` GICv3 boot: Group 1 PPI 30, marker, timer (`QEMU_ARM64_GIC=3 tools/qemu-arm64-boot.sh`) | PASS |
+| amd64 kernel compile/link (`tools/build-gcc.sh --kernel`) | NOT RUN on this AArch64 host: no x86-64 GCC/binutils cross toolchain |
+| amd64 UEFI loader (`tools/build-efi-gcc.sh`) | PARTIAL/BLOCKED: compiles and links `build/gcc/bootx64.efi` as PE32+ with Subsystem `EFI application` (verified with `objdump -p`), but the script's final host `file(1)` string assertion rejects Termux libmagic's "MS PE32+ executable (EFI ROM) x86-64" wording |
+| amd64 boot to MicroPython REPL | NOT RUN: needs the amd64 kernel and an x86-64 QEMU host |
 | Physical ARM64 hardware | NOT RUN |
 
 The earlier amd64 compile/link was run with a Debian
@@ -121,6 +133,16 @@ exercised the same `tools/host/build-kernel.py` manifest, all 136 closure
 units, the ABI/register checks and the final link. In this round the only
 available `gcc` is Clang 21 targeting AArch64: a `--target=x86_64-linux-gnu`
 attempt cannot express the kernel's global `r14`/`r15` register variables and
-has no x86-64 system `ld`, so the amd64 build was not re-run here. The amd64
-source and manifest are unchanged by the ARM64 page allocator. No amd64 boot
-is claimed from either build alone.
+has no x86-64 system `ld`, so the amd64 kernel was not re-run here. The amd64
+kernel source and manifest are unchanged by the ARM64 page allocator.
+
+To complete the amd64 gate before any merge, run on an x86-64 host with
+GCC/binutils and QEMU:
+
+```sh
+tools/build-gcc.sh --kernel
+tools/build-efi-gcc.sh
+tools/qemu-o-boot.sh        # or the canonical amd64 boot procedure
+```
+
+No amd64 boot is claimed from the loader build alone.

@@ -286,10 +286,21 @@ arm64memfree(void)
 	return freebytes;
 }
 
+static void
+fillpage(u64int pa, u64int v)
+{
+	volatile u64int *p;
+	int i;
+
+	p = (volatile u64int*)(uintptr)(pa + KZERO);
+	for(i = 0; i < PageSize/8; i++)
+		p[i] = v + (u64int)i;
+}
+
 int
 arm64memtest(int n)
 {
-	u64int pages[MaxFreed], pa, f0;
+	u64int pages[MaxFreed], again[MaxFreed], pa, f0;
 	int i, j;
 
 	if(n < 1 || n > MaxFreed)
@@ -298,6 +309,7 @@ arm64memtest(int n)
 	if(f0 < (u64int)n*PageSize)
 		return 0;
 
+	/* round 1: distinct and zeroed; dirty each page so round 2 tests zeroing */
 	for(i = 0; i < n; i++){
 		if((pa = arm64pagealloc()) == 0)
 			return 0;
@@ -308,6 +320,7 @@ arm64memtest(int n)
 			if(pages[j] == pa)
 				return 0;
 		pages[i] = pa;
+		fillpage(pa, 0x9e3779b97f4a7c15ULL + (u64int)i);
 	}
 	if(freebytes != f0 - (u64int)n*PageSize)
 		return 0;
@@ -320,17 +333,30 @@ arm64memtest(int n)
 	if(arm64pagefree(pages[0]) != 0 || freebytes != f0)
 		return 0;
 
-	/* the LIFO free list must hand the same set back, zeroed */
+	/*
+	 * Round 2 takes all n pages before freeing any, so the LIFO free list
+	 * cannot rotate one page n times: every page must come back once,
+	 * distinct and zeroed despite the round-1 contents.
+	 */
 	for(i = 0; i < n; i++){
 		if((pa = arm64pagealloc()) == 0)
 			return 0;
-		for(j = 0; j < n; j++)
-			if(pages[j] == pa)
-				break;
-		if(j == n || !pageiszero(pa))
+		if(!pageiszero(pa))
 			return 0;
-		if(!arm64pagefree(pa))
+		for(j = 0; j < i; j++)
+			if(again[j] == pa)
+				return 0;
+		again[i] = pa;
+	}
+	for(i = 0; i < n; i++){
+		for(j = 0; j < n; j++)
+			if(again[i] == pages[j])
+				break;
+		if(j == n)
 			return 0;
 	}
+	for(i = 0; i < n; i++)
+		if(!arm64pagefree(again[i]))
+			return 0;
 	return freebytes == f0;
 }

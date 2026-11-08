@@ -42,6 +42,7 @@
 #define GICR_IGROUPR0	0x080
 #define GICR_ISENABLER0	0x100
 #define GICR_IPRIORITYR0 0x400
+#define GICR_TYPER	0x008
 
 static int gicver;
 static volatile int timerprints;
@@ -168,7 +169,7 @@ gicv3init(void)
 
 	((volatile uchar*)(uintptr)(GICR + GICR_SGI + GICR_IPRIORITYR0))[30] = 0xa0;
 	v = read32(GICR + GICR_SGI + GICR_IGROUPR0);
-	write32(GICR + GICR_SGI + GICR_IGROUPR0, v & ~(1u << 30));
+	write32(GICR + GICR_SGI + GICR_IGROUPR0, v | (1u << 30));	/* PPI 30 is Group 1 */
 	write32(GICR + GICR_SGI + GICR_ISENABLER0, 1u << 30);
 
 	__asm__ volatile("msr s3_0_c12_c12_5, %0" : : "r"(7ULL) : "memory");
@@ -197,6 +198,24 @@ giceoi(u32int iar)
 		__asm__ volatile("msr s3_0_c12_c12_1, %0" : : "r"((u64int)iar) : "memory");
 	else
 		write32(GICC + GICC_EOIR, iar);
+}
+
+static int
+gicversion(void)
+{
+	u32int pidr2;
+
+	pidr2 = read32(GICD + GICD_PIDR2);
+	if(((pidr2 >> 4) & 0xf) >= 3)
+		return 3;
+	/*
+	 * QEMU's GICv3 model leaves the distributor ID registers at zero.
+	 * The redistributor's GICR_TYPER still identifies it; the QEMU virt
+	 * device window is mapped and an absent redistributor reads as zero.
+	 */
+	if(pidr2 == 0 && read32(GICR + GICR_TYPER) != 0)
+		return 3;
+	return 2;
 }
 
 static void
@@ -295,7 +314,7 @@ arm64_main(u64int bootpa)
 	}
 	uartputs("PLAN2001-O: ARM64 MEM: allocator self-test passed\n");
 
-	gicver = ((read32(GICD + GICD_PIDR2) >> 4) & 0xf) >= 3 ? 3 : 2;
+	gicver = gicversion();
 	if(gicver == 3)
 		gicv3init();
 	else

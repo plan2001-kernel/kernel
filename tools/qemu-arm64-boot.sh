@@ -13,8 +13,13 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 out=$root/build/arm64
 esp=$out/esp
-log=$out/qemu/serial.log
-err=$out/qemu/qemu.err
+gic=${QEMU_ARM64_GIC:-2}
+case $gic in
+2|3) ;;
+*) echo "qemu-arm64-boot: QEMU_ARM64_GIC must be 2 or 3" >&2; exit 1 ;;
+esac
+log=$out/qemu/serial-gic$gic.log
+err=$out/qemu/qemu-gic$gic.err
 
 if [ "${QEMU_ARM64_NOBUILD:-0}" != "1" ]; then
 	python3 "$root/tools/host/build-arm64.py" -j "${JOBS:-4}"
@@ -58,7 +63,7 @@ printf 'bootfile=/9karm64.elf\noboot=server\n' > "$esp/plan9.ini"
 rm -f "$log" "$err"
 set +e
 timeout "${QEMU_ARM64_TIMEOUT:-40}" qemu-system-aarch64 \
-	-M virt -cpu cortex-a57 -m 512 \
+	-M "virt,gic-version=$gic" -cpu cortex-a57 -m 512 \
 	-bios "$fw" \
 	-drive if=none,id=esp,file=fat:rw:"$esp",format=raw \
 	-device virtio-blk-device,drive=esp \
@@ -74,9 +79,14 @@ set -e
 
 # PL011 output is line-terminated with CRLF; normalise before matching so the
 # end-of-line anchors work on every terminal/log transport.
-plain=$out/qemu/serial-plain.log
+plain=$out/qemu/serial-gic$gic-plain.log
 tr -d '\r' < "$log" > "$plain"
 
+if ! grep -q "^PLAN2001-O: ARM64: GICv$gic\$" "$plain"; then
+	echo "qemu-arm64-boot: FAIL: expected GICv$gic did not initialise (log $log)" >&2
+	tail -n 30 "$plain" >&2 || true
+	exit 1
+fi
 if ! grep -q '^PLAN2001-O: ARM64 BOOT: shared kernel initialization reached$' "$plain"; then
 	echo "qemu-arm64-boot: FAIL: kernel marker missing (log $log)" >&2
 	tail -n 30 "$plain" >&2 || true
