@@ -39,6 +39,7 @@ enum {
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
 	ObjOpenProcessSelf	= 14,	/* caller's typed child wait */
+	ObjOpenNamespaceCurrent = 17,	/* caller's namespace control */
 };
 
 /* obj_create kinds.  The first two are volatile and ObjKindPipe is a native
@@ -105,7 +106,19 @@ enum {
 	ObjOpDeviceRecv = 39,	/* device: completed immutable bytes Handle */
 	ObjOpDeviceCtl = 40,	/* device: authorized provider-specific control */
 	ObjOpExit	= 36,	/* RETIRED: direct EXITS(8) is used */
+	ObjOpNamespaceCreate = 41,	/* selected roles -> sealed view Handle */
+	ObjOpNamespaceAttach = 42,	/* view Handle + mode -> attachment token */
+	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
+	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
 };
+
+/* Namespace operations require ObjOpenNamespaceCurrent with Vcontrol.
+ * Create takes 1..32 fixed 32-byte NUL-terminated role names in in/inlen
+ * and returns a VkindNamespaceView Handle. Attach takes the view Handle in
+ * arg0 and NS_REPL/NS_BEFORE/NS_AFTER in arg1; its result is the token.
+ * Detach takes the token in arg0. Visible writes up to 32 NsVisible records
+ * to out (outlen must be a whole-record capacity); result is record count.
+ * No operation accepts extra arguments or buffers. */
 
 /* Common message-device ABI v1.  See docs/DEVICE-ABI.md for the normative
  * ownership/completion contract.  Discovery selectors are boot-local hints,

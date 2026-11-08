@@ -22,6 +22,16 @@ object/resource lifetimes coherently.
 from obsolete syscall inventories or try to meet a fixed count. The design
 permits direct process/scalar calls when adding an object would not help.
 
+Namespace views use the object ABI. `OBJOPEN(ObjOpenNamespaceCurrent)` grants
+control over the caller's current namespace; the resulting Handle is bound to
+that namespace and cannot control a different process group. Typed
+`OBJINVOKE` operations create a sealed `VkindNamespaceView` from selected
+delegable roles, attach it with replace/before/after precedence, detach it by
+attachment token, and enumerate visible GE/O identities and rights into a
+bounded `NsVisible` array. The request shapes and operation numbers are in
+`runtime/abi/obj.h`; the record layout is in `runtime/abi/namespace.h`.
+Visibility uses an epoch-validated snapshot and omits unauthorized identities.
+
 ## Device messages and ObjectFIFO
 
 ObjectFIFO is the common capability-aware transport for framed messages and

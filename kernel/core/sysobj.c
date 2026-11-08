@@ -21,6 +21,7 @@
 #include	"../../runtime/abi/sys.h"
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
+#include	"../../runtime/abi/namespace.h"
 #include	"../core/vobjint.h"
 
 static long
@@ -162,6 +163,10 @@ sysobjopen(sysva_list list)
 		if(req != nil || len != 0)
 			error(Ebadarg);
 		return vobjprocessselfopen(rights, (VobjId*)id);
+	case ObjOpenNamespaceCurrent:
+		if(req != nil || len != 0)
+			error(Ebadarg);
+		return vobjnamespaceopen(rights, (VobjId*)id);
 	default:
 		error("obj: provider not supported");
 	}
@@ -218,6 +223,34 @@ sysobjinvoke(sysva_list list)
 	objoptrace(c.op);
 #endif
 	switch(c.op){
+	case ObjOpNamespaceCreate:
+		if(c.in == nil || c.inlen == 0 || c.inlen > 32*32 ||
+		   c.inlen % 32 != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg0 != 0 || c.arg1 != 0)
+			error(Ebadarg);
+		c.result = vobjnamespacecreate(handle, c.in, (int)(c.inlen/32));
+		break;
+	case ObjOpNamespaceAttach:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg0 > 0x7fffffffULL || c.arg1 > 2)
+			error(Ebadarg);
+		c.result = vobjnamespaceattach(handle, (int)c.arg0, (int)c.arg1);
+		break;
+	case ObjOpNamespaceDetach:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg1 != 0)
+			error(Ebadarg);
+		vobjnamespacedetach(handle, c.arg0);
+		c.result = 0;
+		break;
+	case ObjOpNamespaceVisible:
+		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
+		   (c.out == nil && c.outlen != 0) ||
+		   c.outlen > 32*sizeof(NsVisible) ||
+		   c.outlen % sizeof(NsVisible) != 0)
+			error(Ebadarg);
+		c.result = vobjnamespacevisible(handle, c.out, (long)c.outlen);
+		break;
 	case ObjOpDeviceList:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0
         || (c.out == nil && c.outlen != 0)

@@ -14,9 +14,9 @@ qob_new_o_image() {
     "$T16_ROOT/tools/host/t16/memory-checks.py" >"$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --tcg --timeout 180 --obootexec 0x4f45584543000003 \
-  --output-dir "$T16_OUT" --expect '^T16-PASS retired O Space calls denied' "$@"
+  --output-dir "$T16_OUT" --expect '^T16-PASS namespace rights and process isolation' "$@"
 # Reboot the same writable GPT disk to verify committed GE objects and graph.
-if ! qob_boot_once "$T16_OUT/disk.img" second 'PLAN2001-O: REPL READY' repl ''   '^T16-PASS retired O Space calls denied'; then
+if ! qob_boot_once "$T16_OUT/disk.img" second 'PLAN2001-O: REPL READY' repl ''   '^T16-PASS namespace rights and process isolation'; then
   qob_show_tail "$T16_OUT/boot-second.log"
   qob_die "second boot FAIL: $QOB_BOOT_REASON"
 fi

@@ -109,11 +109,7 @@
 #define OUNBIND         98
 #define OREVOKE         99
 #define PIPEINHERIT     100 /* reserved */
-#define ONSVIEW         101
-#define ONMOUNT         102
-#define ONUNMOUNT       103
 #define OBINDX          104
-#define ONSVISIBLE      105
 #define OQUERY          106
 #define SYSSNAPSHOT     107
 /* 108-113 RESERVED: former TCP6* compatibility family.  The numbers stay

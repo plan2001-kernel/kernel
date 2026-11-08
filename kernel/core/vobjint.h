@@ -58,6 +58,15 @@ int	vobjcommit(int handle, uvlong *ver);
 int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
 int	vobjprocessselfopen(uvlong rights, VobjId *id);
+int	vobjnamespaceopen(uvlong rights, VobjId *id);
+int	vobjnamespacecreate(int control, char (*roles)[32], int nr);
+uvlong	vobjnamespaceattach(int control, int view, int mode);
+void	vobjnamespacedetach(int control, uvlong token);
+int	vobjnamespacevisible(int control, void *out, long bytes);
+void	osviewpermitted(void);
+Ohand*	osviewrole(char *name);
+void	osviewgrantvalid(Ohand*);
+int	osvisibility(Ohand **grants, int count, int *allowed);
 
 /* Process-lifecycle providers.  The OBJINVOKE operations validate the
  * caller's own ProcessSelf or Space capability, then call the shared kernel
