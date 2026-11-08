@@ -3570,6 +3570,7 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
  h=vlookup(handle,Vdelegate);
  if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
  if(h->sub) error(Eperm);
+ if(h->obj->kind==VkindNamespaceControl) error(Eperm);
  /* Preserve RFNOMNT/devmask extension restriction. */
  /* RFNOMNT forbids namespace extension, not removal of an existing role. */
  rlock(&up->pgrp->ns);

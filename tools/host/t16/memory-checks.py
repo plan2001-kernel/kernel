@@ -134,6 +134,24 @@ def run():
     print('T16-PASS view revocation lineage')
 
     control = p.obj_open_namespace_current()
+    delegated_control = p.obj_open_handle(control, p.VCONTROL | p.VDELEGATE)
+    for handle, role in ((control, 't16control'),
+                         (delegated_control, 't16controlcopy')):
+        try:
+            p.obj_bind(handle, role, p.VCONTROL | p.VDELEGATE)
+        except OSError:
+            pass
+        else:
+            raise AssertionError('namespace control bound into its namespace')
+        try:
+            p.obj_open_binding(role)
+        except OSError:
+            pass
+        else:
+            raise AssertionError('rejected namespace control role published')
+        assert p.obj_invoke(handle, p.OBJ_OP_NAMESPACE_VISIBLE) >= 0
+    p.obj_close(delegated_control)
+    print('T16-PASS namespace control binding cycle denied')
     weak = p.obj_open_handle(control, p.VDELEGATE)
     try:
         p.obj_invoke(weak, p.OBJ_OP_NAMESPACE_VISIBLE)
