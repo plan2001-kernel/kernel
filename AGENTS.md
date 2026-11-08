@@ -49,7 +49,10 @@ T13 is merged and passes its emulated integration gate; physical NICs were
 NOT RUN. Its native IPv6 startup/OBJ TCP/UDP opens are disabled. Assess actual
 boot/MPY/driver dependencies before removing residue; there is no obligation
 to preserve the unused legacy stack for compatibility. Documentation changes
-implement neither T14 nor T15. The GitHub-first workflow above remains in force.
+alone implemented neither T14 nor T15. The separately assigned T14 coding
+result now passes its minimal emulated IPv6 gate (24 guest / 245 peer
+assertions; [result](docs/T14-IPV6-RESULT.md)); T15 remains PLANNED. No new
+protocol kernel providers were added. The GitHub-first workflow remains in force.
 
 ## plan2001.com: current infrastructure (2026-11-03)
 

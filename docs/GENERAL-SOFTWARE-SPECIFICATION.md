@@ -235,8 +235,10 @@ The target environment is a typical amd64 machine with RAM, persistent disk and 
 **Normative target, updated 2026-11-08; implementation status remains separate.**
 T13 raw Ethernet is merged with an emulated gate PASS; physical NICs were NOT
 RUN. Kernel native IPv6 startup and OBJ TCP/UDP opens are disabled; inherited
-protocol code remains linked. T14 userspace IPv6/ICMPv6/Neighbor Discovery and
-T15 userspace ESP are **PLANNED**, not implemented by this specification.
+protocol code remains linked. T14 userspace IPv6/ICMPv6/Neighbor Discovery
+now passes its [bounded emulated gate](T14-IPV6-RESULT.md); it is not a
+full router stack. T15 userspace ESP is **PLANNED**, not implemented by
+this specification.
 
 - IP processing in the native PoC MUST use IPv6. IPv4 is a legacy
   compatibility protocol for this project, not a requirement for the kernel

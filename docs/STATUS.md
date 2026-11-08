@@ -12,8 +12,22 @@
 > T11 is validated and PASS (2026-11-06) with one FIFO infinite-timeout
 > sentinel fix and a strengthened-validation follow-up PASS (2026-11-07, no
 > kernel change); T12 passes its emulated USB endpoint integration gate
-> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14–T16 remain **PLANNED**; see
+> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15–T16 remain **PLANNED**; see
 > [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+
+## T14: userspace IPv6 (2026-11-08, minimal emulated gate PASS)
+
+[T14-IPV6-RESULT](T14-IPV6-RESULT.md) records 24 guest assertions and 245
+independent external-peer assertions over real virtio/T13 Device ABI/ObjectFIFO:
+static IPv6/ICMPv6/ND, both echo directions, checksum/length/MAC validation,
+multicast/DAD replies, bounded neighbors/aging/retries/timeouts, malformed
+input, controlled close/revoke and no residual responder. A separate MPY
+child runs on CPU 1; the parent returns to the normal committed GE/O REPL.
+Fresh T13 regression (55/55) and canonical two-boot persistence PASS. All four
+canonical builds PASS, with zero kernel/ABI/MPY C changes. Source/API and limits:
+[user/ipv6](../user/ipv6/README.md). Physical NIC/KVM, full original T8 campaign
+and USB T12 rerun are NOT RUN; no common device code changed. T15 ESP remains
+PLANNED. Earlier documentation-round NOT RUN statements below are historical.
 
 ## Network target correction (2026-11-08, documentation only)
 

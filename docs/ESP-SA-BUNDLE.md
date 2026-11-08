@@ -16,7 +16,9 @@ unaffected.
 
 T13 raw Ethernet / common Device ABI / existing ObjectFIFO supplies L2 bytes.
 T14 must separately demonstrate userspace IPv6, addressing, ICMPv6 and Neighbor
-Discovery. A future T15 implementation adds ESP processing in that userspace
+Discovery. T14 now has a separately recorded
+[emulated integration result](T14-IPV6-RESULT.md); this does not satisfy the
+ESP gates below. A future T15 implementation adds ESP processing in that userspace
 path, with hardware drivers and authorized raw device access in the kernel.
 Existing ESP/AES-GCM code may be reused or refactored after an actual dependency
 review; linked kernel ESP code and its old private control service are not a
