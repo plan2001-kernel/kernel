@@ -151,13 +151,18 @@ def run():
     p.obj_close(view)
     p.obj_close(other)
     print('T16-PASS namespace rights and process isolation')
-    for nr in (55, 59, 101, 102, 103, 105):
+    for nr in (55, 59):
         try:
             p.sysraw(nr)
         except OSError:
             pass
         else:
             raise AssertionError('retired O Space syscall active')
+    for nr in (101, 102, 103, 105):
+        child = "import plan9 as p\np.sysraw(" + str(nr) + ")\n"
+        pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child))
+        waited, status = space.wait()
+        assert waited == pid and status != ''
     print('T16-PASS retired O Space and namespace calls denied')
     p.obj_close(rh)
     p.obj_close(ro)
