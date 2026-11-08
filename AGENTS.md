@@ -20,6 +20,29 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 - Do not restore obsolete path, Plan 9 Chan/fid/qid, /dev, 9P, or protocol-
   specific kernel syscall abstractions to satisfy removed experiments.
 
+## Local-only work records (mandatory)
+
+Keep all **individual task and experiment documentation** only in the agent's
+own local working directory, preferably `/.agent-work/<task>/` inside the
+checkout. This includes plans, reasoning notes, run logs, test outputs,
+verification summaries, screenshots, intermediate results and generated reports.
+The entire `/.agent-work/` directory is ignored by Git. An equivalent
+directory outside the repository is also acceptable.
+
+**Never commit or open a PR containing task-specific documentation or test
+reports**, regardless of filename or directory; in particular, do not recreate
+`docs/T*` reports, audit ledgers, one-off roadmaps or verification dumps. Do
+not bypass the ignore rule with `git add -f`. Review staged files before each
+commit and remove local reports from the staging area.
+
+Tracked GitHub documentation is limited to **durable project-wide architecture,
+interfaces, principles, goals and development instructions**. Edit those only
+when an enduring requirement genuinely changes and the task calls for that
+change. A test run is not by itself a reason to update repository docs.
+Summarize results and checks briefly in the PR description instead. Necessary
+test source code and reusable test fixtures are allowed as implementation,
+but their per-run logs and reports remain local.
+
 ## Working method
 
 Use the GitHub repository `plan2001-kernel/kernel` as canonical source.

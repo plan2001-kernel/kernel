@@ -1,3 +1,6 @@
 /build/
 __pycache__/
 *.pyc
+
+# Agent-local task notes, experiments and test/run reports (never commit).
+/.agent-work/

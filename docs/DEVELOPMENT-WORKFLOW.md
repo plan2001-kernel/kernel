@@ -16,5 +16,24 @@ or source-publication host is required.
 4. Submit a focused pull request against `main`. Do not merge without an
    explicit instruction to do so.
 
-Historical test reports belong to repository history, not the live
-`docs/` tree. Actual source and executed tests override obsolete prose.
+## Documentation and local task records
+
+**Do not commit documentation for individual tasks, experiments or test
+runs.** Keep plans, work notes, stdout/stderr logs, measurement tables,
+verification evidence and generated reports in the agent's own working
+directory, such as `/.agent-work/<task>/` within the checkout. Git ignores
+`/.agent-work/`. A working directory outside the repository is also valid.
+Never override that ignore with `git add -f` or move those records into
+`docs/`, the repository root or another tracked directory.
+
+GitHub documentation contains **only long-lived, generally applicable
+architectural decisions, interface contracts, project goals and agent
+instructions**. Update it only for an expressly requested, lasting change.
+Do not add stage-specific reports, retrospective audits, roadmap checklists,
+per-experiment JSON output or other transient documentation. Reusable tests
+and fixtures may be versioned as code; their per-run results must remain local.
+
+Before committing, inspect `git status --short` and the staged diff so that
+no transient files are included. Report the concise verification outcome in
+the PR itself, not in a new repository document. Git history contains any
+previously committed historical material without keeping it in active context.
