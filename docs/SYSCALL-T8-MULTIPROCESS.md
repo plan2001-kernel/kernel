@@ -174,6 +174,6 @@ and from `build/t8/final-persist/boot-boot2.log`: `T8-PERSIST 4242`.
 ## Related
 
 - [STATUS](STATUS.md) — T8 summary and current state.
-- [ROADMAP-T8-T16](ROADMAP-T8-T16.md) — T9–T16 remain PLANNED.
+- The then-current stage roadmap (since removed) recorded T9–T16 as PLANNED.
 - [SYSCALL-T8-MULTIPROCESS.json](SYSCALL-T8-MULTIPROCESS.json) — machine-readable
   result records.

@@ -30,7 +30,7 @@ No keys, implemented secure store or secret-distribution system are supplied.
 | `AGENTS.md` | Binding newer decision, no reinstated negotiation target; GitHub-first workflow preserved |
 | `README.md` | Replace old active IKE/ESP section, correct T13 status, link new target |
 | `docs/GENERAL-SOFTWARE-SPECIFICATION.md` | Userspace IPv6/ESP target, provisioning and failure policy, no legacy compatibility obligation |
-| `docs/ROADMAP-T8-T16.md` | Correct normative 2.4/2.5, T14/T15/T16 scopes/dependencies, T13 status and crosslinks |
+| the then-current stage roadmap (since removed) | Correct normative 2.4/2.5, T14/T15/T16 scopes/dependencies, T13 status and crosslinks |
 | `docs/ESP-SA-BUNDLE.md` | New normative field/lifecycle/security design and future gates; no frozen binary ABI |
 | `docs/STATUS.md` | Current target/status correction, no claimed protocol implementation or new runtime result |
 | `docs/KERNEL-API-ABI.md` | Mark old network-provider descriptions as migration history after T13 |
@@ -55,7 +55,7 @@ are classified below; none is an active IKE implementation goal.
 | Matching file(s) | Why the references remain |
 | --- | --- |
 | `AGENTS.md`, `README.md`, `docs/GENERAL-SOFTWARE-SPECIFICATION.md` | Explicit exclusion of IKE/PSK/UDP-500 targets and historical crosslink |
-| `docs/ROADMAP-T8-T16.md` | Explicit override/exclusion and marked historical baseline/report; T15 has no negotiation target |
+| the then-current stage roadmap (since removed) | Explicit override/exclusion and marked historical baseline/report; T15 has no negotiation target |
 | `docs/ESP-SA-BUNDLE.md` | Target exclusion, historical crosslink and accurate RFC 4106 caveat; RFC mention is not authorization |
 | `docs/STATUS.md` | New exclusion plus dated weekend-integration evidence about the companion bundle |
 | `docs/MINIMAL-IKEV2.md` | Original implementation/build/launch/test/future-work evidence retained verbatim below superseding banner; all NON-TARGET |

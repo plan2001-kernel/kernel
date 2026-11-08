@@ -179,7 +179,7 @@
   ],
   "related": [
     "docs/STATUS.md",
-    "docs/ROADMAP-T8-T16.md",
+    "then-current stage roadmap (since removed)",
     "docs/SYSCALL-T8-MULTIPROCESS.md"
   ],
   "t9_t16": "PLANNED, not implemented by this round"

@@ -164,5 +164,5 @@ inputs.
 | `runtime/libc/port/oobject.c` | removed the unused `obj_process_self_time()` adapter |
 | `runtime/abi/obj.h` | removed the adapter declaration; documented the retained `ObjOpTimeNow` provider and direct libc path |
 | `micropython/modplan9.c` | `plan9.time_ns()` uses direct libc `nsec()` |
-| `docs/ROADMAP-T8-T16.md`, `docs/STATUS.md`, `docs/SYSCALL-LEDGER.md` | T10 status and supersession notes |
+| the then-current stage roadmap (since removed), `docs/STATUS.md`, `docs/SYSCALL-LEDGER.md` | T10 status and supersession notes |
 | `docs/SYSCALL-T10-CLEANUP.md`, `docs/SYSCALL-T10-CLEANUP.json` | this report and machine-readable result |

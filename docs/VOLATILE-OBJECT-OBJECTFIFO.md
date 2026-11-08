@@ -295,7 +295,7 @@ are not the entire syscall ABI. Fixed-width types are in `runtime/abi/obj.h`;
 numbers 136-140 are in `runtime/abi/sys.h`. T7 restored direct calls for simple
 process-local operations and the current observed table is 135 named / 62
 active / 73 reserved. “Exactly five” describes the universal OBJ family, not a
-total syscall quota; see [ROADMAP-T8-T16](ROADMAP-T8-T16.md). The older `VOBJ*`
+total syscall quota. The older `VOBJ*`
 (121-135) family is a compatibility shim over the same core.
 
 | Number | Operation | Arguments | Meaning |

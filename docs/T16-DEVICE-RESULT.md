@@ -162,7 +162,7 @@ local evidence is retained separately from source (no disk images in the PR).
 
 ## Diff inventory and limits
 
-Exactly eight delivery paths: `AGENTS.md`, `README.md`, `docs/ROADMAP-T8-T16.md`,
+Exactly eight delivery paths: `AGENTS.md`, `README.md`, the then-current stage roadmap (since removed),
 `docs/STATUS.md`, `docs/DEVICE-ABI.md`, this report, its `.json`, and
 `tools/host/mcp-public-files.txt` (indexes the two result files). The changes narrow
 current scope, clarify existing semantics, and record evidence. No syscall,
