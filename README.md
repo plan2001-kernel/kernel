@@ -277,7 +277,7 @@ prerequisites. Do not add other test infrastructure to the tree.
 - [STATUS](docs/STATUS.md): current verification and the single set of commands.
 - [SYSCALL-T8-MULTIPROCESS](docs/SYSCALL-T8-MULTIPROCESS.md): T8 multi-process
   MicroPython result (PASS, 2026-11-06).
-- [ROADMAP-T8-T16](docs/ROADMAP-T8-T16.md): T8–T13 recorded PASS within their
+- Recorded stage results: T8–T13 recorded PASS within their
   documented gates; T13 is merged (emulated gate only, physical NIC NOT RUN).
   T14 minimal userspace IPv6 passes its emulated gate
   ([result](docs/T14-IPV6-RESULT.md)); T15 passes its minimal ESP integration

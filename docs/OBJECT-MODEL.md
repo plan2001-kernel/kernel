@@ -160,7 +160,7 @@ T7 restored direct calls for simple process-local operations (`BRK_(24)`,
 `SLEEP(17)`, `NOTIFY(28)`, `NOTED(29)`, `RFORK(19)`, `OTERMINATE(93)`,
 `EXITS(8)`), and the current observed table is 135 named / 62 active / 73
 reserved. “Exactly five” describes the universal object family, not a total
-syscall quota. See [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+syscall quota.
 
 | Operation | Effect |
 | --- | --- |

@@ -13,7 +13,7 @@
 > sentinel fix and a strengthened-validation follow-up PASS (2026-11-07, no
 > kernel change); T12 passes its emulated USB endpoint integration gate
 > (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15 passes its minimal ESP integration gate (13 guest / 43 peer assertions); T16 passes its emulated USB/Ethernet consolidation gate (fresh 66/55); see
-> [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+> the stage results below.
 
 ## T16: common USB/Ethernet Device ABI (2026-11-08, emulated gate PASS)
 

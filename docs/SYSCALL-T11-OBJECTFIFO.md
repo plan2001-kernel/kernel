@@ -447,7 +447,7 @@ The scripts are test inputs, not part of the kernel ABI.
   `ObjOpRecv` only.
 - `docs/SYSCALL-T11-OBJECTFIFO.md`, `docs/SYSCALL-T11-OBJECTFIFO.json` — this
   result and machine-readable evidence.
-- `docs/STATUS.md`, `docs/ROADMAP-T8-T16.md` — T11 status from evidence.
+- `docs/STATUS.md`, the then-current stage roadmap (since removed) — T11 status from evidence.
 - `docs/VOLATILE-OBJECT-OBJECTFIFO.md` — corrected Handle limit (96 observed)
   and precise subscription-rights policy; no historical result rewritten.
 - `tools/host/t11/` — reproducible test orchestrators and bootstrap generator.
@@ -461,7 +461,7 @@ The scripts are test inputs, not part of the kernel ABI.
   counters.
 - `docs/SYSCALL-T11-OBJECTFIFO.md`, `docs/SYSCALL-T11-OBJECTFIFO.json` —
   follow-up evidence and the NOT RUN subscription-close analysis.
-- `docs/STATUS.md`, `docs/ROADMAP-T8-T16.md` — current T11 status.
+- `docs/STATUS.md`, the then-current stage roadmap (since removed) — current T11 status.
 - Local, non-published discrimination harness under `build/t11/mut/` and run
   logs under `build/t11/logs/` (build artifacts, not canonical test inputs).
 

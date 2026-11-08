@@ -21,8 +21,7 @@ superseded for the total syscall ABI.** The five OBJ operations are the general
 object boundary, not the whole kernel interface. T7 restored direct
 `BRK_(24)`, `SLEEP(17)`, `NOTIFY(28)`, `NOTED(29)`, `RFORK(19)`,
 `OTERMINATE(93)` and `EXITS(8)` where an object round trip was not justified;
-the current observed table is 135 named / 62 active / 73 reserved. See
-[ROADMAP-T8-T16](ROADMAP-T8-T16.md). The historical counts below are evidence
+the current observed table is 135 named / 62 active / 73 reserved. The historical counts below are evidence
 for their rounds, not a target or quota. The Pipe/UART/KBD round moved native Pipe, UART and
 PS/2 keyboard behind that boundary as `VkindPipe`, `VkindUart` and `VkindKbd`.
 The 2026-11-05 retirement round now removes the `PIPENEW/READ/WRITE/CLOSE`,

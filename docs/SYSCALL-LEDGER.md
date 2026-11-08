@@ -1,8 +1,8 @@
 # Plan2001-O syscall ledger (T9)
 
 **Status: T9 PASS (documentation and measurement only), 2026-11-06.**
-This is the source-derived ledger required by
-[ROADMAP-T8-T16](ROADMAP-T8-T16.md#t9--static-and-runtime-semantic-audit-of-the-active-syscall-abi).
+This is the source-derived ledger required by the then-current T9 roadmap
+(since removed).
 T10 was subsequently implemented separately (PASS); T11–T16 remain
 **PLANNED**. No syscall, object operation, ABI value, kernel source, userspace
 implementation, build script or test was changed to produce this document.
@@ -164,7 +164,7 @@ with the active `OBJ*` syscalls or with an Object operation carried by
 | [T0 measurement](SYSCALL-T0-MEASUREMENT.md) (snapshot `1236e5b9…`, 2026-11-05) | 135 named / **65 active / 70 reserved** | T0 preceded the T6 retirement. Its active set included `_WAIT(36)`, `AWAIT(47)`, `OSPAWN(92)`, `NOTIFY(28)`, `NOTED(29)`, `RFORK(19)` and `OTERMINATE(93)`. |
 | [T6 process report](SYSCALL-T6-PROCESS.md) | 135 / **58 / 77** | T6 retired those seven process-lifecycle numbers to typed `OBJINVOKE` operations. |
 | [T7 restore report](SYSCALL-SIMPLE-RESTORE.md) | 135 / **62 / 73** | T7 restored four of the seven (`NOTIFY`, `NOTED`, `RFORK`, `OTERMINATE`). `_WAIT`, `AWAIT` and `OSPAWN` remain reserved. |
-| [ROADMAP](ROADMAP-T8-T16.md) header | 135 / 62 / 73 at snapshot `01a7c7a4…` | This is an older inspected baseline. The ledger measures `2b3e6126…`; the dispatch counts happen to be unchanged. |
+| Then-current stage roadmap header (since removed) | 135 / 62 / 73 at snapshot `01a7c7a4…` | This is an older inspected baseline. The ledger measures `2b3e6126…`; the dispatch counts happen to be unchanged. |
 | [T8 report](SYSCALL-T8-MULTIPROCESS.md) | 135 / 62 / 73 | T8 changed only console byte accounting, not syscall dispatch. |
 
 There is also one source-comment discrepancy: `kernel/core/sysproc.c:1520`
@@ -1194,7 +1194,7 @@ sed -n '1,260p' build/t8/final-multiproc/serial-boot.log
 cat build/t8/final-multiproc/report.txt
 ```
 
-Related documents: [STATUS](STATUS.md), [ROADMAP-T8-T16](ROADMAP-T8-T16.md),
+Related documents: [STATUS](STATUS.md),
 [T0 measurement](SYSCALL-T0-MEASUREMENT.md),
 [T6 process report](SYSCALL-T6-PROCESS.md),
 [T7 restore](SYSCALL-SIMPLE-RESTORE.md),

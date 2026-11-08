@@ -468,7 +468,7 @@
     "docs/SYSCALL-T11-OBJECTFIFO.md",
     "docs/SYSCALL-T11-OBJECTFIFO.json",
     "docs/STATUS.md",
-    "docs/ROADMAP-T8-T16.md",
+    "then-current stage roadmap (since removed)",
     "docs/VOLATILE-OBJECT-OBJECTFIFO.md",
     "tools/host/t11/boot-a-orch.py",
     "tools/host/t11/boot-b-orch.py",
@@ -596,7 +596,7 @@
       "docs/SYSCALL-T11-OBJECTFIFO.md",
       "docs/SYSCALL-T11-OBJECTFIFO.json",
       "docs/STATUS.md",
-      "docs/ROADMAP-T8-T16.md"
+      "then-current stage roadmap (since removed)"
     ],
     "not_run": [
       "direct close-versus-blocked-receive test (unreachable through the supported process-local, non-transferable subscription contract)",

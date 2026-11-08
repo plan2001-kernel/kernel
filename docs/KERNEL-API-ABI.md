@@ -29,7 +29,7 @@ current table was observed as 135 named / 62 active / 73 reserved. The goal is
 a small, coherent, understandable interface, not a numeric count; a simple
 operation must not be forced through the object calls merely to preserve a
 count. Historical T0–T7 reports are evidence of their rounds, not current
-quotas. See [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+quotas.
 
 **T12 implementation addition (2026-11-07):** the common message-device ABI
 and one native USB control-endpoint integration are defined in
