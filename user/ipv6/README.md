@@ -2,7 +2,7 @@
 
 `node.py` is the actual guest userspace implementation. It uses the existing
 T13 Device ABI/ObjectFIFO; it implements no kernel provider, socket, filesystem
-or cryptography. Emulated integration evidence: [T14 result](../../docs/T14-IPV6-RESULT.md).
+or cryptography. Earlier emulated integration checks are part of Git history.
 
 ## Interface and ownership
 
@@ -123,7 +123,7 @@ ESP subclass, PUBLIC TEST-ONLY config and child into an ordinary disposable
 GE/O init module; a read-only code Handle and device46 are explicitly passed
 to a separate MPY OID child. This is test code carrying public literals, not
 a persistent key object, versioned bundle or lifecycle service. The parent
-returns to normal commit/REPL. [T15 result](../../docs/T15-ESP-RESULT.md).
+returns to normal commit/REPL.
 
 Fixed test keys/salts are confined to `tools/host/t15/demo-config.py` and its
 disposable generated test module; the ESP subclass contains no demo keys.

@@ -1,8 +1,8 @@
 # Retained crypto source provenance (historical IKE context)
 
 The IKE names below describe actual retained code, not an active/future
-protocol target. The 2026-11-08 decision excludes IKEv2; see the normative
-[minimal T15 scope](../../docs/ESP-SA-BUNDLE.md). T15 reuses espcrypto.c plus
+protocol target. IKEv2 is not a current kernel or userspace development requirement.
+The small experimental ESP example uses espcrypto.c plus
 the existing five BearSSL AES/GHASH/GCM units in the MPY userspace ELF through
 modaesgcm.c; there is no new crypto algorithm or kernel service. The private
 ikeport.h selects the existing user standard types for that build; kernel
