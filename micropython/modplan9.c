@@ -1062,6 +1062,21 @@ static mp_obj_t p9_devicectl(mp_obj_t h,mp_obj_t op){
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_devicectl_obj,p9_devicectl);
 
+static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
+ ObjEtherStatus i;mp_obj_t a[15];
+ if(obj_device_ether_status(mp_obj_get_int(handle),&i)<0)raise_err();
+ a[0]=mp_obj_new_int(i.version);a[1]=mp_obj_new_int(i.controller);
+ a[2]=mp_obj_new_int(i.minframe);a[3]=mp_obj_new_int(i.maxframe);
+ a[4]=mp_obj_new_bytes(i.mac,6);a[5]=mp_obj_new_int(i.link);
+ a[6]=mp_obj_new_int(i.closed);a[7]=mp_obj_new_int_from_ull(i.arrivals);
+ a[8]=mp_obj_new_int_from_ull(i.published);a[9]=mp_obj_new_int_from_ull(i.handoff_drops);
+ a[10]=mp_obj_new_int_from_ull(i.publish_drops);a[11]=mp_obj_new_int_from_ull(i.tx_accepted);
+ a[12]=mp_obj_new_int_from_ull(i.highwater);a[13]=mp_obj_new_int(i.handoff_capacity);
+ a[14]=mp_obj_new_int(i.handoff_queued);
+ return mp_obj_new_tuple(15,a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_deviceetherinfo_obj,p9_deviceetherinfo);
+
 /* Legacy USBLIST path, kept as a thin compatibility adapter for tests. */
 static mp_obj_t p9_usbopen(void){return check(usbopen());}
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_usbopen_obj,p9_usbopen);
@@ -1249,6 +1264,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_uart_status), MP_ROM_PTR(&p9_objuartstatus_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_kbd_open), MP_ROM_PTR(&p9_objkbdopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_kbd_leds), MP_ROM_PTR(&p9_objkbdleds_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_ether_info), MP_ROM_PTR(&p9_deviceetherinfo_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_devices_open), MP_ROM_PTR(&p9_devicesopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_list), MP_ROM_PTR(&p9_devicelist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_open), MP_ROM_PTR(&p9_deviceopen_obj) },

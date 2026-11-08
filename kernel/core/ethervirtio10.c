@@ -379,11 +379,14 @@ interrupt(Ureg*, void* arg)
 	Ether *edev;
 	Ctlr *ctlr;
 	Vqueue *q;
-	int i;
+	int i, isr;
 
 	edev = arg;
 	ctlr = edev->ctlr;
-	if(vin8(&ctlr->isr, 0) & 1){
+	isr = vin8(&ctlr->isr, 0);
+	if((isr & 2) && (ctlr->feat[0] & Fstatus))
+		edev->netif.link = (vin16(&ctlr->dev, Vnet_status) & Nlinkup) != 0;
+	if(isr & 1){
 		for(i = 0; i < ctlr->nqueue; i++){
 			q = &ctlr->queue[i];
 			if(vhasroom(q)){
@@ -613,7 +616,7 @@ pciprobe(void)
 		vout32(&cfg, Vconf_drvfeat, c->feat[1] & Fversion1);
 
 		vout32(&cfg, Vconf_drvfeatsel, 0);
-		vout32(&cfg, Vconf_drvfeat, c->feat[0] & (Fmac|Fctrlvq|Fctrlrx));
+		vout32(&cfg, Vconf_drvfeat, c->feat[0] & (Fmac|Fstatus|Fctrlvq|Fctrlrx));
 
 		vout8(&cfg, Vconf_status, vin8(&cfg, Vconf_status) | Sfeaturesok);
 
@@ -685,7 +688,8 @@ reset(Ether* edev)
 	edev->isa.irq = ctlr->pcidev->intl;
 	edev->tbdf = ctlr->pcidev->tbdf;
 	edev->netif.mbps = 1000;
-	edev->netif.link = 1;
+	edev->netif.link = (ctlr->feat[0] & Fstatus) == 0
+		|| (vin16(&ctlr->dev, Vnet_status) & Nlinkup) != 0;
 
 	if((ctlr->feat[0] & Fmac) != 0 && memcmp(edev->ea, zeros, Eaddrlen) == 0){
 		for(i = 0; i < Eaddrlen; i++)

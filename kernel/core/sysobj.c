@@ -94,6 +94,7 @@ sysobjopen(sysva_list list)
 	switch(provider){
 	case ObjOpenTcpListen:
 	case ObjOpenTcpConnect:
+        error("obj: kernel network protocols disabled; use raw device");
 	case ObjOpenGe:
 		return vobjopenstream(provider, req, len, rights, (VobjId*)id);
 	case ObjOpenHandle:
@@ -120,9 +121,7 @@ sysobjopen(sysva_list list)
 		return vobjopenstream(VopenGeSpace, req, (long)sizeof(VobjGeReq),
 			rights, (VobjId*)id);
 	case ObjOpenUdp6:
-		if(req == nil || len != sizeof(ObjOpenUdp6Req))
-			error(Ebadarg);
-		return vobjopenudp6(req, len, rights, (VobjId*)id);
+        error("obj: kernel network protocols disabled; use raw device");
 	case ObjOpenUart:
 	{
 		ObjOpenUartReq ur;
@@ -233,7 +232,7 @@ sysobjinvoke(sysva_list list)
         if(c.out != nil || c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
         c.result = vobjdevicesend(handle, c.in,
-            bounded(c.inlen, 8+OBJ_DEVICE_MAXPAYLOAD, Ebadarg));
+            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg));
         break;
     case ObjOpDeviceRecv:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0
@@ -242,10 +241,10 @@ sysobjinvoke(sysva_list list)
         c.result = vobjdevicerecv(handle, c.out);
         break;
     case ObjOpDeviceCtl:
-        if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0
-        || c.arg1 != 0)
+        if(c.in != nil || c.inlen != 0 || c.arg1 != 0)
             error(Ebadarg);
-        c.result = vobjdevicectl(handle, c.arg0);
+        c.result = vobjdevicectl(handle, c.arg0, c.out,
+            bounded(c.outlen, sizeof(ObjEtherStatus), Ebadarg));
         break;
     case ObjOpInfo:
 		if(c.out == nil || c.outlen != sizeof(VobjInfo))

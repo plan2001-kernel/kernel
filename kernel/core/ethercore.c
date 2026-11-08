@@ -517,11 +517,16 @@ ethercore_rxunregister(Ether *ether, EtherRxSink sink, void *arg)
 	 * returned.  The callback decrements rxactive and wakes rxr; no lock
 	 * is held across the wait, and the IRQ path never sleeps.
 	 */
+    /* Once detached, finish the callback join even if the closing process
+     * receives a note. Abandoning rxunregistering would strand the sink. */
+    while(waserror())
+        ;
 	for(;;){
 		ilock(&cs->rxlock);
 		if(cs->rxactive == 0){
 			cs->rxunregistering = 0;
 			iunlock(&cs->rxlock);
+            poperror();
 			return EtherErrOk;
 		}
 		iunlock(&cs->rxlock);

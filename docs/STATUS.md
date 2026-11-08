@@ -12,8 +12,23 @@
 > T11 is validated and PASS (2026-11-06) with one FIFO infinite-timeout
 > sentinel fix and a strengthened-validation follow-up PASS (2026-11-07, no
 > kernel change); T12 passes its emulated USB endpoint integration gate
-> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13–T16 remain **PLANNED**; see
+> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14–T16 remain **PLANNED**; see
 > [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+
+## T13: raw Ethernet (2026-11-07, emulated integration gate PASS)
+
+[T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md) records the verified GitHub T12
+baseline, canonical builds, 55 executed T13 assertions on 2 QEMU/TCG CPUs,
+complete external-peer frames with EtherType 0x88b5, cross-process TEE,
+independent overflow, real bounded-handoff drops, rights, revoke, exit,
+flood-time detach and link-down/recovery. The same binaries pass a fresh
+66/66 T12 USB run. Contract: [DEVICE-ABI](DEVICE-ABI.md). Physical hardware,
+TX queue/allocation fault injection and exhaustive race testing are NOT RUN.
+The old native IP service startup and OBJ TCP/UDP opens are disabled under
+the task's explicit override; remaining linked protocol code is documented.
+GitHub branch/PR delivery follows the current workflow; MCP source snapshots
+remain separate. The older T12 publication-blocked narrative below is
+historical, not a blocker on the current GitHub branch workflow.
 
 ## T12: common device ABI (2026-11-07, emulated endpoint gate PASS)
 

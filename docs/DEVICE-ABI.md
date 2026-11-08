@@ -1,6 +1,10 @@
-# T12 — common message-device ABI
+# Common message-device ABI — T12 USB and T13 Ethernet
 
-Status (2026-11-07): T12 integration gate PASS in the emulated endpoint
+T13 raw Ethernet is specified below and validated in
+[T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md). Its emulated integration gate
+passes 55 checks; the same kernel passes a fresh 66-check T12 USB regression.
+
+Historical T12 status (2026-11-07): T12 integration gate PASS in the emulated endpoint
 environment (66/66 executed checks). Physical hardware is NOT RUN; source
 publication is BLOCKED. Execution evidence and
 limits are recorded in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). The initial
@@ -25,10 +29,9 @@ There is no ambient privilege in a numeric selector or volatile identity.
 `DeviceList` requires `Vmeta` and returns an array of 32-byte
 `ObjDeviceEntry` records. A zero byte capacity returns the current count;
 otherwise the result is the number copied, up to the caller's capacity.
-The maximum capacity is 64 records, matching the current USB core's endpoint
-bound. Membership is a snapshot, not a reservation: detach or a competing
-open may occur before the selected device is opened. The initial catalog
-lists live USB control endpoints only, with family 1, device/endpoint numbers,
+The maximum capacity is 128 records (USB endpoints and Ethernet NICs). Membership is a snapshot, not a reservation: detach or a competing
+open may occur before the selected device is opened. USB entries use family 1 and device/endpoint numbers; T13 adds family 2 NICs.
+The USB records have
 maximum send 4104 bytes and maximum receive 4096 bytes. Unused fields are zero.
 Future providers must retain explicit payload and metadata semantics.
 
@@ -160,7 +163,7 @@ C adapters are declared in `runtime/abi/obj.h` and implemented in
 `runtime/libc/port/oobject.c`. MicroPython's `plan9` module exposes:
 
 - `obj_devices_open(rights=0)`
-- `obj_device_list(catalog, capacity=64)` (capacity 0 returns the count)
+- `obj_device_list(catalog, capacity=128)` (capacity 0 returns the count)
 - `obj_device_open(catalog, family, selector0, selector1, rights=0)`
 - `obj_device_send(device, message)` (returns completion sequence)
 - `obj_device_recv(device)` (returns bytes Handle, sequence, family, length)
@@ -187,3 +190,61 @@ remain in effect. It adds no controller logic or new syscall, and does not
 change legacy USB authorization. Peripheral data transfer, completion and
 rights checks then use the T12 session operations. Root-hub emulation and
 actual peripheral HCI data are reported separately.
+
+
+## T13 raw Ethernet provider
+
+Family 2 selects a physical NIC by `(selector0=controller number, selector1=0)`.
+Catalog authority is unchanged: Vcreate is required to open a session; no
+numeric selector grants access. One physical NIC has one RX sink/session;
+explicit Handle aliases share it. Catalog records remain 32 bytes/version 1;
+maxsend/maxrecv are complete L2 frame limits. The common catalog bound is now
+128 entries; the USB payload limit remains 4096, while the shared message
+bound is 16384. Actual NIC limits are also enforced (virtio: 60..1514 bytes).
+Frames include destination/source MAC, EtherType and padding, without FCS.
+No Ethernet/IP schema or filter is imposed on the frame bytes.
+
+Ethernet rights are Vsend|Vrecv|Vmeta|Vsubscribe|Vcontrol|Vdelegate (default
+238). Vsend authorizes raw TX. SEND returns the full accepted length or an
+error, never a short success or a completion sequence. Acceptance means
+ethercore copied/enqueued the frame; it is not a hardware completion. Link
+down, full/closed TX queue, allocation and frame-size errors are explicit.
+Virtio negotiates link status and handles configuration changes in its IRQ.
+
+RECV requires **both Vrecv and Vsubscribe**. It returns an ordinary FIFO
+capability and `(sequence=0, family=2, length=0)`, not a frame completion.
+That capability has Vsubscribe|Vmeta plus only the device Handle's Vcontrol
+and Vdelegate. It never has Vsend. Generic `obj_subscribe(fifo,12,capacity)`
+and `obj_receive(subscription,timeout)` then receive complete immutable bytes
+objects; default receive grants Vread|Vmeta, without delegation. Independent
+processes can receive a device capability with rights 44 and create their
+own subscriptions; neither the device nor FIFO rights can amplify.
+
+Each frame has a separate 24-byte versioned little-endian ObjEtherRxMeta
+envelope: version:u32, controller:u32, length:u32, reserved-zero:u32,
+arrival-sequence:u64. The object bytes remain exactly the L2 frame. Sequence
+is callback arrival order within the session; gaps are possible after drops.
+No GE/O OID is allocated for incoming frames. Handle values are process-local;
+volatile object identity, immutable bytes and physical controller identity
+remain distinct.
+
+DeviceCtl operation 2 returns the fixed 88-byte ObjEtherStatus under Vmeta.
+`obj_device_ether_info(device)` packs it as `(version, controller, minframe,
+maxframe, mac, link, closed, arrivals, published, handoff_drops, publish_drops,
+tx_accepted, highwater, handoff_capacity, handoff_queued)`. `published` counts
+successful FIFO publications (including zero subscribers), handoff_drops
+counts callback rejection, and publish_drops counts worker allocation/FIFO
+failures; generic FIFO drops count per-subscriber overflow separately.
+Operation 3 requires Vcontrol and explicitly detaches the session. Closing
+one alias keeps it alive; final close/exit performs detach, drains pending
+handoff Blocks, closes FIFO queues and releases the NIC sink. Received bytes
+remain valid. Revoke acts on the FIFO, not the physical device; after revoke,
+RX publication fails safely until detach/close. Detach is idempotent; repeated
+user FIFO revoke retains the existing error. A detached session cannot send
+or obtain a new RX FIFO; a new session may reacquire the physical NIC.
+
+IRQ handoff capacity is 64 Blocks. Only the worker allocates immutable
+objects or enters ObjectFIFO publication. There is one existing ObjectFIFO
+per session, with its existing independent subscriber queues, not another
+queue family. Ownership, concurrent teardown and executed limits are detailed
+in [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md).

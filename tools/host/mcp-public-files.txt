@@ -77,6 +77,8 @@ docs/SYSCALL-T6-PROCESS.md
 docs/SYSCALL-T8-MULTIPROCESS.json
 docs/SYSCALL-T8-MULTIPROCESS.md
 docs/T12-DEVICE-RESULT.md
+docs/T13-ETHERNET-RESULT.json
+docs/T13-ETHERNET-RESULT.md
 docs/TEST-RESULTS.json
 docs/TINYCC-SPACE2.md
 docs/TODO.md
@@ -285,6 +287,7 @@ kernel/core/sdscsi.c
 kernel/core/sdvirtio10.c
 kernel/core/segment.c
 kernel/core/syscallfmt.c
+kernel/core/sysdevether.c
 kernel/core/sysfile.c
 kernel/core/sysinfo.c
 kernel/core/syskbd.c
@@ -874,6 +877,9 @@ tools/host/t11/boot-c-orch.py
 tools/host/t11/mk-boot-input.py
 tools/host/t12/device-checks.py
 tools/host/t12/run-device-checks.sh
+tools/host/t13/ethernet-checks.py
+tools/host/t13/peer.py
+tools/host/t13/run-ethernet-checks.sh
 tools/mkovol
 tools/oinspect.py
 tools/qemu-o-boot.sh
