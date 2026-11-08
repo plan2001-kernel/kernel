@@ -171,6 +171,28 @@ The kernel build checks that no `mpelf`/`mpelf_end` payload is present. The
 loader build verifies the PE32+ EFI subsystem. These are normal build commands,
 not a test framework.
 
+### Experimental ARM64 boot foundation
+
+A separate, experimental AArch64 boot tree proves that the existing BootInfo
+v1 handoff and the shared `oplanboot` early-boot module work on a second ISA.
+It is not a port of the amd64 kernel and is not a supported target yet.
+
+```sh
+tools/build-arm64.sh -j 8           # build/arm64/9karm64.elf
+tools/host/build-efi-arm64.sh -j 8  # build/arm64/bootaa64.efi
+tools/qemu-arm64-boot.sh            # build both, boot QEMU virt, check markers
+QEMU_ARM64_GIC=3 tools/qemu-arm64-boot.sh   # the same gate on GICv3
+```
+
+The QEMU `virt` boot reaches EL1, enables its own MMU, validates the same
+BootInfo blob as amd64, reserves the kernel image and blob before handing out
+zeroed 4 KiB physical pages, and prints `PLAN2001-O: ARM64 BOOT: shared kernel
+initialization reached`; the EL1 timer then delivers three interrupts. The gate
+passes with both GICv2 and GICv3 and checks the reported version. Drivers,
+scheduler, virtual memory, GE/O, syscalls, userspace and networking are **not**
+implemented for ARM64. See [architecture support](docs/ARCHITECTURE-SUPPORT.md)
+for the exact scope, limits and verification record.
+
 ## Published source
 
 The complete canonical source tree is published to `plan2001.com` at the end of

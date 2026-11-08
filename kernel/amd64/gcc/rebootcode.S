@@ -20,7 +20,7 @@ _reboot_entry:
 	lgdt	(%rax)
 	pushq	$SELCODE32
 	pushq	$_warp32
-	retfq
+	lretq
 
 	.code32
 _warp32:

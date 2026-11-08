@@ -63,6 +63,25 @@ archdataround(void)
 	return 4096;
 }
 
+/* the AMD64 kernel is entered with the firmware's caches; nothing to flush */
+void
+archcacheclean(uvlong, uvlong)
+{
+}
+
+void
+archcachesync(void)
+{
+}
+
+/* the kernel's entry must lie in the 256 MB window its boot tables map */
+int
+archentryok(uvlong entry)
+{
+	return entry >= 0xffffffff80000000ull
+	    && entry < 0xffffffff80000000ull + 0x10000000ull;
+}
+
 /*
  * May the BootInfo blob lie at [pa, pa+len)?  Not where the kernel goes:
  * its image, at the fixed physical address it is linked for and claimed

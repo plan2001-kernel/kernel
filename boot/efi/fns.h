@@ -12,6 +12,9 @@ void archconf(BootInfo *bi);
 uvlong archentry(uvlong entry);
 ulong archdataround(void);
 int archblobok(uvlong pa, uvlong len);
+int archentryok(uvlong entry);
+void archcacheclean(uvlong pa, uvlong len);
+void archcachesync(void);
 char *archcheck(void);
 void archjump(void *entry, void *bootinfo);
 

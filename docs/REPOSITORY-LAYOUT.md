@@ -7,8 +7,9 @@ Persistent identity remains `(SpaceID, OID)` in a GE/O volume.
 
 ```text
 boot/efi/          Clang/LLD UEFI loader (PE32+ entry, plan9.ini parsing)
-kernel/core/       processes, VM, syscalls, core services
+kernel/core/       processes, VM, syscalls, core services, shared early boot
 kernel/amd64/      amd64 port, pc64 configuration data, GNU asm, GCC startup
+kernel/arm64/gcc/  experimental AArch64 entry, vectors, boot memory and boot-only main
 kernel/drivers/    USB and UART drivers; amd64-specific drivers stay in kernel/amd64/
 kernel/net/        native IPv6-only network protocols
 kernel/compat/     GCC/Plan 9 language compatibility header
@@ -33,8 +34,12 @@ second compile-unit list. `tools/host/build-mpy-gcc.py` has explicit
 MicroPython and `runtime/libc` member manifests and writes
 `build/gcc/micropython.elf`; `tools/host/build-format-o.sh` has an explicit
 fmt manifest. `tools/host/build-efi-gcc.sh` builds `build/gcc/bootx64.efi`
-with Clang/LLD.
+with Clang/LLD. The experimental ARM64 tree has its own explicit manifests:
+`tools/host/build-arm64.py` links `build/arm64/9karm64.elf` and
+`tools/host/build-efi-arm64.sh` builds `build/arm64/bootaa64.efi`.
 The thin `tools/*` entry points keep the previously documented command names.
+`kernel/arm64/gcc/` is not part of the amd64 kernel manifest; see
+[ARCHITECTURE-SUPPORT](ARCHITECTURE-SUPPORT.md) for its scope.
 
 ## N11.3 canonical kernel boundary
 

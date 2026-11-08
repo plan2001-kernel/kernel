@@ -2,7 +2,7 @@ typedef ushort	CHAR16;
 
 typedef uchar	UINT8;
 typedef ushort	UINT16;
-typedef ulong	UINT32;
+typedef uint	UINT32;		/* 32 bits on both x64 and arm64 */
 typedef uvlong	UINT64;
 typedef UINT8	BOOLEAN;
 
