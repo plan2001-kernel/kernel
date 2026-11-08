@@ -1,5 +1,10 @@
 # T15 target correction — documentation result
 
+> **Historical documentation-round result.** Its expansive target was later
+> superseded by the owner's minimal T15 implementation assignment. See
+> [current scope](ESP-SA-BUNDLE.md); the original result below records that
+> earlier decision and is not an active implementation checklist.
+
 **Documentation task PASS (2026-11-08). T14/T15 implementations remain PLANNED.**
 Task `d86c7cf9d7ca4cbcbab58472bcc51a96` was claimed through Plan2001 MCP;
 the owner then explicitly assigned this documentation work. Authoritative

@@ -2,7 +2,7 @@
 #define PLAN2001_IKEPORT_H
 /* Pure protocol code shares this explicit-width boundary with host validation.
  * Kernel builds deliberately do not include host/glibc headers. */
-#ifdef PLAN2001_GCC
+#if defined(PLAN2001_GCC) && !defined(PLAN2001_GCC_USER)
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;

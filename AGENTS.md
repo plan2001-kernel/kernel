@@ -17,42 +17,34 @@ substitute it for GitHub main or overwrite T12 with it. GitHub branch/PR writes
 and task_report do not update that snapshot. The dated publisher/hooks below
 are historical mechanisms, not the default route for current tasks.
 
-## Network target decision (2026-11-08)
+## Network target decision (2026-11-08, latest T15 assignment)
 
-The owner's newer decision overrides older networking prose, archived reports
-and inherited agent context. [ESP-SA-BUNDLE](docs/ESP-SA-BUNDLE.md) is the
-normative **PLANNED** ESP design. **IKEv2 is entirely excluded from the active
-PoC and future target**: no IKE negotiation/handshake, PSK/UDP-500 service,
-key-exchange implementation, IKE daemon or deferred IKE migration. Never
-restore it as a presumed target from historical examples.
+The owner's later minimal T15 assignment supersedes the earlier expansive
+ESP-SA-BUNDLE/key-lifecycle decision. [Current T15 scope](docs/ESP-SA-BUNDLE.md)
+is an **interface integration test**, not a VPN/security product: reuse T14
+userspace IPv6/ICMPv6/ND and T13 raw Device ABI/ObjectFIFO for bidirectional
+transport-mode ESP echo (IPv6 NH=50), with two fixed distinct directional
+TEST-ONLY AES-128-GCM SAs in a disposable fixture. Reuse existing crypto
+primitives in the user process. Correct packet nonces/tags are required within
+the running test; intended protected echo must not silently use plaintext.
 
-T14 is separately demonstrated userspace IPv6/ICMPv6/Neighbor Discovery over
-T13 raw Ethernet/Device ABI/ObjectFIFO. Future T15 is one bidirectional ESP
-SA pair (IPv6 NH=50), AES-128-GCM-16, preferably transport mode and protected
-echo. One bounded versioned GE/O bundle is supplied to both hosts through an
-external authenticated/confidential channel. It contains two directional
-keys (16 bytes each), two salts (4 bytes each), separate SPIs, IPv6 selectors,
-profile, generation, lifetime and policy. Four secret components/40 bytes are
-not the complete object. OIDs are local, not capabilities; local FIFO delivery
-does not secure interhost transfer. Key generation/distribution is outside
-this PoC; do not request secrets in chat.
+Do not restore persistent key objects, versioned bundles, durable consumed
+generations, anti-rollback, replay windows, key lifecycle/rekeying, expiry or
+clock guarantees, secure distribution/storage or enterprise VPN requirements.
+The [old expansive design](docs/history/ESP-SA-BUNDLE-2026-11-08.md) is history,
+not a checklist. Fixed demo keys/counters carry no production, restart or
+key-reuse security claim. IKEv2 remains entirely excluded; no negotiation,
+key exchange or extra daemon. No new syscall, protocol kernel provider/FIFO,
+pathname/Chan/fd adapter or restored native network stack. UDP/TCP and T16
+are independent; T16 is not assigned.
 
-Require tag verification, bounded anti-replay, fresh unique material per new
-session, no AES-GCM nonce reuse or consumed-bundle reactivation after restart,
-and fail closed without plaintext downgrade on failure. Manual provisioning
-is experimental and must not be claimed fully RFC 4106-compliant or production
-security. No new protocol-specific kernel provider/FIFO/syscall or extra daemon.
-UDP/TCP are independent; T16 USB/Wi-Fi is independent. Existing ESP code is
-potential reuse material, not proof of userspace ESP.
-
-T13 is merged and passes its emulated integration gate; physical NICs were
-NOT RUN. Its native IPv6 startup/OBJ TCP/UDP opens are disabled. Assess actual
-boot/MPY/driver dependencies before removing residue; there is no obligation
-to preserve the unused legacy stack for compatibility. Documentation changes
-alone implemented neither T14 nor T15. The separately assigned T14 coding
-result now passes its minimal emulated IPv6 gate (24 guest / 245 peer
-assertions; [result](docs/T14-IPV6-RESULT.md)); T15 remains PLANNED. No new
-protocol kernel providers were added. The GitHub-first workflow remains in force.
+T13 and T14 have their recorded emulated gates; T15 now passes its minimal
+[ESP integration gate](docs/T15-ESP-RESULT.md) (13 guest / 43 peer assertions).
+Physical NICs were NOT RUN.
+Native IP startup/OBJ TCP/UDP opens remain disabled. Preserve actual boot/MPY/
+driver dependencies, with no unused-stack compatibility obligation. In reports
+call the executor **agentti** and inspect the actual host/test environment.
+GitHub-first branch/PR/readback/MCP reporting above remains in force.
 
 ## plan2001.com: current infrastructure (2026-11-03)
 

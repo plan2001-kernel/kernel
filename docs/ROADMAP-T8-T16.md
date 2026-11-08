@@ -9,7 +9,8 @@ see its result below.
 T13 is merged and passes its emulated integration gate (55 T13 checks and a
 fresh 66-check USB regression; physical NIC NOT RUN). T14 now passes the
 minimal emulated IPv6 gate (24 guest / 245 external-peer assertions);
-T15–T16 remain PLANNED. This document itself implements no stage.** T7 is the previous partial result. This roadmap records
+T15 now passes the minimal ESP integration gate (13 guest / 43 peer
+assertions); T16 remains PLANNED. This document itself implements no stage.** T7 is the previous partial result. This roadmap records
 architectural decisions and staged acceptance gates; T8 was completed under a
 separately assigned task and its observed result is recorded below and in
 [SYSCALL-T8-MULTIPROCESS](SYSCALL-T8-MULTIPROCESS.md). This document does not
@@ -152,37 +153,28 @@ TCP/UDP opens are disabled; linked legacy code remains, as documented in
 [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md). It is not a template for more
 protocol-specific kernel object providers or a compatibility obligation.
 
-### 2.5 Externally provisioned userspace ESP; fail closed
+### 2.5 Minimal userspace ESP integration example
 
-**The owner's 2026-11-08 decision supersedes previous network-preservation
-and IKEv2 migration clauses.** IKEv2 is removed entirely from the active PoC
-and future target: no handshake/negotiation, PSKs, UDP/500 service, IKE daemon,
-key-exchange implementation or deferred IKE migration. Historical examples
-are evidence, never implementation instructions.
+**The owner's later 2026-11-08 T15 implementation assignment supersedes the
+expansive key-bundle/lifecycle goals.** The [current T15 scope](ESP-SA-BUNDLE.md)
+is an interface integration test: reuse T14 and T13 for a small userspace
+transport-mode ESP echo (IPv6 NH=50), with two fixed distinct directional
+TEST-ONLY AES-128-GCM SAs. ND may stay ordinary ICMPv6; protected echo must
+not silently fall back to plaintext. Reuse existing primitives in userspace;
+no kernel ESP provider/FIFO, new syscall or pathname/Chan/fd layer.
 
-The normative [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) specifies a PLANNED two-host
-userspace ESP proof over T13/T14, IPv6 Next Header 50, AES-128-GCM-16,
-transport mode preferred, one SA pair and protected ICMPv6 echo. A versioned
-bounded GE/O object provisions both hosts through an external authenticated
-and confidential channel. Its four secret components are two 16-byte keys
-and two 4-byte salts (40 bytes), plus directional SPIs, IPv6 selectors,
-profile, generation, validity/lifetime and policy. Object transfer is not key
-exchange; OIDs are local and local FIFO distribution does not secure a network.
+No persistent key object, versioned bundle, lifecycle management, durable
+consumed generation, anti-rollback, replay window, automatic rekeying,
+expiry/clock guarantee, secure distribution/storage or production VPN is
+required. The old [expansive design](history/ESP-SA-BUNDLE-2026-11-08.md) is
+superseded history. Correct per-running-test nonce/tag mechanics are required;
+security across restarts/reused fixed credentials is not claimed. IKEv2 stays
+outside the active and future target; no key exchange/daemon is assigned.
 
-Require authenticated decryption, bounded anti-replay, no nonce reuse, no
-reactivation of consumed bundles across restart, fresh unique key material
-for new sessions, bounded counters/lifetimes and fail-closed behavior without
-plaintext fallback. Preserve necessary ND under explicit policy. Manual
-provisioning is experimental: the RFC 4106 automatic-key-management caveat
-precludes a full-compliance/production-security claim. The design document
-defines lifecycle and future acceptance gates, not an implemented service.
-
-Preserve demonstrated boot, MPY and driver functionality. Unused native
-IPv6/TCP/UDP/Netfile/Chan residue may be removed or disabled after real
-dependency checks; no backward-compatibility requirement mandates retaining
-it. This docs task changes no code. Existing ESP/AES-GCM code may be reused
-in a separately assigned coding task; no new protocol kernel provider/FIFO,
-syscall, pathname layer or extra daemon is planned.
+Preserve actual boot/MPY/driver dependencies. Unused native networking remains
+disabled, with no compatibility obligation to restore it. UDP/TCP are not
+ESP prerequisites; T16 remains independent. This roadmap itself authorizes
+no unrelated source or hardware changes.
 
 ### 2.6 Supported userspace during the syscall-cleanup PoC
 
@@ -220,7 +212,7 @@ Current transitional network code is visible in `kernel/core/ethercore.c`
 object providers. This is the historical baseline: T13 later disabled native
 IP startup and TCP/UDP opens. The experimental IKEv2/kernel-ESP report
 [MINIMAL-IKEV2](MINIMAL-IKEV2.md) is historical and NON-TARGET. The current
-planned ESP target is [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md).
+minimal ESP interface scope is [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md).
 
 Do not silently convert any “current” statement above into a T8–T16 PASS claim.
 
@@ -543,45 +535,35 @@ then TCP; those are independent objectives, not prerequisites of T15 ESP.
 migration beyond T13. The earlier documentation decision alone did not
 implement T14; the separately assigned coding result above now supplies it.
 
-### T15 — Externally provisioned userspace ESP SA pair (PLANNED)
+### T15 — Minimal userspace ESP integration test (emulated gate PASS)
 
-**Depends on:** independently demonstrated T14 IPv6/ICMPv6/ND and T13 raw-device
-delivery. It does not depend on UDP or TCP. No T15 implementation is claimed.
+**Depends on:** demonstrated T14 IPv6/ICMPv6/ND and T13 raw-device delivery.
+**Result (2026-11-08):** [T15-ESP-RESULT](T15-ESP-RESULT.md): 13 guest /
+43 external-peer assertions, fresh T13 55/55 and T14 24/245 regressions,
+normal boot/commit/REPL and canonical builds PASS. Physical NIC NOT RUN.
+No UDP/TCP dependency. The separately assigned coding task implements only
+[this reduced objective](ESP-SA-BUNDLE.md), not the superseded security product.
 
-Implement the separately specified [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md): two
-IPv6 hosts, one bidirectional configuration made of two unidirectional SAs,
-AES-128-GCM-16, transport mode preferred, protected echo sufficient. The user
-supplies one versioned bounded binary object to both machines over an
-external trusted/confidential channel. No key-exchange/distribution system
-or extra protocol daemon is part of the PoC. Existing ESP/AES-GCM may be
-reused/refactored in a future coding task. UDP/TCP remain independent goals.
+Use two static link-local peers, two fixed distinct directional TEST-ONLY SAs
+(SPI, AES-128-GCM key, four-byte salt), and a small transport-mode protected
+echo. Reuse the existing crypto implementation in the MPY user process and
+existing Device ABI/ObjectFIFO/Handles. No GE/O key-bundle infrastructure.
 
-**Acceptance conditions (future tests):**
+**Integration acceptance:**
 
-- Prove opposite TX/RX mappings with separate directional SPIs, keys and
-  salts, explicit peers/selectors, mode/version, generation, lifetime/policy.
-  Four secrets (40 bytes) are not the complete provisioning object.
-- Use authorized local object Handles, not ambient OID authority; different
-  local OIDs may hold the same content. Local ObjectFIFO is not secure
-  interhost transport.
-- Show protected echo both directions as IPv6 NH=50, exact recovered content
-  and necessary ND; no protected plaintext appears on the link.
-- Reject malformed/mismatched bundles, peers, SPIs/policy, invalid tags,
-  replays and counter/lifetime exhaustion. Test bounded replay windows and
-  authenticated reordering without unauthenticated state advancement.
-- Fail closed on crash, exit, restart, missing key, expiry or link loss;
-  never downgrade to plaintext. Reject previously consumed bundles, including
-  after restart/rollback; require fresh unique key material for each session.
-- Prove no AES-GCM key/salt/IV reuse and best-effort secret cleanup. Running
-  sequence/replay state is separate from provisioning, never a reusable secret.
-- Record the RFC 4106 automated-key-management requirement caveat: manually
-  provisioned AES-GCM is experimental, not fully compliant/production security.
-- Reuse Device ABI/ObjectFIFO without new protocol-specific kernel providers,
-  FIFOs, syscalls or pathname/Chan/fd adapters. Report each gate honestly.
+- Boot/MPY/GE/O/parent REPL work through the existing ABI.
+- A real guest and peer exchange complete RX/TX ESP frames with NH=50.
+- Both directions decrypt the intended echo bytes and verify tags, with
+  distinct packet nonces within each SA's running disposable test.
+- The protected echo does not use a plaintext fallback; required ND may.
+- No syscall, kernel protocol provider/FIFO or filesystem abstraction is added.
+- Record focused T13/T14 regressions, exact evidence and explicit limitations.
 
-**NOT in scope:** negotiation or automatic rekeying, general VPN/router,
-UDP/TCP as ESP dependencies, or a secure distribution/storage infrastructure.
-The no-IKE decision in §2.5 applies to both present and future targets.
+**NOT in scope:** persistent key objects/bundles, lifecycle/replay-window/
+anti-rollback systems, rekeying, expiry/clock guarantees, secure distribution/
+storage, production VPN or exhaustive security testing. Demo credentials and
+counters are confined to disposable tests; no restart/key-reuse security,
+production security or full RFC 4106 compliance is claimed. No IKE or T16 work.
 
 ### T16 — Generalize to USB and Wi-Fi
 
@@ -658,7 +640,8 @@ filesystem, or claiming all USB/Wi-Fi hardware is covered.
 - [OBJECT-MODEL](OBJECT-MODEL.md) — object, file and Python boundaries.
 - [VOLATILE-OBJECT-OBJECTFIFO](VOLATILE-OBJECT-OBJECTFIFO.md) — volatile
   objects and ObjectFIFO/TEE.
-- [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) — normative PLANNED ESP object/lifecycle.
+- [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) — minimal fixed-SA ESP interface test.
+- [T15-ESP-RESULT](T15-ESP-RESULT.md) — observed emulated integration evidence.
 - [MINIMAL-IKEV2](MINIMAL-IKEV2.md) — historical NON-TARGET evidence only.
 - [REPOSITORY-LAYOUT](REPOSITORY-LAYOUT.md) — source layout.
 - Working code: `kernel/core/ethercore.c`, `kernel/core/sysvobj.c`,
@@ -683,8 +666,10 @@ limits in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). T13 is merged and
 physical NIC NOT RUN); see [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md).
 T14 **passes its minimal emulated IPv6 gate** (24 guest / 245 external-peer
 assertions, fresh T13 regression and persistence PASS); see
-[T14-IPV6-RESULT](T14-IPV6-RESULT.md). T15–T16 remain **PLANNED, not
-implemented**. T15 specifies externally
-provisioned ESP, not a negotiation protocol. T7 is the previous partial
+[T14-IPV6-RESULT](T14-IPV6-RESULT.md). T15 now **passes the minimal emulated
+ESP interface gate** (13 guest / 43 peer assertions, T13/T14 regressions);
+see [T15-ESP-RESULT](T15-ESP-RESULT.md). T16 remains **PLANNED**. T15 is only
+a minimal fixed-SA userspace ESP integration test,
+not the superseded persistent-bundle or negotiation design. T7 is the previous partial
 result. The roadmap itself does not authorize implementation; T12 was
 separately assigned by the user, and later stages still require their own assignment and acceptance gate.

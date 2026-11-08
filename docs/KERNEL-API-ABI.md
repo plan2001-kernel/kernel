@@ -4,9 +4,10 @@
 > descriptions below are migration history. T13 disabled native IPv6 startup
 > and OBJ TCP/UDP opens; retained symbols are not a supported network service
 > or a compatibility obligation. The current raw Device ABI is documented in
-> [DEVICE-ABI](DEVICE-ABI.md). Future userspace IPv6 and externally provisioned
-> ESP are PLANNED; [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) defines the target without
-> adding a syscall/provider or proving an implemented protocol service.
+> [DEVICE-ABI](DEVICE-ABI.md). The minimal T14/T15 userspace
+> examples reuse that path; [current T15 scope](ESP-SA-BUNDLE.md) is a disposable
+> fixed-SA ESP integration test, not the superseded key-bundle/security product.
+> Neither example adds a kernel syscall/provider.
 
 **Status:** normative vocabulary and migration rules for **new Plan2001-O code**; proposed API/ABI design, **not an implemented or frozen binary ABI**.
 **Volatile-object implementation addition:** the RAM-only scope-qualified object

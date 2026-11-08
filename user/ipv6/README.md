@@ -93,3 +93,42 @@ RX metadata is kernel-generated; protocol logic uses only the immutable frame
 bytes. Allocation remains bounded by the T13 frame cap, node state and FIFO
 capacity; stats keys are fixed and only the latest request/result is retained.
 The kernel native IP service stays disabled, with no fallback responder.
+
+
+## Optional T15 disposable ESP example
+
+`esp_demo.py` defines `EspNode(Node)` after the original node source is
+loaded. The original T14 Node is unchanged. `EspNode(device, local, peer,
+tx_sa, rx_sa)` accepts two distinct `(SPI, key16, salt4)` test SAs from the
+fixture and reuses T14 ND, checksum, echo and owned Handles. Only ND is sent
+as ordinary ICMPv6; echo TX is always transport-mode ESP NH=50, and plaintext
+echo RX is discarded. There is no fallback to the inherited plaintext path.
+ESP sequence/explicit IV increases per direction within the running test;
+AAD is SPI+sequence, nonce is salt+8-byte IV, tag16, padding is 1..padlen and
+the inner Next Header is58. Decryption verifies tags before ICMP handling.
+Echo payload is capped at1196 bytes to stay within the IPv6 minimum MTU.
+
+The small in-process `aesgcm` module exposes
+`encrypt(key16, nonce12, aad, plaintext)` and
+`decrypt(key16, nonce12, aad, ciphertext_and_tag16)`. It reuses the existing
+`espcrypto.c` / BearSSL implementation. Plaintext length is at most2048 and
+AAD at most64 bytes; decrypt returns only authenticated bytes or raises
+ValueError. These are local MPY functions, not new syscalls or a kernel ESP
+service. Only the private crypto port header/build registration is adapted
+for user compilation; vendor algorithms and kernel networking are unchanged.
+
+Run `bash tools/host/t15/run-esp-checks.sh` after canonical builds, with the
+same QEMU/OVMF environment as the T14 result. It combines the unchanged node,
+ESP subclass, PUBLIC TEST-ONLY config and child into an ordinary disposable
+GE/O init module; a read-only code Handle and device46 are explicitly passed
+to a separate MPY OID child. This is test code carrying public literals, not
+a persistent key object, versioned bundle or lifecycle service. The parent
+returns to normal commit/REPL. [T15 result](../../docs/T15-ESP-RESULT.md).
+
+Fixed test keys/salts are confined to `tools/host/t15/demo-config.py` and its
+disposable generated test module; the ESP subclass contains no demo keys.
+No replay window, anti-rollback, persistent lifecycle, rekeying, expiry,
+secure distribution/storage, VPN negotiation or IKE is implemented. Duplicate
+valid ESP packets may be accepted. Counters restart with the disposable VM;
+no security across restarts or reused demo keys, production security or full
+RFC4106 compliance is claimed. This module is only an interface example.

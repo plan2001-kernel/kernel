@@ -60,6 +60,8 @@ CFLAGS = [
     "-I", str(ROOT / "runtime/mp/port"),
     "-I", str(MPY / "lib/libm_dbl"),
     "-I", str(MPY / "lib/musl"),
+    "-I", str(ROOT / "runtime/ikecrypto/bearssl/inc"),
+    "-I", str(ROOT / "runtime/ikecrypto/bearssl/src"),
 ]
 # Measurement-only: keep the normal user ELF free of trace checkpoints.
 if os.environ.get("PLAN2001_SYSCALL_TRACE") == "1":
@@ -240,7 +242,7 @@ def sources() -> list[tuple[str, pathlib.Path]]:
         if n == "modjson":
             continue
         out.append((f"py_{n}", MPY / "py" / (n + ".c")))
-    for n in ("main", "modplan9", "modge", "modcbor", "p9space", "p9image", "p9sha",
+    for n in ("main", "modplan9", "modge", "modcbor", "modaesgcm", "p9space", "p9image", "p9sha",
               "p9builtin", "p9math", "p9console", "p9hal"):
         out.append((n, MPY / (n + ".c")))
     out.append(("extmod_modjson", MPY / "extmod/modjson.c"))
@@ -254,6 +256,13 @@ def sources() -> list[tuple[str, pathlib.Path]]:
         out.append((f"libm_{n}", MPY / "lib/libm_dbl" / (n + ".c")))
     for n in musl:
         out.append((f"musl_{n}", MPY / "lib/musl" / (n + ".c")))
+    # Same six allocation-free AES-GCM units already used by kernel libesp,
+    # compiled independently into the MPY userspace ELF. No kernel crypto API.
+    for rel in ("espcrypto.c", "bearssl/src/symcipher/aes_ct.c",
+                "bearssl/src/symcipher/aes_ct_enc.c",
+                "bearssl/src/symcipher/aes_ct_ctr.c",
+                "bearssl/src/hash/ghash_ctmul.c", "bearssl/src/aead/gcm.c"):
+        out.append(("gcm_" + pathlib.Path(rel).stem, ROOT / "runtime/ikecrypto" / rel))
     return out
 
 
@@ -398,7 +407,7 @@ def main() -> int:
     # rebuild together; source timestamps alone can silently misbind modules.
     signature=hashlib.sha256("\n".join(CFLAGS).encode())
     headers=set(GENHDR.glob("*.h"))
-    for base in (MPY,ROOT/"runtime/abi",ROOT/"runtime/ge_relations",ROOT/"runtime/cbor"):
+    for base in (MPY,ROOT/"runtime/abi",ROOT/"runtime/ge_relations",ROOT/"runtime/cbor",ROOT/"runtime/ikecrypto"):
         headers.update(base.rglob("*.h"))
     for header in sorted(headers):
         signature.update(str(header.relative_to(ROOT)).encode())
