@@ -105,11 +105,9 @@
  * stays allocated forever but has no dispatch entry; use
  * OBJINVOKE(ObjOpPipeInherit). */
 #define OBIND           96 /* reserved */
-#define OLOOKUP         97
-#define OUNBIND         98
-#define OREVOKE         99
+/* 97-99 reserved: retired object binding calls. */
 #define PIPEINHERIT     100 /* reserved */
-#define OBINDX          104
+/* 104 reserved: retired extended object binding call. */
 #define OQUERY          106
 #define SYSSNAPSHOT     107
 /* 108-113 RESERVED: former TCP6* compatibility family.  The numbers stay

@@ -1514,42 +1514,9 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &atomic_locals_dict
     );
 
-/* Experimental native object views. Rights are enforced by the kernel. */
-extern long obindx(int, unsigned long long, char*, int, int);
-extern long olookup(char*, int, unsigned long long*);
-extern long ounbind(char*, int);
-extern long orevoke(int);
+/* GE/O operations use the object ABI. */
 extern long oexecute(int, unsigned long long, char**, int);
-
 static void hcheck(long r) { if(r < 0) raise_err(); }
-static mp_obj_t space_obind(size_t n, const mp_obj_t *a) {
-    const char *role = mp_obj_str_get_str(a[0]);
-    hcheck(obindx(n>3 ? mp_obj_get_int(a[3]) : osp, obyteoid(a[1]),
-                                                    (char*)role, strlen(role), mp_obj_get_int(a[2])));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_obind_obj,3,4,space_obind);
-static mp_obj_t space_olookup(mp_obj_t role) {
-    const char *s = mp_obj_str_get_str(role);
-    unsigned long long info[3];
-    long h = olookup((char*)s, strlen(s), info);
-    mp_obj_t a[4];
-    hcheck(h);
-    a[0] = mp_obj_new_int(h);
-    for(int i=0; i<3; i++) a[i+1] = mp_obj_new_int_from_ull(info[i]);
-    return mp_obj_new_tuple(4,a);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_olookup_obj,space_olookup);
-static mp_obj_t space_ounbind(mp_obj_t role) {
-    const char *s = mp_obj_str_get_str(role);
-    hcheck(ounbind((char*)s,strlen(s)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_ounbind_obj,space_ounbind);
-static mp_obj_t space_orevoke(mp_obj_t h) {
-    hcheck(orevoke(mp_obj_get_int(h))); return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_orevoke_obj,space_orevoke);
 static mp_obj_t space_hclose(mp_obj_t h) {
     hcheck(obj_close(mp_obj_get_int(h))); return mp_const_none;
 }
@@ -1588,7 +1555,6 @@ static mp_obj_t space_hexecute(mp_obj_t h, mp_obj_t oid) {
 static MP_DEFINE_CONST_FUN_OBJ_2(space_hexecute_obj,space_hexecute);
 
 /* Native sealed provider and union operations. */
-extern long obindx(int,unsigned long long,char*,int,int);
 static long namespace_call(ObjCall *call) {
  long control=obj_open(ObjOpenNamespaceCurrent,NULL,0,Vcontrol,NULL);
  if(control<0)return control;
@@ -1641,13 +1607,6 @@ static mp_obj_t space_visible(void) {
  return result;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(space_visible_obj,space_visible);
-static mp_obj_t space_bindx(size_t n,const mp_obj_t *a) {
- const char *role=mp_obj_str_get_str(a[0]);int mode=mp_obj_get_int(a[3]);
- if(mode<0||mode>2)mp_raise_ValueError(MP_ERROR_TEXT("union mode"));
- hcheck(obindx(n>4?mp_obj_get_int(a[4]):osp,obyteoid(a[1]),(char*)role,strlen(role),mp_obj_get_int(a[2])|(mode<<8)));
- return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_bindx_obj,4,5,space_bindx);
 static mp_obj_t space_open_handle(mp_obj_t name) {
  const char *s=mp_obj_str_get_str(name);long h=obj_open(ObjOpenSpace,(void*)s,strlen(s),0,NULL);
  hcheck(h);return mp_obj_new_int(h);
@@ -1680,17 +1639,12 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_mount), MP_ROM_PTR(&space_mount_obj) },
     { MP_ROM_QSTR(MP_QSTR_unmount), MP_ROM_PTR(&space_unmount_obj) },
     { MP_ROM_QSTR(MP_QSTR_visible), MP_ROM_PTR(&space_visible_obj) },
-    { MP_ROM_QSTR(MP_QSTR_bindx), MP_ROM_PTR(&space_bindx_obj) },
     { MP_ROM_QSTR(MP_QSTR_open_handle), MP_ROM_PTR(&space_open_handle_obj) },
     { MP_ROM_QSTR(MP_QSTR_openobj), MP_ROM_PTR(&space_openobj_obj) },
     { MP_ROM_QSTR(MP_QSTR_MREPL), MP_ROM_INT(0) },
     { MP_ROM_QSTR(MP_QSTR_MBEFORE), MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_MAFTER), MP_ROM_INT(2) },
     { MP_ROM_QSTR(MP_QSTR_ORELATE), MP_ROM_INT(64) },
-    { MP_ROM_QSTR(MP_QSTR_obind), MP_ROM_PTR(&space_obind_obj) },
-    { MP_ROM_QSTR(MP_QSTR_olookup), MP_ROM_PTR(&space_olookup_obj) },
-    { MP_ROM_QSTR(MP_QSTR_ounbind), MP_ROM_PTR(&space_ounbind_obj) },
-    { MP_ROM_QSTR(MP_QSTR_orevoke), MP_ROM_PTR(&space_orevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_hclose), MP_ROM_PTR(&space_hclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_hget), MP_ROM_PTR(&space_hget_obj) },
     { MP_ROM_QSTR(MP_QSTR_hexecute), MP_ROM_PTR(&space_hexecute_obj) },

@@ -32,6 +32,16 @@ bounded `NsVisible` array. The request shapes and operation numbers are in
 `runtime/abi/obj.h`; the record layout is in `runtime/abi/namespace.h`.
 Visibility uses an epoch-validated snapshot and omits unauthorized identities.
 
+Each namespace role holds one authorized object Handle. `OBJBIND` checks
+delegation rights and can attenuate them; `OBJOPEN(ObjOpenBinding)` opens that
+role through the same path for GE/O, FIFO, and other object kinds. Closing a
+Handle releases one reference. `OBJBIND(ObjBindRemove)` removes a name without
+invalidating Handles already opened from it. `OBJINVOKE(ObjOpRevoke)` revokes
+GE/O authority and its derived copies, or closes a FIFO with `Vcontrol`.
+GE/O revocation follows the existing shared origin: sibling copies of the
+same origin are affected, while independently opened grants to the same OID
+remain valid. Persistent object identity and bytes remain intact.
+
 ## Device messages and ObjectFIFO
 
 ObjectFIFO is the common capability-aware transport for framed messages and

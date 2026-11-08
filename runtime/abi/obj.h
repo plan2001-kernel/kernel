@@ -54,8 +54,8 @@ enum {
 	ObjCreateKindMask	= 0xff,
 };
 
-/* obj_bind modes.  Low byte is passed to the native O view when the object
- * is GE-backed; OBJ_BIND_REMOVE removes the binding and ignores rights. */
+/* obj_bind modes.  Remove uses handle=0 and rights=0; it changes only the
+ * caller's current namespace and does not revoke already opened Handles. */
 enum {
 	ObjBindCopy		= 0,
 	ObjBindExclusive	= 1,

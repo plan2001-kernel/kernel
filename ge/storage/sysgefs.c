@@ -690,21 +690,6 @@ obootstrap(Proc *p)
 	return p != nil && p == bootowner && p->pid == bootpid;
 }
 
-/* Labels are bounded ASCII roles, never paths. */
-static void
-orolename(char *dst, char *src, int n)
-{
-	int i;
-	if(n <= 0 || n >= Onamemax) error(Ebadarg);
-	validaddr((uintptr)src, n, 0);
-	memmove(dst, src, n);
-	dst[n] = 0;
-	for(i=0; i<n; i++)
-		if(!((dst[i]>='a' && dst[i]<='z') || (dst[i]>='A' && dst[i]<='Z') ||
-							(dst[i]>='0' && dst[i]<='9') || dst[i]=='_' || dst[i]=='-'))
-			error(Ebadarg);
-}
-
 /* RFNOMNT is represented by a fully denied device mask after Dev removal. */
 static void
 onscanextend(void)
@@ -716,60 +701,6 @@ onscanextend(void)
  runlock(&up->pgrp->ns);
  if(denied) error(Eperm);
 }
-static uintptr
-obinding(sysva_list list)
-{
-	Ohand *source, *grant;
-	char name[Onamemax], *p;
-	uvlong oid, ver;
-	int h, n, rights, mode=0;
-	h = sysva_arg(list, int);
-	oid = sysva_arg(list, uvlong);
-	p = sysva_arg(list, char*);
-	n = sysva_arg(list, int);
-	rights = sysva_arg(list, int);
- mode=(unsigned)rights>>8;rights &= 255;
- if(mode>2) error(Ebadarg);
- onscanextend();
-	orolename(name, p, n);
-	if(up->pgrp == nil || rights<=0 || (rights & ~(Oall & ~Ocreate))) error(Ebadarg);
-	source = ogetspace(h, VkindSpace, vobjrightsfromo(rights | Odelegate));
-	qlock(ohgate(source));
-	if(waserror()){
-		qunlock(ohgate(source));
-		ohandput(source);
-		nexterror();
-	}
-	oauthorize(source, oid, rights | Odelegate);
-	if(!source->bootstrap){
-		/* Rebinding a delegated grant preserves its revocation lineage. */
-		if(rights != source->rights) error(Eperm);
-		octxbindmode(up->pgrp->ocontext, name, source,mode);
-	}else{
-		grant = smalloc(sizeof *grant);
-		grant->ref.ref = 1;
-		if(waserror()){ ohandput(grant); nexterror(); }
-		grant->sp = onativeopen(ovol, source->space);
-		grant->sid = onativesid(grant->sp);
-		if(grant->sid != source->sid) error(Eperm);
-		if(onativeget(grant->sp, oid, nil, 0, &ver) < 0) error("O: no such object");
-		grant->oid = oid;
-		grant->rights = rights;
-		strcpy(grant->space, source->space);
-		octxbindmode(up->pgrp->ocontext, name, grant,mode);
-		poperror();
-		ohandput(grant);
-	}
-	poperror();
-	qunlock(ohgate(source));
-	ohandput(source);
-	return 0;
-}
-
-uintptr
-sysobindx(sysva_list list)
-{return obinding(list);}
-
 /* Low-level grant admission for the NamespaceControl provider.  The
  * provider owns the sealed view and attachment lifecycle in sysvobj.c. */
 void
@@ -778,21 +709,23 @@ osviewpermitted(void)
  onscanextend();
 }
 
-Ohand*
-osviewrole(char *name)
+void
+oscheckrole(void *context, char *name, int geonly)
 {
- Ohand *h;
- if(up->pgrp==nil) error(Eperm);
- if(waserror()){poperror();error(Eperm);}
- h=octxlookup(up->pgrp->ocontext,name);
- poperror();
+ Ohand *h;void *binding;
+ if(context==nil) error(Eperm);
+ binding=octxobject(context,name);
+ if(waserror()){vobjbindingput(binding);nexterror();}
+ if(!vobjbindingdelegable(binding) || (geonly && vobjbindinggecap(binding)==nil)) error(Eperm);
+ h=vobjbindingcap(binding);
+ if(h==nil){poperror();vobjbindingput(binding);return;}
  qlock(ohgate(h));
  if(waserror()){
-  qunlock(ohgate(h));ohandput(h);poperror();error(Eperm);
+  qunlock(ohgate(h));nexterror();
  }
- oauthorize(h,h->oid,oboot()?0:Odelegate);
+ oauthorize(h,h->oid,Odelegate);
  poperror();qunlock(ohgate(h));
- return h;
+ poperror();vobjbindingput(binding);
 }
 
 void
@@ -806,74 +739,20 @@ osviewgrantvalid(Ohand *h)
  qunlock(ohgate(h));
 }
 
-uintptr
-sysolookup(sysva_list list)
+/* GE/O authority revocation is distinct from Handle close and role removal.
+ * Descendants sharing an origin are revoked; independently opened grants are not. */
+void
+osrevokehand(Ohand *h)
 {
-	char name[Onamemax], *p;
-	uvlong *info, values[3];
-	Ohand *oh;
-	int n, h;
-	p = sysva_arg(list, char*);
-	n = sysva_arg(list, int);
-	info = sysva_arg(list, uvlong*);
-	orolename(name, p, n);
-	if(up->pgrp == nil) error(Eperm);
-	validaddr((uintptr)info, sizeof values, 1);
-	oh = octxlookup(up->pgrp->ocontext, name);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	/* Rights may be write-only; lookup itself does not read object bytes. */
-	oauthorize(oh, oh->oid, 0);
-	values[0] = oh->sid;
-	values[1] = oh->oid;
-	values[2] = oh->rights;
-	memmove(info, values, sizeof values);
-	h = vobjinstallohand(oh, VkindGe);
-	poperror();
-	qunlock(ohgate(oh));
-	return h;                   /* installed slot owns lookup reference */
-}
-
-uintptr
-sysounbind(sysva_list list)
-{
-	char name[Onamemax], *p;
-	int n;
-	p = sysva_arg(list, char*);
-	n = sysva_arg(list, int);
-	orolename(name, p, n);
-	if(up->pgrp == nil) error(Eperm);
-	octxunbind(up->pgrp->ocontext, name);
-	return 0;
-}
-
-uintptr
-sysorevoke(sysva_list list)
-{
-	Ohand *oh;
-	int h = sysva_arg(list, int);
-	oh = ogetspace(h, VkindGe, Vdelegate);
-	qlock(ohgate(oh));
-	if(waserror()){
-		qunlock(ohgate(oh));
-		ohandput(oh);
-		nexterror();
-	}
-	oauthorize(oh, oh->oid, oboot() ? 0 : Odelegate);
-	if(oh->bootstrap) error(Eperm);
-	if(oh->origin) oh->origin->revoked = 1;
- oh->revoked = 1;
-	/* Release an abandoned transaction even while views retain this grant. */
-	onativeclose(oh->sp);
-	oh->sp = nil;
-	poperror();
-	qunlock(ohgate(oh));
-	ohandput(oh);
-	return 0;
+ if(h==nil) error(Ebadarg);
+ qlock(ohgate(h));
+ if(waserror()){qunlock(ohgate(h));nexterror();}
+ oauthorize(h,h->oid,Odelegate);
+ if(h->bootstrap) error(Eperm);
+ if(h->origin) h->origin->revoked=1;
+ h->revoked=1;
+ if(h->sp){onativeclose(h->sp);h->sp=nil;}
+ poperror();qunlock(ohgate(h));
 }
 
 /* Snapshot selected bindings before the child can run. Grants stay live:
@@ -884,7 +763,6 @@ void
 ocontextspawn(Proc *child, int mode, char (*roles)[32], int nr)
 {
 	void *snapshot;
-	Ohand *h;
 	int i, j;
 	if(mode == 0) return;
 	if(up->pgrp == nil) error(Eperm);
@@ -894,18 +772,11 @@ ocontextspawn(Proc *child, int mode, char (*roles)[32], int nr)
 		if(memchr(roles[i], 0, 32) == nil || roles[i][0] == 0) error(Ebadarg);
 		for(j = 0; j < i; j++)
 			if(strcmp(roles[j], roles[i]) == 0) error(Ebadarg);
-		h = octxlookup(snapshot, roles[i]);
-		qlock(ohgate(h));
-		if(waserror()){
-			qunlock(ohgate(h)); ohandput(h); nexterror();
-		}
-		oauthorize(h, h->oid, oboot() ? 0 : Odelegate);
+		oscheckrole(snapshot, roles[i], 0);
 		octxcopybinding(child->pgrp->ocontext, snapshot, roles[i]);
-		poperror();
-		qunlock(ohgate(h));
-		ohandput(h);
 	}
 	if(mode == 2){
+  if(!oboot() && !octxshareable(snapshot)) error(Eperm);
   Ohand *layers[Obindmax]; int count=octxsnapshot(snapshot,layers,1),k;
   for(k=0;k<count;k++){
    int ok;
