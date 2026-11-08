@@ -237,8 +237,8 @@ T13 raw Ethernet is merged with an emulated gate PASS; physical NICs were NOT
 RUN. Kernel native IPv6 startup and OBJ TCP/UDP opens are disabled; inherited
 protocol code remains linked. T14 userspace IPv6/ICMPv6/Neighbor Discovery
 now passes its [bounded emulated gate](T14-IPV6-RESULT.md); it is not a
-full router stack. T15 userspace ESP is **PLANNED**, not implemented by
-this specification.
+full router stack. T15 now passes its [minimal ESP integration gate](T15-ESP-RESULT.md),
+not the superseded persistent-key/security-product design.
 
 - IP processing in the native PoC MUST use IPv6. IPv4 is a legacy
   compatibility protocol for this project, not a requirement for the kernel
@@ -264,51 +264,28 @@ this specification.
   kernel and userspace responders for the same address/traffic. Historical
   code/reports are evidence, not an obligation to restore old services.
 
-The normative [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) defines the minimal future
-T15 proof: two IPv6 hosts, one SA pair, IPv6 Next Header 50, AES-128-GCM-16,
-transport mode preferred, bidirectional protected ICMPv6 echo sufficient.
-Existing ESP/AES-GCM code is potential reuse material, not demonstrated
-userspace ESP. T16 USB/Wi-Fi remains independent.
+### Minimal ESP integration objective (latest owner decision, 2026-11-08)
 
-**IKEv2 is removed entirely from the active PoC and future target.** No
-negotiation/handshake, PSKs, UDP/500 service, IKE daemon, key-exchange
-implementation or deferred IKE migration is planned. Historical IKE evidence
-must not reinstate that target.
+The [current T15 scope](ESP-SA-BUNDLE.md) supersedes the earlier persistent
+key-bundle/security-product proposal. T15 validates the existing syscall,
+Device ABI/ObjectFIFO and authorized Handle path with a small userspace
+transport-mode ESP example, IPv6 NH=50, over the working T14 IPv6 base.
+Two fixed distinct directional TEST-ONLY AES-128-GCM SAs (SPI/key/four-byte
+salt) and simple protected echo both ways suffice. ND may remain plaintext;
+intended protected echo MUST NOT silently fall through to plaintext T14 echo.
+Existing crypto primitives SHOULD be reused in the user process, without a
+kernel ESP service, new syscall/provider/FIFO, pathname/Chan/fd layer or daemon.
 
-Provisioning MUST use one explicit versioned bounded binary GE/O object,
-supplied to both machines over a pre-existing external **authenticated and
-confidential channel**. Remote secret transport, peer authentication and key
-generation/distribution infrastructure are outside this PoC. Object transfer
-is not key exchange. OIDs are local to each Space and may differ; a bare OID
-is not a capability and local ObjectFIFO does not secure interhost delivery.
-
-The two unidirectional SAs have four secret components: two independent
-16-byte AES keys and two 4-byte salts, **40 secret bytes total**. The complete
-object also requires separate 32-bit SPIs, IPv6 addresses/selectors,
-mode/profile/version, session/key-generation identity, validity/lifetime and
-policy. Each host maps TX/RX oppositely. Mutable sequence/replay state is
-separate; it MUST NOT turn provisioning into a reusable live-state snapshot.
-
-### Protected traffic policy (PLANNED, not implemented)
-
-Future ESP activation MUST validate the whole bundle and local authority,
-authenticate tags before releasing plaintext, enforce a bounded anti-replay
-window and reject peer/SPI/policy mismatches. Necessary ND stays available
-under an explicit narrow control exception; it must not bypass protection for
-echo/data. Protected traffic MUST fail closed on missing key, invalid input,
-expiry, controller/service crash, restart or link failure, without plaintext
-downgrade. No legacy kernel service may provide a fallback.
-
-AES-GCM key/salt/explicit-IV reuse is forbidden, including after restart.
-Consumed bundles MUST NOT reactivate; each new session requires fresh unique
-material, bounded counters/lifetimes and verified freshness, as specified in
-[ESP-SA-BUNDLE](ESP-SA-BUNDLE.md). Secrets must be discarded securely where
-possible; GE/O persistence, snapshots and MPY GC are not an implemented secure
-store or guaranteed erasure facility. Manual provisioning is an experimental
-PoC: RFC 4106 requires automatic key management, so this design must not claim
-full RFC 4106 compliance or production security. The caveat authorizes no
-key-exchange implementation. Future coding and validation require separate
-assignment; no source or storage-format change is authorized by this document.
+No persistent key object, versioned bundle, lifecycle/replay-window subsystem,
+durable consumed generations, anti-rollback, automatic rekeying, expiry/clock
+guarantees, secure distribution/storage, production VPN or exhaustive security
+campaign is required. The [older expansive design](history/ESP-SA-BUNDLE-2026-11-08.md)
+is retained as history only. Packet nonces must be distinct per SA within the
+running disposable test and tags must calculate/verify correctly; fixed demo
+credentials have no security guarantee across reboot or reuse. No production
+security/full RFC 4106 compliance is claimed. IKEv2 remains excluded from both
+active and future targets; no key exchange or negotiation is assigned.
+T16 stays independent. This is a scoped interface proof, not a deployment plan.
 
 Coding work should favor (in order) direct reuse of existing working code, a small adaptation, then a new narrowly scoped component. Keep the existing octet-based representation and on-disk format until a concrete experiment justifies change. Do not replace inherited Plan2001/9front subsystems simply because their terminology differs from the manifesto.
 

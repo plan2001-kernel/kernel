@@ -81,6 +81,8 @@ docs/T13-ETHERNET-RESULT.json
 docs/T13-ETHERNET-RESULT.md
 docs/T14-IPV6-RESULT.json
 docs/T14-IPV6-RESULT.md
+docs/T15-ESP-RESULT.json
+docs/T15-ESP-RESULT.md
 docs/TEST-RESULTS.json
 docs/TINYCC-SPACE2.md
 docs/TODO.md
@@ -89,6 +91,7 @@ docs/UJ1-TEST-OUTPUT.txt
 docs/UJ1-USER-JOURNEY.md
 docs/UJ1-VERIFICATION.json
 docs/VOLATILE-OBJECT-OBJECTFIFO.md
+docs/history/ESP-SA-BUNDLE-2026-11-08.md
 ge/format/blk.c
 ge/format/cache.c
 ge/format/dat.h
@@ -441,6 +444,7 @@ micropython/lib/musl/pow.c
 micropython/lib/musl/pow_data.c
 micropython/lib/musl/pow_data.h
 micropython/main.c
+micropython/modaesgcm.c
 micropython/modcbor.c
 micropython/modge.c
 micropython/modplan9.c
@@ -886,9 +890,15 @@ tools/host/t14/boot-checks.py
 tools/host/t14/node-child.py
 tools/host/t14/peer.py
 tools/host/t14/run-ipv6-checks.sh
+tools/host/t15/boot-checks.py
+tools/host/t15/demo-config.py
+tools/host/t15/node-child.py
+tools/host/t15/peer.py
+tools/host/t15/run-esp-checks.sh
 tools/mkovol
 tools/oinspect.py
 tools/qemu-o-boot.sh
 tools/qemu-o-persist.sh
 user/ipv6/README.md
+user/ipv6/esp_demo.py
 user/ipv6/node.py

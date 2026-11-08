@@ -9,8 +9,8 @@ MICROPY_ROM_TEXT_COMPRESSION = 0
 include $(TOP)/py/py.mk
 INC = -I. -I$(TOP) -I$(BUILD)
 CFLAGS += $(INC) -std=gnu99 -DNDEBUG
-SRC_C = main.c p9hal.c modplan9.c modge.c modcbor.c p9space.c p9image.c extmod/modjson.c shared/readline/readline.c shared/runtime/pyexec.c shared/runtime/stdout_helpers.c shared/runtime/gchelper_generic.c
-SRC_QSTR += main.c modplan9.c modge.c modcbor.c p9space.c p9image.c extmod/modjson.c shared/readline/readline.c shared/runtime/pyexec.c
+SRC_C = main.c p9hal.c modplan9.c modge.c modcbor.c modaesgcm.c p9space.c p9image.c extmod/modjson.c shared/readline/readline.c shared/runtime/pyexec.c shared/runtime/stdout_helpers.c shared/runtime/gchelper_generic.c
+SRC_QSTR += main.c modplan9.c modge.c modcbor.c modaesgcm.c p9space.c p9image.c extmod/modjson.c shared/readline/readline.c shared/runtime/pyexec.c
 OBJ += $(PY_CORE_O) $(addprefix $(BUILD)/,$(SRC_C:.c=.o))
 GENHDR = qstrdefs.generated.h moduledefs.h root_pointers.h mpversion.h
 genhdr: $(addprefix $(HEADER_BUILD)/,$(GENHDR))

@@ -2,9 +2,12 @@
 
 The IKE names below describe actual retained code, not an active/future
 protocol target. The 2026-11-08 decision excludes IKEv2; see the normative
-[planned ESP-SA-BUNDLE](../../docs/ESP-SA-BUNDLE.md). Existing AES-GCM is
-potential reuse material for future userspace ESP, not proof of that service.
-This documentation task changes no crypto source, build or license.
+[minimal T15 scope](../../docs/ESP-SA-BUNDLE.md). T15 reuses espcrypto.c plus
+the existing five BearSSL AES/GHASH/GCM units in the MPY userspace ELF through
+modaesgcm.c; there is no new crypto algorithm or kernel service. The private
+ikeport.h selects the existing user standard types for that build; kernel
+types are unchanged. No vendor source or license changes. The older source
+provenance below describes the historical split, not a target IKE requirement.
 
 BearSSL 0.6, unmodified subset from https://bearssl.org/bearssl-0.6.tar.gz
 Archive SHA-256: 6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14

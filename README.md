@@ -280,7 +280,8 @@ prerequisites. Do not add other test infrastructure to the tree.
 - [ROADMAP-T8-T16](docs/ROADMAP-T8-T16.md): T8–T13 recorded PASS within their
   documented gates; T13 is merged (emulated gate only, physical NIC NOT RUN).
   T14 minimal userspace IPv6 passes its emulated gate
-  ([result](docs/T14-IPV6-RESULT.md)); T15 ESP and T16 remain PLANNED.
+  ([result](docs/T14-IPV6-RESULT.md)); T15 passes its minimal ESP integration
+  gate ([result](docs/T15-ESP-RESULT.md)); T16 remains PLANNED.
   See [SYSCALL-LEDGER](docs/SYSCALL-LEDGER.md) for the accepted T9 audit.
 - [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md): the host source layout and
   its distinction from future OID-addressed source objects.
@@ -298,36 +299,27 @@ prerequisites. Do not add other test infrastructure to the tree.
 - [QEMU-O-TESTING](docs/QEMU-O-TESTING.md): the two sanctioned disposable
   QEMU/OVMF native GE/O boot and persistence scripts.
 
-## Planned userspace ESP with external provisioning
+## Minimal userspace ESP interface example (T15, emulated gate PASS)
 
-The [ESP-SA-BUNDLE specification](docs/ESP-SA-BUNDLE.md) is the normative
-network-security target. T14 first demonstrates userspace IPv6/ICMPv6/Neighbor
-Discovery over the merged T13 raw Ethernet/Device ABI/ObjectFIFO path. Future
-T15 adds one two-host ESP SA pair (IPv6 NH=50), AES-128-GCM-16, preferably
-transport mode; protected echo suffices. UDP/TCP are independent objectives.
+The owner's later [T15 scope](docs/ESP-SA-BUNDLE.md) replaces the expansive
+key-bundle/lifecycle proposal with a small integration test: userspace ESP
+transport mode (IPv6 NH=50), two fixed distinct directional TEST-ONLY
+AES-128-GCM SAs and bidirectional encrypted echo over existing T13 Device
+ABI/ObjectFIFO and T14 IPv6. Necessary ND may remain ordinary ICMPv6; intended
+protected echo must not use a plaintext fallback. Existing AES-GCM primitives
+are reused in the user process without a kernel ESP service or new syscall.
 
-A versioned bounded GE/O object is supplied to both machines through an
-external authenticated/confidential channel. It carries two directional
-keys and salts (four secrets, 40 bytes), separate SPIs, IPv6 selectors,
-profile, generation, lifetime and policy. Local OIDs may differ and are not
-capabilities; local FIFO delivery is not secure interhost transport. No key
-exchange or distribution infrastructure is part of the PoC.
-
-IKEv2 is removed entirely from the active and future target: no handshake,
-PSKs, UDP/500 service, IKE daemon or deferred migration. The historical
-[MINIMAL-IKEV2](docs/MINIMAL-IKEV2.md) report remains NON-TARGET evidence.
-Existing kernel ESP/AES-GCM and its old control service have not been removed
-by this docs task and do not demonstrate userspace ESP. Native IPv6 startup
-and OBJ TCP/UDP opens were disabled in T13.
-
-Require tag verification, anti-replay, fresh unique material for every new
-session, no nonce reuse or consumed-bundle reactivation across restart, and
-fail closed without plaintext fallback. Manual AES-GCM provisioning is
-experimental; RFC 4106's automatic-key-management requirement prevents a
-full-compliance or production-security claim. T14
-[user/ipv6](user/ipv6/README.md) now passes its bounded emulated gate
-(24 guest / 245 peer assertions); T15 ESP remains PLANNED. Here ESP means
-IPsec, not the UEFI EFI System Partition.
+No persistent key object/bundle, lifecycle, replay window, anti-rollback,
+rekeying, expiry guarantees, secure distribution/storage or production VPN
+is part of this task. Fixed demo credentials/counters are for disposable tests
+only, with no security across restart/reuse or full RFC compliance claim.
+IKEv2 remains outside the target. The
+[old expansive design](docs/history/ESP-SA-BUNDLE-2026-11-08.md) and
+[MINIMAL-IKEV2](docs/MINIMAL-IKEV2.md) remain historical, not active requirements.
+T14 [user/ipv6](user/ipv6/README.md) retains its recorded emulated PASS;
+T15 [result](docs/T15-ESP-RESULT.md): 13 guest / 43 peer assertions, T13/T14
+regressions and normal boot/commit/REPL PASS. Physical NIC NOT RUN.
+T16 is independent. Here IPsec ESP is unrelated to the UEFI EFI System Partition.
 
 ## Limits
 

@@ -12,8 +12,23 @@
 > T11 is validated and PASS (2026-11-06) with one FIFO infinite-timeout
 > sentinel fix and a strengthened-validation follow-up PASS (2026-11-07, no
 > kernel change); T12 passes its emulated USB endpoint integration gate
-> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15–T16 remain **PLANNED**; see
+> (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15 passes its minimal ESP integration gate (13 guest / 43 peer assertions); T16 remains **PLANNED**; see
 > [ROADMAP-T8-T16](ROADMAP-T8-T16.md).
+
+## T15: minimal userspace ESP integration (2026-11-08, emulated gate PASS)
+
+[T15-ESP-RESULT](T15-ESP-RESULT.md) records 13 guest assertions and 43
+independent real-peer assertions: userspace transport-mode NH50 ESP, exact
+bidirectional decrypted echo, packet tags/nonces, ordinary ND, no plaintext
+echo fallback, existing Device ABI/ObjectFIFO and authorized child Handles.
+Fresh T13 55/55 and T14 24 guest /245 peer regressions PASS on the same MPY
+ELF; normal boot/GE/O commit/parent REPL and canonical builds PASS. The small
+MPY aesgcm binding reuses existing BearSSL/espcrypto code in userspace; no
+kernel networking/syscall/ABI/provider is added. Fixed public demo SAs are
+TEST-ONLY, with no security across restart/reuse or production guarantees.
+No persistent bundle, lifecycle/replay-window or VPN work. Physical NIC and
+production security tests NOT RUN; T16 remains PLANNED. Current scope:
+[ESP-SA-BUNDLE](ESP-SA-BUNDLE.md), superseding the earlier expansive proposal.
 
 ## T14: userspace IPv6 (2026-11-08, minimal emulated gate PASS)
 
@@ -26,10 +41,15 @@ child runs on CPU 1; the parent returns to the normal committed GE/O REPL.
 Fresh T13 regression (55/55) and canonical two-boot persistence PASS. All four
 canonical builds PASS, with zero kernel/ABI/MPY C changes. Source/API and limits:
 [user/ipv6](../user/ipv6/README.md). Physical NIC/KVM, full original T8 campaign
-and USB T12 rerun are NOT RUN; no common device code changed. T15 ESP remains
-PLANNED. Earlier documentation-round NOT RUN statements below are historical.
+and USB T12 rerun were NOT RUN; no common device code changed. T15 ESP was
+still PLANNED at that historical round. See the current T15 gate above. Earlier
+documentation-round NOT RUN statements below are historical.
 
-## Network target correction (2026-11-08, documentation only)
+## Historical network target correction (2026-11-08, documentation only)
+
+> Superseded by the later minimal T15 assignment and result above. This
+> dated documentation-round description is retained as decision history;
+> its bundle/lifecycle/security requirements are no longer active.
 
 IKEv2 is excluded entirely from the active PoC and future target, including
 handshake/negotiation, PSKs, UDP/500, an IKE daemon and deferred migration.
