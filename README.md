@@ -279,7 +279,8 @@ prerequisites. Do not add other test infrastructure to the tree.
   MicroPython result (PASS, 2026-11-06).
 - [ROADMAP-T8-T16](docs/ROADMAP-T8-T16.md): T8–T13 recorded PASS within their
   documented gates; T13 is merged (emulated gate only, physical NIC NOT RUN).
-  T14 userspace IPv6, T15 provisioned ESP and T16 device work remain PLANNED.
+  T14 minimal userspace IPv6 passes its emulated gate
+  ([result](docs/T14-IPV6-RESULT.md)); T15 ESP and T16 remain PLANNED.
   See [SYSCALL-LEDGER](docs/SYSCALL-LEDGER.md) for the accepted T9 audit.
 - [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md): the host source layout and
   its distinction from future OID-addressed source objects.
@@ -323,8 +324,10 @@ Require tag verification, anti-replay, fresh unique material for every new
 session, no nonce reuse or consumed-bundle reactivation across restart, and
 fail closed without plaintext fallback. Manual AES-GCM provisioning is
 experimental; RFC 4106's automatic-key-management requirement prevents a
-full-compliance or production-security claim. T14/T15 implementation remains
-PLANNED. Here ESP means IPsec, not the UEFI EFI System Partition.
+full-compliance or production-security claim. T14
+[user/ipv6](user/ipv6/README.md) now passes its bounded emulated gate
+(24 guest / 245 peer assertions); T15 ESP remains PLANNED. Here ESP means
+IPsec, not the UEFI EFI System Partition.
 
 ## Limits
 

@@ -7,8 +7,9 @@ validated and verified (PASS, 2026-11-06) with one FIFO timeout sentinel fix;
 T12 passes the emulated USB endpoint integration gate (66/66 PASS);
 see its result below.
 T13 is merged and passes its emulated integration gate (55 T13 checks and a
-fresh 66-check USB regression; physical NIC NOT RUN). T14–T16 remain
-PLANNED. This document itself implements no stage.** T7 is the previous partial result. This roadmap records
+fresh 66-check USB regression; physical NIC NOT RUN). T14 now passes the
+minimal emulated IPv6 gate (24 guest / 245 external-peer assertions);
+T15–T16 remain PLANNED. This document itself implements no stage.** T7 is the previous partial result. This roadmap records
 architectural decisions and staged acceptance gates; T8 was completed under a
 separately assigned task and its observed result is recorded below and in
 [SYSCALL-T8-MULTIPROCESS](SYSCALL-T8-MULTIPROCESS.md). This document does not
@@ -513,17 +514,23 @@ a sleeping allocation or blocking lock from the interrupt path.
 the GE/O format, or implementing T14–T16. Native network disabling is authorized by the
 later T13 task and is documented in its result.
 
-### T14 — Minimal userspace IPv6 service (PLANNED)
+### T14 — Minimal userspace IPv6 service (emulated integration gate PASS)
 
 **Depends on:** T13 raw-frame send/receive and device-model evidence (merged,
 emulated gate PASS; physical NIC NOT RUN).
 
-Implement a minimal MicroPython userspace IPv6 node over T13 raw Ethernet:
+**Result (2026-11-08):** [T14-IPV6-RESULT](T14-IPV6-RESULT.md) records
+24 guest assertions, 245 independent real-NIC peer assertions, 55/55 fresh
+T13 regression and two-boot GE/O/REPL persistence PASS. Static fe80::/64,
+MTU1280, four neighbors and one pending ping; physical NIC and full-router
+features NOT RUN. Kernel/ABI/MPY C are unchanged.
+
+Implemented a minimal MicroPython userspace IPv6 node over T13 raw Ethernet:
 IPv6 addressing, ICMPv6 and Neighbor Discovery, with basic external exchange.
 This is not a complete router stack. UDP may follow the demonstrated base,
 then TCP; those are independent objectives, not prerequisites of T15 ESP.
 
-**Acceptance conditions (future tests):**
+**Acceptance conditions (observed for the bounded subset above):**
 
 - Demonstrate basic IPv6/ICMPv6/ND traffic and observable address/neighbor
   configuration over the actual T13 NIC path, independently of ESP.
@@ -533,7 +540,8 @@ then TCP; those are independent objectives, not prerequisites of T15 ESP.
 - Distinguish the minimal PoC from a production router/full stack.
 
 **NOT in scope:** ESP implementation, complete routing, IPv4, or device
-migration beyond T13. T14 is not implemented by this documentation task.
+migration beyond T13. The earlier documentation decision alone did not
+implement T14; the separately assigned coding result above now supplies it.
 
 ### T15 — Externally provisioned userspace ESP SA pair (PLANNED)
 
@@ -673,7 +681,10 @@ T12 **passes the emulated endpoint integration gate** (66/66 PASS), with verific
 limits in [T12-DEVICE-RESULT](T12-DEVICE-RESULT.md). T13 is merged and
 **passes its emulated gate** (55 T13 checks, fresh 66-check USB regression;
 physical NIC NOT RUN); see [T13-ETHERNET-RESULT](T13-ETHERNET-RESULT.md).
-T14–T16 remain **PLANNED, not implemented**. T15 specifies externally
+T14 **passes its minimal emulated IPv6 gate** (24 guest / 245 external-peer
+assertions, fresh T13 regression and persistence PASS); see
+[T14-IPV6-RESULT](T14-IPV6-RESULT.md). T15–T16 remain **PLANNED, not
+implemented**. T15 specifies externally
 provisioned ESP, not a negotiation protocol. T7 is the previous partial
 result. The roadmap itself does not authorize implementation; T12 was
 separately assigned by the user, and later stages still require their own assignment and acceptance gate.
