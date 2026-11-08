@@ -1,9 +1,10 @@
 /*
- * N9.4 Linux-native UEFI loader support for the Microsoft x64 ABI.
+ * N9.4 Linux-native UEFI loader support for the Microsoft x64 ABI, reused
+ * for the experimental AArch64 loader's AAPCS64 ABI.
  *
- * clang --target=x86_64-pc-windows-msvc gives COFF objects and the MS ABI
- * that UEFI requires.  The existing loader C sources are reused unchanged
- * except for this bounded bridge.
+ * clang --target=x86_64-pc-windows-msvc (or aarch64-pc-windows-msvc) gives
+ * COFF objects and the calling convention UEFI requires.  The existing
+ * loader C sources are reused unchanged except for this bounded bridge.
  */
 #include <u.h>
 #include "fns.h"

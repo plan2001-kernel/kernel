@@ -15,6 +15,24 @@
 > (66/66 checks PASS, 2026-11-07; publication BLOCKED); T13 passes its emulated raw-Ethernet gate (55 checks and a fresh 66-check USB regression); T14 passes its bounded emulated IPv6 gate (24 guest / 245 peer assertions); T15 passes its minimal ESP integration gate (13 guest / 43 peer assertions); T16 passes its emulated USB/Ethernet consolidation gate (fresh 66/55); see
 > the stage results below.
 
+## Experimental ARM64 boot foundation (2026-11-08, QEMU PASS)
+
+`docs/ARCHITECTURE-SUPPORT.md` records the bounded AArch64 boot proof: a
+freestanding Clang/LLD kernel (`build/arm64/9karm64.elf`) and UEFI loader
+(`build/arm64/bootaa64.efi`) enter EL1 on QEMU `virt`, enable a 2 GiB boot map
+and PL011 console, validate the existing BootInfo v1 blob through the shared
+`kernel/core/oplanboot.c`, reserve the kernel image and blob, hand out zeroed
+4 KiB pages from the map's RAM (with an allocate/free/re-allocate self-test),
+print the ARM64 boot marker and take three EL1 timer interrupts.
+`tools/build-arm64.sh`, `tools/host/build-efi-arm64.sh` and
+`tools/qemu-arm64-boot.sh` reproduced this build/boot in this round. The amd64
+boot was **NOT RUN** and the amd64 compile/link was **NOT RUN** on this
+AArch64 host (no x86-64 GCC/binutils cross toolchain; the earlier Debian-host
+build remains the amd64 evidence). ARM64 has no scheduler, virtual memory,
+GE/O, syscalls, userspace, networking, USB, storage or SMP support, and
+physical ARM64 hardware was **NOT RUN**. amd64 remains the only supported
+target.
+
 ## T16: common USB/Ethernet Device ABI (2026-11-08, emulated gate PASS)
 
 [T16-DEVICE-RESULT](T16-DEVICE-RESULT.md) records a source-backed contract /

@@ -421,10 +421,17 @@ enum {
 	ElfData2LSB = 1,
 	ElfTypeExec = 2,
 	ElfMachineX86_64 = 62,
+	ElfMachineAArch64 = 183,
 	ElfPTLoad = 1,
 	ElfPFX = 1,
 	ElfMaxPh = 16,
 };
+
+#if defined(__aarch64__)
+#define	ElfMachine	ElfMachineAArch64
+#else
+#define	ElfMachine	ElfMachineX86_64
+#endif
 
 typedef struct Elf64Ehdr Elf64Ehdr;
 typedef struct Elf64Phdr Elf64Phdr;
@@ -490,7 +497,7 @@ bootelf(void *f, uchar *magic)
 		return "bad ELF magic";
 	if(eh.ident[4] != ElfClass64 || eh.ident[5] != ElfData2LSB)
 		return "unsupported ELF class/endianness";
-	if(eh.type != ElfTypeExec || eh.machine != ElfMachineX86_64)
+	if(eh.type != ElfTypeExec || eh.machine != ElfMachine)
 		return "unsupported ELF type/machine";
 	if(eh.version != 1 || eh.ehsize < sizeof eh)
 		return "unsupported ELF version/header size";
@@ -552,7 +559,16 @@ bootelf(void *f, uchar *magic)
 	}
 	if(nload == 0)
 		return "ELF kernel has no loadable segments";
-	if(eh.entry < KZERO || eh.entry >= KZERO + 0x10000000ull){
+	/*
+	 * The image was written through the firmware's caches.  Make it
+	 * visible to the kernel entry, which runs with the MMU and caches
+	 * off (ARM64; a no-op on AMD64), including the BSS the loader just
+	 * zeroed: a stale dirty line must not reappear as a page table.
+	 */
+	for(i = 0; i < nload; i++)
+		archcacheclean(lpa[i], lsz[i]);
+	archcachesync();
+	if(!archentryok(eh.entry)){
 		errmsg = "ELF entry outside kernel half";
 		goto bad;
 	}

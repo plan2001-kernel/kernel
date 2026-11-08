@@ -158,6 +158,7 @@ KERNEL_SOURCES = {
     "netlog": "kernel/net/netlog.c",
     "nullmedium": "kernel/net/nullmedium.c",
     "ouser": "kernel/amd64/ouser.c",
+    "oplanboot": "kernel/core/oplanboot.c",
     "page": "kernel/core/page.c",
     "parse": "kernel/core/parse.c",
     "pci": "kernel/core/pci.c",

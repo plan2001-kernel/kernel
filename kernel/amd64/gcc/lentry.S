@@ -51,7 +51,7 @@ _efi64:
 	pushq	$KESEL
 	movl	$_efi64b-KZERO, %eax
 	pushq	%rax
-	retfq
+	lretq
 	.size	_efi64, .-_efi64
 
 _efi64b:

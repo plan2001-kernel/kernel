@@ -1,6 +1,7 @@
 #include	"u.h"
 #include	"tos.h"
 #include	"../core/lib.h"
+#include	<oplanboot.h>
 #include	"mem.h"
 #include	"dat.h"
 #include	"fns.h"
@@ -20,6 +21,13 @@ extern void usbcore_shutdown(void);
 extern void sysgefsshutdown(void);
 
 extern void (*i8237alloc)(void);
+
+static void
+bootannounceout(void *arg, const char *s)
+{
+	(void)arg;
+	print("%s", (char*)s);
+}
 
 void
 confinit(void)
@@ -140,6 +148,7 @@ main(void)
 	ioinit();
 	i8250console();
 	quotefmtinstall();
+	oplanbootannounce(bootannounceout, nil, bootinfo, bootblob);
 	print("\nPlan 9\n");
 	cpuidentify();
 	meminit0();

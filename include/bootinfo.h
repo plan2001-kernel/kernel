@@ -36,6 +36,9 @@
  * (fdtoff and fdtlen were; rdbase and rdlen).  A change that breaks that
  * needs a new BootInfoVersion.
  */
+#ifndef PLAN2001_BOOTINFO_H
+#define PLAN2001_BOOTINFO_H
+
 enum {
 	BootInfoMagic	= 0x49423250,	/* "P2BI" */
 	BootInfoVersion	= 1,
@@ -132,3 +135,5 @@ struct BootInfo {
 	u64int	rdbase;
 	u64int	rdlen;		/* bytes */
 };
+
+#endif /* PLAN2001_BOOTINFO_H */
