@@ -193,26 +193,14 @@ scheduler, virtual memory, GE/O, syscalls, userspace and networking are **not**
 implemented for ARM64. See [architecture support](docs/ARCHITECTURE-SUPPORT.md)
 for the exact scope, limits and verification record.
 
-## Published source
+## Development
 
-The complete canonical source tree is published to `plan2001.com` at the end of
-**every** task round, including failed or incomplete rounds. Publication is
-never gated on a build or test result; the honest result is recorded as session
-metadata instead. Run `make pub` from the repository root, or use the
-`EXIT`-trap wrapper `tools/host/session-publish.sh` so a failing command still
-triggers publication.
-
-`make pub` creates a deterministic, content-addressed snapshot and transfers it
-over SSH to the Ubuntu host. The host-side helper verifies the previous
-snapshot, every file hash, the manifest and the archive before activating the
-new snapshot with atomic renames. `CURRENT` switches only after verification,
-the previous complete snapshot is always retained, and the MCP source service
-(`https://plan2001.com/mcp`) exposes the new version through `kernel_status`,
-`kernel_history`, `kernel_manifest`, `kernel_read`, `kernel_search` and
-`kernel_archive_chunk`. A failed check or transfer leaves the previous snapshot
-active and queues a retry. See
-[docs/DEVELOPMENT-WORKFLOW.md](docs/DEVELOPMENT-WORKFLOW.md) for the binding
-rules.
+The canonical source is [plan2001-kernel/kernel](https://github.com/plan2001-kernel/kernel).
+Work can be done in Codex Cloud, Android Termux/OpenCode, or another suitable
+environment. Follow [DEVELOPMENT-WORKFLOW](docs/DEVELOPMENT-WORKFLOW.md):
+implement the task, run available checks, report their results, and submit a
+pull request for review. Do not merge without explicit authorization. An ARM64
+Termux host need not run amd64 kernel tests natively.
 
 ## Ream, seed and install
 

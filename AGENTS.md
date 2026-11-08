@@ -1,21 +1,19 @@
 # Plan2001-O — instructions for coding agents
 
-## Current source and task workflow (2026-11-07)
+## Development workflow
 
-The owner's later GitHub-first decision supersedes the kuha-only development
-and mandatory MCP source-publication rules preserved below. Read the
-[current workflow](docs/DEVELOPMENT-WORKFLOW.md#nykyinen-työnkulku-2026-11-07)
-before acting. Use Plan2001 MCP to claim tasks and report results; use
-[GitHub main](https://github.com/plan2001-kernel/kernel/tree/main) as current
-source. Verify the actual executor, available authentication and exact main
-SHA for each task. Propose changes on a dedicated branch and PR, verify the
-remote commit/files after writing, and report commit/PR links and actual test
-outcomes through MCP. Do not merge or update main without explicit assignment.
+The canonical source is [plan2001-kernel/kernel](https://github.com/plan2001-kernel/kernel).
+Obtain the task directly from the user or development environment. Read the
+current repository and relevant project instructions, make the requested change,
+run available checks, and report what actually ran. Submit a focused pull
+request against `main` for review. Never merge without explicit authorization.
+Git is the ordinary version control mechanism; no particular development
+machine, working directory, task queue, or source publication service is
+required. See [DEVELOPMENT-WORKFLOW](docs/DEVELOPMENT-WORKFLOW.md).
 
-The MCP source snapshot is historical T11 until separately synchronized; never
-substitute it for GitHub main or overwrite T12 with it. GitHub branch/PR writes
-and task_report do not update that snapshot. The dated publisher/hooks below
-are historical mechanisms, not the default route for current tasks.
+Codex Cloud and Android Termux/OpenCode are supported development environments.
+The operating system target is amd64; an ARM64 Termux host is not expected to
+execute amd64 kernel tests natively. Mark unavailable checks **NOT RUN**.
 
 ## Network target decision (2026-11-08, latest T15 assignment)
 
@@ -44,7 +42,7 @@ Physical NICs were NOT RUN.
 Native IP startup/OBJ TCP/UDP opens remain disabled. Preserve actual boot/MPY/
 driver dependencies, with no unused-stack compatibility obligation. In reports
 call the executor **agentti** and inspect the actual host/test environment.
-GitHub-first branch/PR/readback/MCP reporting above remains in force.
+The development workflow above applies.
 
 ## T16 scope decision (2026-11-08)
 
@@ -58,73 +56,9 @@ Ethernet accepted-L2/asynchronous FIFO semantics. Fix only demonstrated
 inconsistencies or unsafe ownership/rights/lifecycle with focused regression
 proof; do not invent code changes if the existing contract is coherent.
 Canonical builds and fresh T12/T13 tests, common/provider/legacy dependency
-matrix and owner-review PR/readback/MCP reporting define this task. No merge.
+matrix and owner-review PR delivery define this historical task. No merge.
 The [T16 result](docs/T16-DEVICE-RESULT.md) now records fresh 66/55 emulated
 checks and builds PASS, with zero runtime/ABI changes. No physical test claim.
-
-## plan2001.com: current infrastructure (2026-11-03)
-
-Owner-confirmed facts, authoritative over older documents and session summaries:
-
-- **plan2001.com runs Ubuntu Linux.** The host is not running Plan 9,
-  9front, Plan9+, Plan2001 or Plan2001-O.
-- The former plan2001.com service implemented in **plan9-wasm32** and
-  **monolith** has been removed. Those repositories are not the current
-  production service or deployment source for this host.
-- Their old rc-httpd/tlssrv, rcpu/9pterm, dp9ik, WireGuard administration,
-  `/sys/lib/plan2001` paths, demo/ISO/passkey gateway and native Plan 9 MCP
-  instructions are retired. Do not use them to administer, diagnose or
-  restore this Ubuntu host, even if old source code or credentials remain.
-- Diagnose or restore MCP services using the actual Ubuntu configuration,
-  deployed files and Linux service management. Current SSH access, service
-  names, paths, backups, ports and MCP endpoints must be verified; none are
-  established by an old Plan 9 deployment report.
-- Plan 9/9front code, local VMs and the browser guest remain separate project
-  contexts. Their operating system does not describe plan2001.com.
-- When resuming an older Codex, OpenCode or Copilot session, discard any
-  conflicting host assumptions and follow these facts. Do not automatically
-  redeploy either removed service.
-
-## Historical source-publication decision (2026-11-04)
-
-**Historical scope:** the 2026-11-07 workflow above supersedes this section's
-source-transfer requirements. Its dated text and mechanism descriptions are
-retained as evidence; they do not require running the old publisher or hooks
-for a GitHub branch/PR task. Hardware/format authorization boundaries remain.
-
-Owner decision, binding over older publishing notes at that date: there is **no production
-kernel**. The kernel is a PoC on `kuha`. The full canonical source tree is
-edited on `kuha` and published immediately to `plan2001.com`. Every task round
-must publish the **complete current source tree**, including failed or
-incomplete rounds. Never gate publication on a build or test result; record the
-result honestly instead. The previous complete snapshot must always remain
-available. Do not claim `kuha` and `plan2001.com` are identical before the
-hash verification succeeds.
-
-Use `python3 tools/host/mcp-publish.py` (or `make pub`), or the `EXIT`-trap
-wrapper `tools/host/session-publish.sh`. Read
-[docs/DEVELOPMENT-WORKFLOW.md](docs/DEVELOPMENT-WORKFLOW.md) before changing the
-pipeline. This rule does **not** authorize hardware boot, p5/ESP writes, or
-GE/O format changes; those remain separate, explicitly authorized actions.
-
-**Automatic worker hook.** The canonical tree carries
-`.opencode/plugins/plan2001-worker-publish.js` (implementation in
-`tools/host/opencode/plan2001-worker-publish.js`). An OpenCode process started
-in this worktree loads it automatically. It observes `task_claim` and
-`task_report` tool completion, publishes the complete source tree through the
-existing publisher after a report, and also publishes at `/new`, `session.idle`,
-`session.error` and `session.deleted` for a claimed task that has not been
-published. Publication is therefore not dependent on the agent remembering to
-run a command. The hook keeps a machine-local state file under
-`build/mcp-publish/` (never part of the published source). The manual commands
-remain valid fallbacks.
-
-The remote finalizer journals an activation before changing `CURRENT`, records
-the session only after `CURRENT` is durable, and reconciles interrupted
-finalizations idempotently. A snapshot that was activated but failed
-post-verification is re-verified as the same session, not published again. An
-old pending draft is kept in history but never moves `CURRENT` backwards past a
-newer snapshot. Do not weaken these guarantees when editing the publisher.
 
 ## Project scope
 
@@ -242,4 +176,4 @@ test demonstrates it.
 - Never run image-formatting or `tools/gcc-ovol-ream.sh --install` against a real disk as part of routine tests. Use disposable images; p5 writes require the explicit destructive-fixture authorization above.
 - Preserve source copyright, license notices and provenance. Importing a source archive does not transfer authorship.
 
-See [docs/STATUS.md](docs/STATUS.md) for the **single maintained set of build, install and current-status commands**, and [docs/DEVELOPMENT-WORKFLOW.md](docs/DEVELOPMENT-WORKFLOW.md) for the binding source publication workflow.
+See [docs/STATUS.md](docs/STATUS.md) for the **single maintained set of build, install and current-status commands**, and [docs/DEVELOPMENT-WORKFLOW.md](docs/DEVELOPMENT-WORKFLOW.md) for the development workflow.

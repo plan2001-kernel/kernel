@@ -1,5 +1,16 @@
 # Plan2001-O — current status
 
+## Development workflow (current)
+
+The canonical source is [plan2001-kernel/kernel](https://github.com/plan2001-kernel/kernel).
+Tasks come directly from the user or development environment. Work can be done
+in Codex Cloud, Termux/OpenCode, or another suitable environment; no dedicated
+machine, task queue, or source publisher is required. Run available checks,
+report **NOT RUN** where appropriate, and submit a pull request for review.
+Do not merge without explicit authorization. The dated source-publication and
+Kuha entries below are historical evidence, not current instructions.
+See [DEVELOPMENT-WORKFLOW](DEVELOPMENT-WORKFLOW.md).
+
 ## Syscall consolidation (2026-11-08)
 
 The proposed branch is documented in [SYSCALL-CONSOLIDATION](SYSCALL-CONSOLIDATION.md). It reduces the active amd64 dispatch table from 62 to 33 entries. The 135 assigned numbers remain allocated; 102 are reserved and reject with `Ebadarg`. The T9/T10 counts below are historical measurements.
@@ -124,9 +135,8 @@ flood-time detach and link-down/recovery. The same binaries pass a fresh
 TX queue/allocation fault injection and exhaustive race testing are NOT RUN.
 The old native IP service startup and OBJ TCP/UDP opens are disabled under
 the task's explicit override; remaining linked protocol code is documented.
-GitHub branch/PR delivery follows the current workflow; MCP source snapshots
-remain separate. The older T12 publication-blocked narrative below is
-historical, not a blocker on the current GitHub branch workflow.
+GitHub branch/PR delivery follows the current workflow. The older T12
+publication-blocked narrative below is historical and is not a current blocker.
 
 ## T12: common device ABI (2026-11-07, emulated endpoint gate PASS)
 
@@ -145,10 +155,10 @@ last-owner process exit with a pending response. Original root-only 34/34
 evidence is superseded for this gate, not counted again.
 
 Physical hardware, active-transfer unplug/timeout injection, broad regressions
-and T13–T16 are NOT RUN. Source publication is **BLOCKED**: no writable source
-MCP operation is available; neither SSH nor task_report substitutes for it.
-The full verified patch/source artifacts are supplied for integration; kuha
-and server CURRENT have not been updated by this round.
+and T13–T16 were NOT RUN in that round. At the time, source publication was
+reported **BLOCKED**; that historical publication status is not a current
+GitHub development blocker. The patch/source artifacts were supplied for
+integration, without updating the then-current remote snapshot.
 
 ## T11: ObjectFIFO multiprocess validation (2026-11-06 PASS; strengthened 2026-11-07 PASS)
 
@@ -620,7 +630,8 @@ Fresh evidence on `kuha`:
   **NOT RUN**; no test harness or new Handle table was added.
 
 The self-test printed `USBEP SELFTEST PASS 32 0` and the QEMU report
-recorded `result=PASS`. Source publication follows the binding workflow.
+recorded `result=PASS`. At that time, source publication followed the retired
+workflow.
 
 ## Pipe lock/lifecycle and KBD claim-path fix (2026-11-05)
 
@@ -756,7 +767,7 @@ Fresh evidence on `kuha` (disposable KVM QEMU, local Ethernet-over-UDP peer):
 For this round, unprivileged spawn denial of UDP6 open, OSPAWN UDP6 handoff,
 observed exec/exit endpoint release, the raw receive-too-small path, multi-CPU
 and allocation-fault campaigns are **NOT RUN**; no broad test tree was added.
-Source publication follows the binding workflow.
+At that time, source publication followed the retired workflow.
 
 ## Capability-fix candidate (2026-11-05)
 
@@ -839,47 +850,16 @@ unconfirmed, and test sequencing/host peer timing is plausible but not proven.
 **NOT RUN:** allocation fault injection beyond the deterministic handle-table
 exhaustion above, long fuzz, external IPv6 beyond the local peer, multi-CPU
 stress beyond the 4-vCPU boots, physical hardware/disk writes, USB migration
-and unrelated syscall reduction. Source publication follows the binding
-workflow; the published `snapshot_id` is reported by `kernel_status` after
-activation and is not asserted locally.
+and unrelated syscall reduction. At that time, source publication followed the
+retired workflow; the `kernel_status` snapshot claim was not asserted locally.
 
-## Source publication pipeline (2026-11-04)
+## Historical source publication pipeline (2026-11-04; retired)
 
-The binding development workflow is documented in
-[DEVELOPMENT-WORKFLOW](DEVELOPMENT-WORKFLOW.md). Every task round publishes the
-complete canonical source tree to `plan2001.com`, including failed or
-incomplete rounds; publication is not gated on build or test success. The
-implementation on `kuha` is `tools/host/mcp-publish.py` (SSH staging, remote
-byte-for-byte verification, journaled and recoverable activation, session
-history, previous-snapshot retention, idempotent re-verification, history-only
-handling of superseded drafts and pending retry) plus the root-side helper
-`tools/host/mcp-publish-remote.py` and the `EXIT`-trap wrapper
-`tools/host/session-publish.sh`.
-
-The read-only MCP source service at `https://plan2001.com/mcp` exposes
-`kernel_status`, `kernel_pop`, `kernel_history`, `kernel_list`,
-`kernel_manifest`, `kernel_read`, `kernel_search` and
-`kernel_archive_chunk`. `kernel_status` additionally reports
-`activation_consistent` and any `pending_activation` journal without changing
-existing fields. `kernel_history` lists every published session, including
-`result=failed` / `incomplete`, with its `snapshot_id` and hashes. The previous
-complete snapshot is never deleted or replaced as the only copy.
-
-`latest` means the real newest `kuha` source snapshot, not a forced older
-"known-good" version. A candidate kernel status below is independent of source
-publication: the tree may be a reviewable kernel candidate and still be the
-published source of record.
-
-**Automatic OpenCode worker hook:** the canonical tree carries
-`.opencode/plugins/plan2001-worker-publish.js` (implementation
-`tools/host/opencode/plan2001-worker-publish.js`). An OpenCode process started
-in this worktree loads it automatically; optional global installation is
-`tools/host/opencode/install.sh`. The hook observes `task_claim` and
-`task_report`, publishes after a report, and also publishes a claimed but
-unreported task at `/new`, `session.idle`, `session.error` and
-`session.deleted`. It keeps machine-local state in
-`build/mcp-publish/opencode-worker-state.json`. The manual commands remain
-valid fallbacks.
+This section preserves dated publication verification evidence. The former
+publisher, server and OpenCode hook have been removed from the repository.
+Their snapshot and task-queue services are not part of the current development
+workflow. Paths and service names in the evidence below describe the 2026-11-04
+implementation and are not commands or requirements to run.
 
 ### Publication verification (2026-11-04)
 
@@ -923,9 +903,9 @@ service:
   (`docs/STATUS.md`, SHA-256 prefix `d39007ca...`). The older
   `eed6f23e...0ad5` also remained readable with its own `snapshot_id`.
 - Broad kernel regression testing remains **NOT RUN by design** for this
-  publication-only task. The final publication after this STATUS update is the
-  active snapshot reported by MCP; its session record is the authoritative
-  record of the final full-archive verification.
+  publication-only task. The then-current published snapshot was reported by
+  MCP; its session record was the record of that historical full-archive
+  verification.
 
 ## Universal five-operation object ABI: retirement and GE integration (2026-11-04)
 
