@@ -108,7 +108,7 @@
 /* 97-99 reserved: retired object binding calls. */
 #define PIPEINHERIT     100 /* reserved */
 /* 104 reserved: retired extended object binding call. */
-#define OQUERY          106
+#define OQUERY          106 /* reserved */
 #define SYSSNAPSHOT     107
 /* 108-113 RESERVED: former TCP6* compatibility family.  The numbers stay
  * allocated forever but have no dispatch entry; use the OBJ* five-call ABI. */

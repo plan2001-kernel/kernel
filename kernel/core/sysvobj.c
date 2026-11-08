@@ -837,7 +837,6 @@ vobjrightsfromo(int o)
  if(o & Ocommit) r |= Vcommit;
  if(o & Oexecute) r |= Vexecute;
  if(o & Odelegate) r |= Vdelegate;
- if(o & Orelate) r |= Vcontrol;
  return r;
 }
 
@@ -859,7 +858,6 @@ vgecaplimit(Ohand *cap, int rights)
  if(rights & Vcommit) r|=Ocommit;
  if(rights & Vexecute) r|=Oexecute;
  if(rights & Vdelegate) r|=Odelegate;
- if(rights & Vcontrol) r|=Orelate;
  cap->rights &= r;
 }
 

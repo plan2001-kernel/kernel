@@ -32,6 +32,23 @@ def run():
     print('T16-PASS semaphore release acquire timeout')
     import space
     sh = p.obj_open_space('init')
+    if hasattr(shared, 'previous_ge_oid'):
+        previous = p.obj_open_ge_space(sh, shared.previous_ge_oid)
+        assert p.obj_read(previous, 11) == b'T16-UPDATED'
+        p.obj_close(previous)
+        print('T16-PASS GE restart reopen')
+    fresh, fresh_oid = p.obj_create_ge(sh, b'T16-DRAFT')
+    p.obj_commit(sh)
+    writer = p.obj_open_ge_space(sh, fresh_oid)
+    assert p.obj_write(writer, b'T16-UPDATED') == 11
+    p.obj_commit(writer)
+    p.obj_close(writer)
+    reopened = p.obj_open_ge_space(sh, fresh_oid)
+    assert p.obj_read(reopened, 11) == b'T16-UPDATED'
+    p.obj_close(reopened)
+    p.obj_close(fresh)
+    shared.previous_ge_oid = fresh_oid
+    print('T16-PASS GE write commit and reopen')
     gh, oid = p.obj_create_ge(sh, b'T16-GE')
     p.obj_commit(sh)
     assert p.obj_read(gh, 6) == b'T16-GE'
@@ -282,7 +299,7 @@ def run():
             pass
         else:
             raise AssertionError('retired O Space syscall active')
-    for nr in (97, 98, 99, 101, 102, 103, 104, 105):
+    for nr in (97, 98, 99, 101, 102, 103, 104, 105, 106):
         child = "import plan9 as p\np.sysraw(" + str(nr) + ")\n"
         pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child))
         waited, status = space.wait()

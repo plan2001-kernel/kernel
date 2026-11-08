@@ -1,7 +1,7 @@
 /* Experimental N13 native object view; kernel pointers never cross the ABI. */
 enum {
 	Oread=1, Owrite=2, Ocreate=4, Ocommit=8, Oexecute=16, Odelegate=32,
-	Orelate=64, Oall=127, Obindmax=32, Onamemax=32,
+	Oall=63, Obindmax=32, Onamemax=32,
 };
 typedef struct Ohand Ohand;
 struct Ohand {

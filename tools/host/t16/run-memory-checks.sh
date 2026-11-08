@@ -22,6 +22,8 @@ if ! qob_boot_once "$T16_OUT/disk.img" second 'PLAN2001-O: REPL READY' repl ''  
 fi
 qob_has_fixed 'space: O: restored init' "$T16_OUT/boot-second.log" ||
   qob_die 'second boot did not restore persistent init graph'
+qob_has_fixed 'T16-PASS GE restart reopen' "$T16_OUT/boot-second.log" ||
+  qob_die 'second boot did not reopen previously committed GE object'
 qob_has_fixed 'PLAN2001-O: GE/O COMMIT SUCCESS' "$T16_OUT/boot-second.log" ||
   qob_die 'second boot did not commit'
 qob_say 'PASS: same disk restored and committed on second boot'
