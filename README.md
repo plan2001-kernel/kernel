@@ -1,5 +1,9 @@
 # Plan 2001-kernel
 
+<p align="center">
+  <img src="assets/plan2001-o-mascot.svg" alt="Plan 2001-kernel mascot: a rabbit playing the banjo" width="280">
+</p>
+
 Plan 2001-kernel is an **experimental object-oriented operating-system
 kernel** under development for AMD64 and ARM64. Persistent GE/O storage
 uses SpaceIDs and OIDs rather than a native hierarchical filesystem.
@@ -42,6 +46,7 @@ early-boot PASS is not a claim of physical-hardware validation.
 - [GE/O persistent object storage](docs/OBJECT-STORAGE.md)
 - [Kernel interface and ObjectFIFO principles](docs/KERNEL-INTERFACE.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
+- [Olio ja objekti: tietoteoreettinen manifesti (suomeksi)](docs/OLIO-OBJEKTI-MANIFESTI.md)
 
 Read [AGENTS.md](AGENTS.md) for coding instructions. Source code and tests
 are the authority for implemented behavior. Earlier experiments, T-stage
