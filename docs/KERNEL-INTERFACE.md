@@ -53,7 +53,7 @@ objects the process can see and use*. Attaching a namespace or learning an
 OID must not grant capabilities implicitly.
 
 The minimal set model supports membership testing, union, intersection, and
-difference (`A \\ B`, or "in A and not in B"). It does not require an
+difference (`A \ B`, or "in A and not in B"). It does not require an
 unbounded universal complement. Dynamic namespace expressions reference
 other namespaces and are evaluated against their later memberships; initial
 implementations may reject cyclic expression dependencies. A query result
@@ -71,10 +71,12 @@ mechanisms through the existing object ABI where appropriate. Union,
 intersection, difference, and higher-level query parsing do not each need a
 new syscall; user programs may evaluate complex expressions. Hashtag/tag
 parsing, tag-specific indexes, and application query syntax do not belong in
-the kernel. Existing GE R1/`OQUERY` hashtag behavior is legacy to remove,
-not a requirement for the new set model. No compatibility migration of that
-metadata is needed when the experimental volume is reamed and objects are
-reimported. This section is a target contract, not a claim of implementation.
+the kernel. The legacy GE R1 hashtag implementation has been removed from
+the kernel and MicroPython; `OQUERY` syscall number 106 is reserved and has
+no handler. No old R1 metadata reader or migration is required: experimental
+volumes may be explicitly reamed and their objects reimported. The set-based
+namespace described here remains an architectural target, not an implemented
+feature.
 
 ## Device messages and ObjectFIFO
 
