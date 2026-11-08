@@ -1,5 +1,13 @@
 # Object ABI migration roadmap
 
+> **Network status correction (2026-11-08):** the dated UDP/TCP provider
+> descriptions below are migration history. T13 disabled native IPv6 startup
+> and OBJ TCP/UDP opens; retained symbols are not a supported network service
+> or a compatibility obligation. The current raw Device ABI is documented in
+> [DEVICE-ABI](DEVICE-ABI.md). Future userspace IPv6 and externally provisioned
+> ESP are PLANNED; [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) defines the target without
+> adding a syscall/provider or proving an implemented protocol service.
+
 **Status:** native Pipe/UART/KBD provider and USB metadata-service candidate,
 2026-11-05 (task USB `2de71075e8c54f44afef60a4792857a9`, following the
 Pipe/UART/KBD round `4900c68069db4b41aab89e4ebca79b3a`, the UDP6 round

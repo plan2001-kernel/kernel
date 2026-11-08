@@ -1,5 +1,13 @@
 # Plan2001-O kernel API/ABI: terminology and boundary contract
 
+> **Network status correction (2026-11-08):** the dated UDP/TCP provider
+> descriptions below are migration history. T13 disabled native IPv6 startup
+> and OBJ TCP/UDP opens; retained symbols are not a supported network service
+> or a compatibility obligation. The current raw Device ABI is documented in
+> [DEVICE-ABI](DEVICE-ABI.md). Future userspace IPv6 and externally provisioned
+> ESP are PLANNED; [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) defines the target without
+> adding a syscall/provider or proving an implemented protocol service.
+
 **Status:** normative vocabulary and migration rules for **new Plan2001-O code**; proposed API/ABI design, **not an implemented or frozen binary ABI**.
 **Volatile-object implementation addition:** the RAM-only scope-qualified object
 identity, rights-bearing handles and ObjectFIFO TEE channel are specified in

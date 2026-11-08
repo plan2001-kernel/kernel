@@ -230,49 +230,83 @@ Accordingly:
 
 The target environment is a typical amd64 machine with RAM, persistent disk and network connectivity. Desktop use exposes available display and keyboard facilities; server use exposes remote control over the existing network path. The first user interface may be a command line or REPL. A new desktop GUI, remote protocol or replacement network stack is not a prerequisite.
 
-### Native network profile: IPv6-only (accepted scope decision)
+### Network profile: userspace IPv6 and externally provisioned ESP
 
-**Normative target for Plan2001-O's native O-only kernel. The canonical amd64 `pc64` kernel links the native IPv6-only path; see [STATUS.md](STATUS.md) for verified scope and limits.** The native network architecture MUST support **IPv6 only**. IPv4 is classified as a **legacy compatibility protocol for this project**; it is not a requirement of the new kernel C network API, userspace ABI, or O-only server use cases. This project-specific classification does not mean that IPv4 has been deprecated by the IETF or is intrinsically insecure.
+**Normative target, updated 2026-11-08; implementation status remains separate.**
+T13 raw Ethernet is merged with an emulated gate PASS; physical NICs were NOT
+RUN. Kernel native IPv6 startup and OBJ TCP/UDP opens are disabled; inherited
+protocol code remains linked. T14 userspace IPv6/ICMPv6/Neighbor Discovery and
+T15 userspace ESP are **PLANNED**, not implemented by this specification.
 
-- The native networking profile MUST use IPv6 for IP addressing, routing, TCP, UDP, and any exposed IP network operations. Ethernet and other suitable link-layer drivers remain usable; IPv6's essential ICMPv6/Neighbor Discovery behavior MUST be preserved. Security policy MUST treat IPv6, NDP, and Router Advertisements as attack surfaces; IPv6-only is not a firewall or a security guarantee.
-- The **final IPv6-only O-only kernel** MUST NOT link executable IPv4 packet-processing, IPv4 routing, or ARP protocol implementations. Incoming Ethernet IPv4 frames and IPv4 payloads from virtual/tunnel interfaces MUST NOT be accepted into the native IP datapath. Shared, genuinely IP-version-independent C machinery MAY be retained if it does not enable IPv4 functionality.
-- The native kernel API and userspace ABI MUST NOT introduce IPv4 address types, IPv4 socket compatibility modes, IPv4-mapped IPv6 fallback semantics, or implicit translation to IPv4. NAT64, DNS64, 464XLAT, and other IPv4 interworking mechanisms are outside the native PoC's scope; an external gateway is a possible separate integration choice, not part of this kernel.
-- If WireGuard is enabled in the native profile, both its **outer UDP transport** and its **inner IP packets** MUST use IPv6. This requirement does not mandate implementing WireGuard in the first IPv6 networking milestone.
-- **Compatibility boundary:** inherited dual-stack source and historical reports MAY remain in archived source snapshots. IPv4/ARP functionality there MUST NOT be mistaken for a requirement to retain it in the canonical O-only profile.
-- **Migration and evidence:** intermediate development profiles MAY temporarily link inherited IPv4 code while native Ethernet, IP, and UDP/TCP interfaces are disentangled. Such builds MUST be labeled transitional, not "IPv6-only". Final acceptance requires both source/linked-symbol analysis and live IPv6 networking tests, including a negative test that IPv4 frames and IPv4 connection requests cannot succeed. Do not delete shared code or weaken a verified legacy configuration to satisfy this policy by superficial symbol removal.
+- IP processing in the native PoC MUST use IPv6. IPv4 is a legacy
+  compatibility protocol for this project, not a requirement for the kernel
+  API, userspace ABI or O-only server. This project decision does not imply
+  IETF deprecation or intrinsic insecurity of IPv4.
+- Drivers and authorized raw devices remain in the kernel; protocols run
+  primarily in userspace over the existing T13 Device ABI/ObjectFIFO path.
+  The raw carrier is protocol-independent; an Ethernet frame is not by itself
+  an authorized IPv4/IPv6 protocol service. No protocol-specific kernel
+  object/FIFO provider, new syscall, pathname/Chan/fd bridge or extra protocol
+  daemon is required.
+- T14 MUST separately demonstrate basic IPv6, addressing, ICMPv6 and ND.
+  Neighbor Discovery and Router Advertisements remain security attack
+  surfaces; IPv6-only is not a firewall. UDP and TCP are independent later
+  userspace objectives, not prerequisites for ESP.
+- The final kernel target MUST NOT link executable IPv4 processing/routing or
+  ARP. Existing linked residue is not proof this cleanup is complete; shared
+  IP-independent machinery MAY remain. No IPv4 address/socket compatibility,
+  mapped fallback, NAT64/DNS64/464XLAT or implicit translation is mandated.
+- The newer decision supersedes legacy-network preservation clauses: assess
+  actual boot/MPY/driver dependencies, then remove or disable unused protocol
+  paths. Do not retain an unused stack for hypothetical compatibility or run
+  kernel and userspace responders for the same address/traffic. Historical
+  code/reports are evidence, not an obligation to restore old services.
 
-This is a **product scope decision**, not an instruction to modify the storage
-subsystem or the current SD/native-disk implementation. It is implemented
-through separately reviewed networking work. The current implementation status
-remains documented in [STATUS.md](STATUS.md), and naming/API boundaries are
-governed by [KERNEL-API-ABI.md](KERNEL-API-ABI.md).
+The normative [ESP-SA-BUNDLE](ESP-SA-BUNDLE.md) defines the minimal future
+T15 proof: two IPv6 hosts, one SA pair, IPv6 Next Header 50, AES-128-GCM-16,
+transport mode preferred, bidirectional protected ICMPv6 echo sufficient.
+Existing ESP/AES-GCM code is potential reuse material, not demonstrated
+userspace ESP. T16 USB/Wi-Fi remains independent.
 
-### Future SEALED network mode (proposed, not implemented)
+**IKEv2 is removed entirely from the active PoC and future target.** No
+negotiation/handshake, PSKs, UDP/500 service, IKE daemon, key-exchange
+implementation or deferred IKE migration is planned. Historical IKE evidence
+must not reinstate that target.
 
-A later SEALED mode may restrict ordinary IPv6 traffic to an authenticated
-tunnel. It is **not implemented**; the current kernel is NORMAL-only and the
-existing Next Header 253 fixture is an unauthenticated experiment, never
-authenticated inner IP. Any future implementation must make these decisions at
-explicit boundaries:
+Provisioning MUST use one explicit versioned bounded binary GE/O object,
+supplied to both machines over a pre-existing external **authenticated and
+confidential channel**. Remote secret transport, peer authentication and key
+generation/distribution infrastructure are outside this PoC. Object transfer
+is not key exchange. OIDs are local to each Space and may differ; a bare OID
+is not a capability and local ObjectFIFO does not secure interhost delivery.
 
-- **Per-interface mode.** Mode belongs to a physical `Ether`/`Ipifc` pair, not a
-  single accidental global switch.
-- **Ingress before IP/ICMP processing.** Check mode before `ipiput6` and before
-  ICMPv6 error generation; allow only specified NDP/PMTU control and the
-  dedicated transport.
-- **Egress before NIC queue admission.** Check mode before queueing into
-  `Ether.oq`; ordinary IPv6 transmit must fail explicitly.
-- **Forwarding.** Drop ordinary forwarding; outer tunnel packets are handled by
-  the future service, not forwarded as normal IPv6.
-- **Queue invalidation.** An atomic mode/generation publication must invalidate
-  stale queued frames in both directions.
-- **Link state.** A logically unavailable SEALED interface must remain
-  distinguishable from a physical link-down state.
-- **Failure.** Fail closed: a crashed userspace tunnel must not silently reopen
-  NORMAL operation; boot/operator recovery needs a separate design.
-- **Tunnel trust.** Authenticate before inner IPv6 injection; separate outer and
-  verified inner packets; anti-replay, peer/prefix checks, loop avoidance,
-  bounded queues, full IPv6 validation, PMTU and rate limits are required.
+The two unidirectional SAs have four secret components: two independent
+16-byte AES keys and two 4-byte salts, **40 secret bytes total**. The complete
+object also requires separate 32-bit SPIs, IPv6 addresses/selectors,
+mode/profile/version, session/key-generation identity, validity/lifetime and
+policy. Each host maps TX/RX oppositely. Mutable sequence/replay state is
+separate; it MUST NOT turn provisioning into a reusable live-state snapshot.
+
+### Protected traffic policy (PLANNED, not implemented)
+
+Future ESP activation MUST validate the whole bundle and local authority,
+authenticate tags before releasing plaintext, enforce a bounded anti-replay
+window and reject peer/SPI/policy mismatches. Necessary ND stays available
+under an explicit narrow control exception; it must not bypass protection for
+echo/data. Protected traffic MUST fail closed on missing key, invalid input,
+expiry, controller/service crash, restart or link failure, without plaintext
+downgrade. No legacy kernel service may provide a fallback.
+
+AES-GCM key/salt/explicit-IV reuse is forbidden, including after restart.
+Consumed bundles MUST NOT reactivate; each new session requires fresh unique
+material, bounded counters/lifetimes and verified freshness, as specified in
+[ESP-SA-BUNDLE](ESP-SA-BUNDLE.md). Secrets must be discarded securely where
+possible; GE/O persistence, snapshots and MPY GC are not an implemented secure
+store or guaranteed erasure facility. Manual provisioning is an experimental
+PoC: RFC 4106 requires automatic key management, so this design must not claim
+full RFC 4106 compliance or production security. The caveat authorizes no
+key-exchange implementation. Future coding and validation require separate
+assignment; no source or storage-format change is authorized by this document.
 
 Coding work should favor (in order) direct reuse of existing working code, a small adaptation, then a new narrowly scoped component. Keep the existing octet-based representation and on-disk format until a concrete experiment justifies change. Do not replace inherited Plan2001/9front subsystems simply because their terminology differs from the manifesto.
 

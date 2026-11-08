@@ -277,8 +277,9 @@ prerequisites. Do not add other test infrastructure to the tree.
 - [STATUS](docs/STATUS.md): current verification and the single set of commands.
 - [SYSCALL-T8-MULTIPROCESS](docs/SYSCALL-T8-MULTIPROCESS.md): T8 multi-process
   MicroPython result (PASS, 2026-11-06).
-- [ROADMAP-T8-T16](docs/ROADMAP-T8-T16.md): T8 and T9 PASS; T10–T16 planned
-  ObjectFIFO, device, network and userspace-protocol stages; not implemented.
+- [ROADMAP-T8-T16](docs/ROADMAP-T8-T16.md): T8–T13 recorded PASS within their
+  documented gates; T13 is merged (emulated gate only, physical NIC NOT RUN).
+  T14 userspace IPv6, T15 provisioned ESP and T16 device work remain PLANNED.
   See [SYSCALL-LEDGER](docs/SYSCALL-LEDGER.md) for the accepted T9 audit.
 - [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md): the host source layout and
   its distinction from future OID-addressed source objects.
@@ -296,15 +297,34 @@ prerequisites. Do not add other test infrastructure to the tree.
 - [QEMU-O-TESTING](docs/QEMU-O-TESTING.md): the two sanctioned disposable
   QEMU/OVMF native GE/O boot and persistence scripts.
 
-## Minimal IKEv2 / ESP
+## Planned userspace ESP with external provisioning
 
-IKE runs as the native userspace `build/gcc/iked.elf`; the kernel handles
-AES-128-GCM ESP (IPv6 protocol 50). A bootstrap-granted private Pipe carries
-ESP control and entropy requests using existing syscall slots. There are no
-default PSKs. See [MINIMAL-IKEV2](docs/MINIMAL-IKEV2.md) for builds, launch,
-the exact profile and explicitly deferred operational requirements. The
-canonical tree contains only the kernel ESP datapath and its AES-GCM subset;
-the `iked` program and full user crypto are in the companion bundle.
+The [ESP-SA-BUNDLE specification](docs/ESP-SA-BUNDLE.md) is the normative
+network-security target. T14 first demonstrates userspace IPv6/ICMPv6/Neighbor
+Discovery over the merged T13 raw Ethernet/Device ABI/ObjectFIFO path. Future
+T15 adds one two-host ESP SA pair (IPv6 NH=50), AES-128-GCM-16, preferably
+transport mode; protected echo suffices. UDP/TCP are independent objectives.
+
+A versioned bounded GE/O object is supplied to both machines through an
+external authenticated/confidential channel. It carries two directional
+keys and salts (four secrets, 40 bytes), separate SPIs, IPv6 selectors,
+profile, generation, lifetime and policy. Local OIDs may differ and are not
+capabilities; local FIFO delivery is not secure interhost transport. No key
+exchange or distribution infrastructure is part of the PoC.
+
+IKEv2 is removed entirely from the active and future target: no handshake,
+PSKs, UDP/500 service, IKE daemon or deferred migration. The historical
+[MINIMAL-IKEV2](docs/MINIMAL-IKEV2.md) report remains NON-TARGET evidence.
+Existing kernel ESP/AES-GCM and its old control service have not been removed
+by this docs task and do not demonstrate userspace ESP. Native IPv6 startup
+and OBJ TCP/UDP opens were disabled in T13.
+
+Require tag verification, anti-replay, fresh unique material for every new
+session, no nonce reuse or consumed-bundle reactivation across restart, and
+fail closed without plaintext fallback. Manual AES-GCM provisioning is
+experimental; RFC 4106's automatic-key-management requirement prevents a
+full-compliance or production-security claim. T14/T15 implementation remains
+PLANNED. Here ESP means IPsec, not the UEFI EFI System Partition.
 
 ## Limits
 
