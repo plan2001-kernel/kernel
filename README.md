@@ -1,344 +1,49 @@
-# Plan2001-O
+# Plan 2001-kernel
 
-<p align="center">
-  <img src="assets/plan2001-o-mascot.svg" alt="Plan2001-O mascot: a rabbit playing the banjo" width="280">
-</p>
+Plan 2001-kernel is an **experimental object-oriented operating-system
+kernel** under development for AMD64 and ARM64. Persistent GE/O storage
+uses SpaceIDs and OIDs rather than a native hierarchical filesystem.
+Object handles and ObjectFIFO provide capability-aware runtime and device
+interfaces. MicroPython is the primary userspace proof of concept.
 
-**Project mascot:** the banjo-playing rabbit.
+The current **AMD64** kernel has a working full-system path, including GE/O
+and MicroPython. The **ARM64** implementation has an early UEFI/QEMU boot
+foundation, shared BootInfo handoff, console, memory initialization and timer
+interrupts, but is not yet a full-system port. Neither architecture is an
+exclusive long-term target.
 
-**Plan2001-O is an experimental operating system for the amd64 architecture.**
+## Build and test
 
-Plan2001-O is a small, byte-oriented operating-system proof of concept:
-persistent Space occurrences (*olios*), contextual objects, observations and,
-eventually, native relations, built on the existing Plan2001/9front code and
-conventional amd64 hardware. amd64 is the only supported and intended target.
-
-The [Finnish manifesto](docs/OLIO-OBJEKTI-MANIFESTI.md) keeps the philosophical
-meaning of *olio* and *object* separate from this implementation. The
-[general software specification](docs/GENERAL-SOFTWARE-SPECIFICATION.md)
-describes the practical computer. This PoC deliberately uses ordinary bytes,
-64-bit OIDs and conventional amd64 hardware; the manifesto does not mandate
-exotic storage or hardware.
-
-NS2–NS4 object namespaces and kernel-authorized GE relation queries are described
-in [NS integration](docs/NS-INTEGRATION.md), with machine-readable results in
-[NS verification](docs/NS-VERIFICATION.json). The weekend test harnesses are
-retained in the separate companion bundle (`../Plan2001-O-weekend-tests/plan2001`);
-they are not build or boot prerequisites of this canonical tree.
-
-Optional [CBOR and O-Envelope v1](docs/CBOR-O-ENVELOPE.md) encode application
-payloads without changing GE/O storage or namespace authorization. Its host and
-native suites, including the independent `cbor2` reference check, live in the
-same companion bundle.
-
-[UJ1 Aino user journey](docs/UJ1-USER-JOURNEY.md) integrates native editing,
-TinyCC compilation, isolated TCP6/HTTP processes, publication and reboot
-persistence. Its userspace programs and two-boot harness are in the companion
-bundle; per-case results are in [UJ1 verification](docs/UJ1-VERIFICATION.json).
-
-## Current system
-
-One amd64 `pc64` configuration, booted from a normal ESP through GRUB:
-
-```text
-UEFI -> GRUB -> Clang 19/LLD PE32+ EFI loader (bootx64.efi)
-     -> GCC 14 ELF kernel (9pc64.elf, no embedded interpreter)
-     -> native GE/O volume on partition 5, selected by PARTUUID
-     -> OVOLOPEN / OBJOPEN(ObjOpenSpace) / OEXECUTE
-     -> GCC 14 MicroPython ELF stored in GE/O at OID 0x4f45584543000003
-     -> restored init Space, init.run(), GE/O commit, interactive REPL
-```
-
-- **Kernel:** GCC 14, built as an ELF64 `ET_EXEC` image. The kernel contains no
-  MicroPython bytes.
-- **NS1 process namespaces:** the existing Pgrp/OContext lifecycle is audited,
-  with a kernel-group initialization race corrected and native SMP regressions
-  for sharing, copies, empty views, authorization, OSPAWN and exec. See
-  [NS1 design and tests](docs/NS1-PROCESS-NAMESPACES.md).
-- **Loader:** Clang 19/LLD PE32+ EFI application. It reads `plan9.ini` and the
-  kernel from its own ESP directory.
-- **MicroPython:** an independently built GCC 14 freestanding ELF, stored byte
-  for byte as a normal O object. The kernel loads it through native `OEXECUTE`.
-- **GE relations R1:** the `ge` module creates persistent content/tag objects
-  and directed OID relations, with multi-tag AND queries. Same-OID/content
-  persistence is verified across two real VM boots. See
-  [GE relations R1](docs/GE-RELATIONS-R1.md).
-- **TinyCC experiment:** native userspace C/assembler/linker port, verified
-  compiling and executing real Space 2 objects inside QEMU. See
-  [TinyCC and Space 2](docs/TINYCC-SPACE2.md) for the bounded port and test.
-- **Storage:** native GE/O v1, reamed by the repository's real GE/O reamer
-  (`ge/format/ream.c::reamo()`) built as a Linux GCC host program, not by a
-  Linux header writer or a simplified Python image writer. The `.mpy` seed
-  is compiled on Linux by the same-version `mpy-cross`. `ge/format/` now
-  contains only the eight O formatter/seed units and their two headers; the
-  inherited GEFS FS/9P server sources have been removed.
-- **Runtime:** `runtime/` contains the live GCC libc, crypto, IPv4, AML and FIS
-  members used by the kernel, MicroPython or the formatter, plus the kernel
-  AES-GCM subset, GE relations and optional CBOR library. Unused 9front
-  sources, Ken C amd64 assembly, `ucd` generators/data and mkfiles have been
-  removed. `runtime/abi/sys.h` adds the weekend slots 101–113; earlier numbers
-  and layouts are unchanged.
-- **Canonical boot:** `oboot=server`. The kernel bootstrap does not run `oinit`
-  and does not mount a filesystem root. `oinit` and `kbdfs` are historical
-  bootstrap helpers; the canonical boot path does not require them and the
-  source tree no longer carries their 9front userland sources.
-
-The N10.1 GCC kernel and Clang UEFI loader were booted on the physical Dell
-Precision 7520 from the single `Plan2001-O` GRUB entry and reached an
-interactive `>>>` MicroPython REPL. The earlier pre-cleanup binary also
-demonstrated PS/2 keyboard input, `dir()`, `import space`, `space.info()` and
-real GE/O commits. After N11.HW1 installed that configuration, the owner
-reported three physical boots with a working REPL and a REPL-assigned
-variable that survived across them (owner-reported, not an agent-read log).
-N11.7 was verified only in QEMU on a fresh disposable O image; it has not yet
-been installed or booted on the physical machine.
-
-## The `plan9.ini` contract
-
-`plan9.ini` is a line-oriented file. **Every line, including the last, must end
-in LF (`0x0a`).** There is no implicit final line.
-
-The canonical content is:
-
-```ini
-bootfile=/EFI/plan2001-gcc/9pc64.elf
-oboot=server
-obootvol=PARTUUID=<live-p5-partuuid>
-obootrepl=1
-*ncpu=1
-```
-
-The EFI loader rejects a nonempty final line that lacks LF and prints exactly
-`plan9.ini: missing final newline`; it does not silently drop the last setting
-or fall back to another CPU count or boot profile. `tools/gcc-o-install.sh`
-writes the file directly with a trailing LF and verifies the staged and
-installed bytes (including the final byte) before reporting success.
-
-### Optional boot selectors and CPU placement
-
-The default line set above needs no selectors. The installer and kernel also
-accept these optional lines:
-
-```ini
-obootexec=0x0          # canonical MicroPython, or a published 64-bit OID
-obootcpu=2             # exact logical CPU for the first user process
-*ncpu=4                # requested maximum number of logical CPUs
-```
-
-- `obootexec` absent or `0x0` selects the canonical MicroPython executable
-  `0x4f45584543000003` in the existing `init` Space. **`0x0` is a bootstrap
-  selector alias, not a stored object at OID 0.** A nonzero value selects that
-  published executable by its real `(Space, OID)` identity; a malformed,
-  overflowing, missing or non-executable value is a hard boot error with no
-  silent fallback to MicroPython. Canonical MicroPython keeps its
-  `micropython -O <volume> -S init -I|-N` arguments; another executable
-  receives the generic `oexec <volume> init` convention.
-- `obootcpu` is a kernel `Mach.machno` index (0 is the boot CPU), not a
-  firmware APIC ID or a physical core number. When present it is a strict
-  single-CPU **affinity** for the first user process and survives `OEXECUTE`.
-  It is not an exclusive CPU reservation: interrupts, kernel work and other
-  processes may still share that CPU. The index must be below `*ncpu`, online,
-  and past its per-CPU scheduler handoff; an offline, out-of-range or
-  not-ready CPU is rejected instead of being clamped or moved to CPU 0.
-- `*ncpu` requests a maximum of 1..128 logical CPUs (`MAXMACH`); it does not
-  prove that every requested CPU came online. `tools/gcc-o-install.sh` rejects
-  `--ncpu` outside 1..128, `--obootcpu` outside 0..127 and `--obootcpu >=
-  --ncpu` before any ESP or GRUB access.
-
-The boot log reports the actual CPU at the first userspace dispatch, for
-example `n13: firstuser pid=... cpu=2 requested=2`, so the effective placement
-is directly observable. The same online-and-scheduler-ready rule gates the
-exact CPU requested by `OSPAWN`; see [N13-INTEGRATION](docs/N13-INTEGRATION.md)
-for its grant, view, budget and network contracts.
-
-## Build
-
-Host tools: GCC 14, Clang 19 and LLD (`clang-19`, `lld-link-19`), Python 3,
-GNU make and glibc. The GE/O formatter and the `.mpy` compiler are ordinary
-Linux host programs; no 9front VM, Ken C `6c`/`6l` or Plan 9 `mk` is used.
+For the current AMD64 implementation (requires suitable GCC/binutils and
+Clang/LLD toolchains):
 
 ```sh
-# independent native artifacts
-tools/build-gcc.sh --kernel -j 24       # build/gcc/9pc64.elf
-tools/build-efi-gcc.sh -j 24            # build/gcc/bootx64.efi
-tools/build-mpy-gcc.sh -j 24            # build/gcc/micropython.elf
-
-# native Linux host preparation tools: the real ge/format reamer and mpy-cross
-tools/build.sh                          # WHAT=kernel is accepted as an alias
+tools/build-gcc.sh --kernel -j 8
+tools/build-efi-gcc.sh -j 8
+tools/build-mpy-gcc.sh -j 8
+tools/qemu-o-boot.sh
 ```
 
-The kernel build checks that no `mpelf`/`mpelf_end` payload is present. The
-loader build verifies the PE32+ EFI subsystem. These are normal build commands,
-not a test framework.
-
-### Experimental ARM64 boot foundation
-
-A separate, experimental AArch64 boot tree proves that the existing BootInfo
-v1 handoff and the shared `oplanboot` early-boot module work on a second ISA.
-It is not a port of the amd64 kernel and is not a supported target yet.
+For the experimental AArch64 early-boot implementation:
 
 ```sh
-tools/build-arm64.sh -j 8           # build/arm64/9karm64.elf
-tools/host/build-efi-arm64.sh -j 8  # build/arm64/bootaa64.efi
-tools/qemu-arm64-boot.sh            # build both, boot QEMU virt, check markers
-QEMU_ARM64_GIC=3 tools/qemu-arm64-boot.sh   # the same gate on GICv3
+tools/build-arm64.sh -j 8
+tools/host/build-efi-arm64.sh -j 8
+tools/qemu-arm64-boot.sh
+QEMU_ARM64_GIC=3 tools/qemu-arm64-boot.sh
 ```
 
-The QEMU `virt` boot reaches EL1, enables its own MMU, validates the same
-BootInfo blob as amd64, reserves the kernel image and blob before handing out
-zeroed 4 KiB physical pages, and prints `PLAN2001-O: ARM64 BOOT: shared kernel
-initialization reached`; the EL1 timer then delivers three interrupts. The gate
-passes with both GICv2 and GICv3 and checks the reported version. Drivers,
-scheduler, virtual memory, GE/O, syscalls, userspace and networking are **not**
-implemented for ARM64. See [architecture support](docs/ARCHITECTURE-SUPPORT.md)
-for the exact scope, limits and verification record.
+These commands require appropriate host dependencies. A build or QEMU
+early-boot PASS is not a claim of physical-hardware validation.
 
-## Development
+## Current documentation
 
-The canonical source is [plan2001-kernel/kernel](https://github.com/plan2001-kernel/kernel).
-Work can be done in Codex Cloud, Android Termux/OpenCode, or another suitable
-environment. Follow [DEVELOPMENT-WORKFLOW](docs/DEVELOPMENT-WORKFLOW.md):
-implement the task, run available checks, report their results, and submit a
-pull request for review. Do not merge without explicit authorization. An ARM64
-Termux host need not run amd64 kernel tests natively.
+- [Architecture and architecture maturity](docs/ARCHITECTURE.md)
+- [GE/O persistent object storage](docs/OBJECT-STORAGE.md)
+- [Kernel interface and ObjectFIFO principles](docs/KERNEL-INTERFACE.md)
+- [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
 
-## Ream, seed and install
-
-Reaming/seed and ESP installation are separate operations.
-
-```sh
-# Fresh O image, exact p5 logical size, through the real GE/O reamer.
-tools/gcc-ovol-ream.sh --image build/fresh-p5.img 15276
-
-# Read-only identity/size/mount/holder preflight.
-tools/gcc-ovol-ream.sh --plan --device /dev/nvme0n1p5 \
-  --partuuid <live-p5-partuuid> --image build/fresh-p5.img
-
-# Authorized partition-only write, fsync, full readback and read-only inspect.
-sudo -n tools/gcc-ovol-ream.sh --install --device /dev/nvme0n1p5 \
-  --partuuid <live-p5-partuuid> --image build/fresh-p5.img
-```
-
-The device is never guessed. The tool requires partition 5, a matching live
-PARTUUID, the expected p5 size, an unmounted partition and no holders. It writes
-only that partition; it never touches the GPT, ESP, other partitions, firmware
-or the old demo.
-
-Install or update the ESP files and the single GRUB entry:
-
-```sh
-# read-only plan: exact bytes, final-byte check and intended GRUB changes
-tools/gcc-o-install.sh --plan --device /dev/nvme0n1p5 \
-  --partuuid <live-p5-partuuid>
-
-# create the ESP directory if needed, or update an existing one
-sudo -n tools/gcc-o-install.sh --bootstrap --device /dev/nvme0n1p5 \
-  --partuuid <live-p5-partuuid>
-sudo -n tools/gcc-o-install.sh --install --device /dev/nvme0n1p5 \
-  --partuuid <live-p5-partuuid>
-
-# read-only check of installed bytes, plan9.ini and the one GRUB entry
-tools/gcc-o-install.sh --verify --device /dev/nvme0n1p5 \
-  --partuuid <live-p5-partuuid>
-```
-
-The one visible GRUB entry is **`Plan2001-O`** (id `plan2001-o`); it chainloads
-`/EFI/plan2001-gcc/BOOTX64.EFI`. The historical `42_plan2001` and
-`43_plan2001_o` scripts are made non-executable, so later `update-grub` runs
-cannot bring their entries back; their files and old ESP directories are left
-on disk. `44_plan2001_gcc` is the canonical single-entry script. The installer
-generates and validates a candidate `grub.cfg` before replacing the active
-one, keeps Debian as the default (`set default="0"`), preserves every
-non-Plan2001 entry, and never changes `/etc/default/grub`, Debian's own GRUB
-scripts or the UEFI boot order.
-
-After reaming p5, install the ESP files again. Reaming does not modify the ESP,
-and ESP installation does not format or write p5.
-
-## Retained tools
-
-The short `tools/*` names are compatibility wrappers; implementations live in
-`tools/host/`.
-
-```text
-tools/build-gcc.sh            GCC kernel build
-tools/build-efi-gcc.sh        Clang/LLD EFI loader build
-tools/build-mpy-gcc.sh        GCC MicroPython ELF build
-tools/build.sh                native Linux formatter + mpy-cross host build
-tools/gcc-ovol-ream.sh        ream/seed image and write/verify p5
-tools/mkovol                  GE/O image formatter/seeder
-tools/oinspect.py             read-only O volume inspection
-tools/gefslog                 read-only GE/O analysis library used by oinspect
-tools/gcc-o-install.sh        canonical ESP/GRUB/plan9.ini installer
-tools/qemu-o-boot.sh          one disposable QEMU/OVMF native GE/O boot
-tools/qemu-o-persist.sh       two-boot same-disk GE/O persistence check
-```
-
-See [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md) for the source tree and
-[QEMU-O-TESTING](docs/QEMU-O-TESTING.md) for the two sanctioned QEMU scripts.
-The repository intentionally retains **no other test harnesses, broad QEMU
-smoke suites, fixture binaries/generators or debug boot selectors**. The
-sanctioned scripts build or reuse the canonical artifacts, write only
-disposable regular files under `build/`, and are not build or boot
-prerequisites. Do not add other test infrastructure to the tree.
-
-## Documentation
-
-- [STATUS](docs/STATUS.md): current verification and the single set of commands.
-- [SYSCALL-T8-MULTIPROCESS](docs/SYSCALL-T8-MULTIPROCESS.md): T8 multi-process
-  MicroPython result (PASS, 2026-11-06).
-- Recorded stage results: T8–T13 recorded PASS within their
-  documented gates; T13 is merged (emulated gate only, physical NIC NOT RUN).
-  T14 minimal userspace IPv6 passes its emulated gate
-  ([result](docs/T14-IPV6-RESULT.md)); T15 passes its minimal ESP integration
-  gate ([result](docs/T15-ESP-RESULT.md)); T16 common USB/Ethernet audit and
-  fresh verification PASS ([result](docs/T16-DEVICE-RESULT.md)), with no Wi-Fi.
-  See [SYSCALL-LEDGER](docs/SYSCALL-LEDGER.md) for the accepted T9 audit.
-- [REPOSITORY-LAYOUT](docs/REPOSITORY-LAYOUT.md): the host source layout and
-  its distinction from future OID-addressed source objects.
-- [O-FORMAT](docs/O-FORMAT.md): implemented GE/O storage and native contract.
-- [KERNEL-API-ABI](docs/KERNEL-API-ABI.md): kernel API/ABI boundaries.
-- [OBJECT-MODEL](docs/OBJECT-MODEL.md): object/file/Python boundaries.
-- [GENERAL-SOFTWARE-SPECIFICATION](docs/GENERAL-SOFTWARE-SPECIFICATION.md):
-  practical implementation design.
-- [PRODUCTION-BOOT-AND-AUTHORITY](docs/PRODUCTION-BOOT-AND-AUTHORITY.md):
-  proposed server/embedded profile and authority boundaries.
-- [OLIO-OBJEKTI-MANIFESTI](docs/OLIO-OBJEKTI-MANIFESTI.md): philosophical manifesto.
-- [LEGACY-DEPENDENCIES](docs/LEGACY-DEPENDENCIES.md): inherited dependency inventory.
-- [GCC-PORT](docs/GCC-PORT.md) and [GCC-HW-BOOT](docs/GCC-HW-BOOT.md): GCC build
-  and physical-boot howto.
-- [QEMU-O-TESTING](docs/QEMU-O-TESTING.md): the two sanctioned disposable
-  QEMU/OVMF native GE/O boot and persistence scripts.
-
-## Minimal userspace ESP interface example (T15, emulated gate PASS)
-
-The owner's later [T15 scope](docs/ESP-SA-BUNDLE.md) replaces the expansive
-key-bundle/lifecycle proposal with a small integration test: userspace ESP
-transport mode (IPv6 NH=50), two fixed distinct directional TEST-ONLY
-AES-128-GCM SAs and bidirectional encrypted echo over existing T13 Device
-ABI/ObjectFIFO and T14 IPv6. Necessary ND may remain ordinary ICMPv6; intended
-protected echo must not use a plaintext fallback. Existing AES-GCM primitives
-are reused in the user process without a kernel ESP service or new syscall.
-
-No persistent key object/bundle, lifecycle, replay window, anti-rollback,
-rekeying, expiry guarantees, secure distribution/storage or production VPN
-is part of this task. Fixed demo credentials/counters are for disposable tests
-only, with no security across restart/reuse or full RFC compliance claim.
-IKEv2 remains outside the target. The
-[old expansive design](docs/history/ESP-SA-BUNDLE-2026-11-08.md) and
-[MINIMAL-IKEV2](docs/MINIMAL-IKEV2.md) remain historical, not active requirements.
-T14 [user/ipv6](user/ipv6/README.md) retains its recorded emulated PASS;
-T15 [result](docs/T15-ESP-RESULT.md): 13 guest / 43 peer assertions, T13/T14
-regressions and normal boot/commit/REPL PASS. Physical NIC NOT RUN.
-T16 is independent. Here IPsec ESP is unrelated to the UEFI EFI System Partition.
-
-## Limits
-
-A file is an O object's finite byte sequence; it needs no directory hierarchy,
-pathname or Unix `stat` record. GE/O currently stores versioned opaque byte
-values and a flat `init` catalog. The Python persistent graph is still committed
-as one `OID_GRAPH` object, not as independently indexed native relations.
-General executable-object loading, native IPC/remote-object protocol,
-encrypted storage, verified boot and production authority are not implemented.
-Inherited `eve`/`hostowner` behavior and the legacy namespace/`Dev` machinery
-remain where still linked; see [LEGACY-DEPENDENCIES](docs/LEGACY-DEPENDENCIES.md).
+Read [AGENTS.md](AGENTS.md) for coding instructions. Source code and tests
+are the authority for implemented behavior. Earlier experiments, T-stage
+audit logs and removed proposals are available in Git history, not in the
+working documentation set.
