@@ -56,23 +56,16 @@ enum {
 	Vconsoleslotmax = 4,
 };
 
-/* The ABI record is copied verbatim, so the on-wire layout must stay
- * byte-compatible with the legacy Usbentry from include/usbctl.h. */
-_Static_assert(sizeof(ObjUsbEntry) == sizeof(Usbentry),
-	"ObjUsbEntry must match Usbentry");
-_Static_assert(sizeof(ObjUsbEntry) == OBJ_USB_ENTRY_SIZE,
-	"OBJ_USB_ENTRY_SIZE must match ObjUsbEntry");
 _Static_assert(OBJ_USB_EP_DATA == USBDATA && OBJ_USB_EP_CTL == USBCTL,
-	"ObjUsbEpReq kinds must match the usbcore values");
+	"device option kinds must match the usbcore values");
 _Static_assert(OREAD == USBOREAD && OWRITE == USBOWRITE && ORDWR == USBOrdwr,
-	"ObjUsbEpReq modes must match the usbcore values");
-_Static_assert(OBJ_USB_MODE_READ == OREAD && OBJ_USB_MODE_WRITE == OWRITE &&
-	OBJ_USB_MODE_RDWR == ORDWR,
-	"OBJ_USB_MODE_* must match the open modes");
-
-_Static_assert(sizeof(ObjDeviceEntry) == 32, "device discovery ABI");
-_Static_assert(sizeof(ObjOpenDeviceReq) == 24, "device open ABI");
-_Static_assert(sizeof(ObjDeviceResult) == 16, "device completion ABI");
+	"device option modes must match the usbcore values");
+_Static_assert(sizeof(ObjDeviceEntry) == 36, "device discovery ABI");
+_Static_assert(sizeof(ObjDeviceOpenOptions) == 16, "device options ABI");
+_Static_assert(sizeof(ObjOpenDeviceReq) == 32 + OBJ_DEVICE_OPTMAX,
+	"device open ABI");
+_Static_assert(OBJ_DEVICE_OPTMAX >= sizeof(ObjDeviceOpenOptions),
+	"device option bound");
 
 typedef struct Vobj	Vobj;
 typedef struct Vmsg	Vmsg;
@@ -1883,26 +1876,15 @@ uartmodebits(int mode)
 	return 0;
 }
 
-int
-vobjuartopenrights(int port, int mode, uvlong rights, VobjId *id)
+/* The catalog has already validated authority, selector, mode and rights.
+ * Acquire the port only after those checks so a refused open has no effect. */
+static int
+vobjuartdevice(int port, int mode, uvlong rights, VobjId *id)
 {
 	Vobj *o;
 	Vuart *vu;
-	int h, defr, hrights;
+	int h, hrights;
 
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	if(!iseve())
-		error(Eperm);
-	if(mode != OREAD && mode != OWRITE && mode != ORDWR)
-		error(Ebadarg);
-	defr = uartmodebits(mode);
-	if(rights == 0)
-		rights = defr;
-	if((rights & ~(uvlong)defr) != 0)
-		error(Eperm);
-	if(vobjhandlesbykind(up, VkindUart) >= Vuartslotmax)
-		error("too many UART handles");
 	uartnopen(port, mode);
 	vu = smalloc(sizeof *vu);
 	if(vu == nil){
@@ -1928,7 +1910,7 @@ vobjuartopenrights(int port, int mode, uvlong rights, VobjId *id)
 		}
 		error(Enomem);
 	}
-	o->provider = ObjOpenUart;
+	o->provider = ObjOpenDevice;
 	vobjsetpriv(o, vu);
 	hrights = (int)rights;
 	if(waserror()){
@@ -2010,8 +1992,10 @@ vobjuartstatus(int handle, void *buf, long n)
 	return r;
 }
 
-int
-vobjkbdopen(VobjId *id)
+/* The catalog has already validated the exclusive-claim option.  The rights
+ * mask is the validated attenuation of Vread|Vmeta|Vcontrol|Vdelegate. */
+static int
+vobjkbddevice(uvlong rights, VobjId *id)
 {
 	Vobj *o;
 	Vkbd *vk;
@@ -2019,12 +2003,6 @@ vobjkbdopen(VobjId *id)
 	Vhtab *t;
 	int h, r;
 
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	if(!iseve())
-		error(Eperm);
-	if(vobjhandlesbykind(up, VkindKbd) >= Vkbdslotmax)
-		error("too many keyboard handles");
 	/*
 	 * Allocate everything that can sleep before claiming the exclusive
 	 * scan-code controller.  The claim is then held only across the
@@ -2038,7 +2016,7 @@ vobjkbdopen(VobjId *id)
 		free(vk);
 		error(Enomem);
 	}
-	o->provider = ObjOpenKbd;
+	o->provider = ObjOpenDevice;
 	vobjsetpriv(o, vk);
 	if((t = vgettab(1)) == nil){
 		vobjput(o);
@@ -2053,7 +2031,7 @@ vobjkbdopen(VobjId *id)
 		error(Einuse);
 	}
 	vk->held = 1;
-	vhandinit(nh, o, nil, Vread|Vmeta|Vdelegate|Vcontrol);
+	vhandinit(nh, o, nil, (int)rights);
 	h = vinstall(t, nh);
 	if(h < 0){
 		vhandput(nh);
@@ -2097,14 +2075,14 @@ kbdstream(void *buf, long n)
 
 /* LED state is a shared hardware control, not scan-code authority.  A
  * nonzero KBD Handle carrying Vcontrol is required: there is no handle-less
- * global control and no implicit authority from a numeric selector. */
+ * global control and no implicit authority from a numeric selector.  The
+ * initial grant is restricted by catalog opening; a delegated Vcontrol
+ * Handle remains usable without a second identity check. */
 int
 vobjkbdleds(int handle, int leds)
 {
 	Vhand *h;
 
-	if(!iseve())
-		error(Eperm);
 	if(handle == 0)
 		error(Ebadarg);
 	h = vlookup(handle, Vcontrol);
@@ -2117,122 +2095,9 @@ vobjkbdleds(int handle, int leds)
 	return 0;
 }
 
-/*
- * USB service object: a process-local capability over the existing usbcore
- * endpoint table.  The default (rights==0) Handle is metadata-only and can
- * list but not open endpoints.  Endpoint creation requires the explicit
- * Vcreate bit, which only the trusted eve/bootstrap user may request at
- * open; a metadata Handle or an attenuated copy of it cannot gain Vcreate.
- * Listing requires Vmeta and is bounded exactly like the legacy USBLIST.
- */
-static int
-usbsvcrights(void)
-{
-	return Vmeta|Vdelegate;
-}
-
-static int
-usbsvcmaxrights(void)
-{
-	int r;
-
-	r = usbsvcrights();
-	if(iseve())
-		r |= Vcreate|Vcontrol;
-	return r;
-}
-
-int
-vobjusbopen(uvlong rights, VobjId *id)
-{
-	Vobj *o;
-	int h, defr, maxr;
-
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	defr = usbsvcrights();
-	maxr = usbsvcmaxrights();
-	if(rights == 0)
-		rights = defr;
-	if((rights & ~(uvlong)maxr) != 0)
-		error(Eperm);
-	if(vobjhandlesbykind(up, VkindUsb) >= Vusbslotmax)
-		error("too many USB service handles");
-	usbcore_init();
-	o = vobjnewkind(VkindUsb, 0);
-	if(o == nil)
-		error(Enomem);
-	o->provider = ObjOpenUsb;
-	if(waserror()){
-		vobjput(o);
-		nexterror();
-	}
-	h = vobjinstallobj(o, (int)rights);
-	poperror();
-	if(id != nil){
-		id->incarnation = o->incarnation;
-		id->space = o->space;
-		id->oid = o->oid;
-	}
-	vobjput(o);
-	return h;
-}
-
-long
-vobjusblist(int handle, void *ents, long nbytes)
-{
-	Vhand *h;
-	Usbentry *ke;
-	long n, r, sz;
-	int total;
-
-	h = vlookup(handle, Vmeta);
-	if(h->obj->kind != VkindUsb){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	total = usbcore_list(nil, 0);
-	if(ents == nil || nbytes == 0){
-		vhandput(h);
-		return total;
-	}
-	if(nbytes < 0 || nbytes % sizeof(Usbentry) != 0){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	n = nbytes / sizeof(Usbentry);
-	if(n > OBJ_USB_LISTMAX)
-		n = OBJ_USB_LISTMAX;
-	if(n > total)
-		n = total;
-	if(n == 0){
-		vhandput(h);
-		return 0;
-	}
-	sz = n * sizeof(Usbentry);
-	ke = smalloc(sz);
-	if(waserror()){
-		free(ke);
-		vhandput(h);
-		nexterror();
-	}
-	if(!okaddr((uintptr)ents, sz, 1))
-		error(Ebadarg);
-	r = usbcore_list(ke, (int)n);
-	if(r < 0)
-		error(Eio);
-	if(r > n)
-		r = n;
-	memmove(ents, ke, r * sizeof(Usbentry));
-	poperror();
-	free(ke);
-	vhandput(h);
-	return r;
-}
-
-/* Endpoint rights come only from the validated kind/mode request.  The
- * caller never supplies a rights mask, and OBJOPEN/GRANT/OSPAWN can only
- * attenuate this set. */
+/* USB endpoint references are created only through the common catalog.
+ * Endpoint rights come from the validated kind/mode option; the open rights
+ * argument can attenuate but never amplify that set. */
 static int
 usbeprights(int kind, int mode)
 {
@@ -2250,45 +2115,41 @@ usbeprights(int kind, int mode)
 	return r;
 }
 
-int
-vobjusbepopen(int handle, void *req)
+/* DATA owns the usbcore data-open; CTL only references the endpoint for
+ * provider administration, matching the former endpoint-open semantics. */
+static int
+vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id)
 {
-	Vhand *sh;
 	Vobj *o;
 	Vusbep *ve;
 	Ep *ep;
-	ObjUsbEpReq r;
-	int h, opened, rights, need;
+	int h, opened;
 
-	if(req == nil || !okaddr((uintptr)req, sizeof r, 0))
-		error(Ebadarg);
-	memmove(&r, req, sizeof r);
-	if(r.flags != 0 || r.reserved != 0)
-		error(Ebadarg);
-	if(r.kind != USBDATA && r.kind != USBCTL)
-		error(Ebadarg);
-	if(r.mode != OREAD && r.mode != OWRITE && r.mode != ORDWR)
-		error(Ebadarg);
-	need = Vcreate | (r.kind == USBCTL ? Vcontrol : 0);
-	sh = vlookup(handle, need);
-	if(sh->obj->kind != VkindUsb){
-		vhandput(sh);
-		error(Ebadarg);
-	}
-	vhandput(sh);
 	if(vobjhandlesbykind(up, VkindUsbEp) >= Vusbepslotmax)
 		error("too many USB endpoint handles");
-	ep = usbcore_getep(r.devno, r.epno);
+	ep = usbcore_getep(devno, epno);
 	if(ep == nil)
 		error(Ebadarg);
+	/* The selector is not authority and the requested kind is not a
+	 * description of the endpoint: validate it against the actual usbcore
+	 * transfer type before any data-open or public Handle exists. */
+	if(ep->dev->state == Ddetach){
+		usbcore_putep(ep);
+		error("device is detached");
+	}
+	if((kind == USBCTL && ep->ttype != Tctl)
+	|| (kind == USBDATA && (ep->ttype == Tctl || ep->ttype == Tnone))){
+		usbcore_putep(ep);
+		error(Ebadarg);
+	}
 	ve = smalloc(sizeof *ve);
 	if(ve == nil){
 		usbcore_putep(ep);
 		error(Enomem);
 	}
 	ve->ep = ep;
-	ve->kind = r.kind;
-	ve->mode = r.mode;
+	ve->kind = kind;
+	ve->mode = mode;
 	opened = 0;
 	if(waserror()){
 		if(opened)
@@ -2297,13 +2158,12 @@ vobjusbepopen(int handle, void *req)
 		free(ve);
 		nexterror();
 	}
-	if(r.kind == USBDATA){
-		usbcore_dataopen(ep, r.mode);
+	if(kind == USBDATA){
+		usbcore_dataopen(ep, mode);
 		opened = 1;
 	}
 	poperror();
 	/* ve owns the referenced endpoint from here. */
-	rights = usbeprights(r.kind, r.mode);
 	o = vobjnewkind(VkindUsbEp, 0);
 	if(o == nil){
 		if(opened)
@@ -2312,22 +2172,29 @@ vobjusbepopen(int handle, void *req)
 		free(ve);
 		error(Enomem);
 	}
-	o->provider = ObjOpenUsb;
+	o->provider = ObjOpenDevice;
 	vobjsetpriv(o, ve);
 	if(waserror()){
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, rights);
+	h = vobjinstallobj(o, (int)rights);
 	poperror();
+	if(id != nil){
+		id->incarnation = o->incarnation;
+		id->space = o->space;
+		id->oid = o->oid;
+	}
 	vobjput(o);
 	return h;
 }
 
-/* T12 common device sessions.  USB control is the first concrete provider.
- * One synchronous transfer + one pending immutable completion is deliberately
- * not a second FIFO: there is no queue, fanout, blocking receive or IRQ path.
- * ObjectFIFO can carry the received bytes Handle without any device branch.
+/* Common device catalog.
+ *
+ * Discovery selectors are boot-local hints and never authority.  Every open
+ * validates the catalog Handle, the requested rights, the family options and
+ * the selectors before acquiring a port, the keyboard controller, a NIC or a
+ * USB endpoint.  Provider I/O semantics remain distinct.
  */
 int
 vobjdevicesopen(uvlong rights, VobjId *id)
@@ -2339,7 +2206,7 @@ vobjdevicesopen(uvlong rights, VobjId *id)
 		validaddr((uintptr)id, sizeof *id, 1);
 	max = Vmeta|Vdelegate;
 	if(iseve())
-		max |= Vcreate;
+		max |= Vcreate|Vcontrol;
 	if(rights == 0)
 		rights = Vmeta|Vdelegate;
 	if(rights & ~(uvlong)max)
@@ -2347,7 +2214,7 @@ vobjdevicesopen(uvlong rights, VobjId *id)
 	if(vobjhandlesbykind(up, VkindDevices) >= Vusbslotmax)
 		error("too many device catalog handles");
 	usbcore_init();
-    vetherlist(nil, 0); /* initialize the existing NIC registry once */
+	vetherlist(nil, 0); /* initialize the existing NIC registry once */
 	o = vobjnewkind(VkindDevices, 0);
 	if(o == nil)
 		error(Enomem);
@@ -2365,6 +2232,14 @@ vobjdevicesopen(uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return h;
+}
+
+static void
+deventryput(void *out, int cap, int *total, ObjDeviceEntry *e)
+{
+	if(*total < cap)
+		memmove((uchar*)out + (long)*total*sizeof *e, e, sizeof *e);
+	(*total)++;
 }
 
 long
@@ -2393,105 +2268,154 @@ vobjdevicelist(int handle, void *out, long bytes)
 	if(bytes != 0)
 		validaddr((uintptr)out, bytes, 1);
 	cap = bytes / sizeof e;
+	total = 0;
 	n = usbcore_list(entries, OBJ_DEVICE_LISTMAX);
 	if(n > OBJ_DEVICE_LISTMAX)
 		n = OBJ_DEVICE_LISTMAX;
-	total = 0;
 	for(i = 0; i < n; i++){
-		if(entries[i].ttype != Tctl || entries[i].state == Ddetach)
+		if(entries[i].state == Ddetach)
 			continue;
+		if(entries[i].ttype == Tctl){
+			memset(&e, 0, sizeof e);
+			e.version = OBJ_DEVICE_ABI_VERSION;
+			e.family = ObjDeviceUsbControl;
+			e.selector0 = entries[i].devno;
+			e.selector1 = entries[i].epno;
+			e.maxsend = Rsetuplen+OBJ_DEVICE_MAXPAYLOAD;
+			e.maxrecv = OBJ_DEVICE_MAXPAYLOAD;
+			e.kind = Tctl;
+			deventryput(out, cap, &total, &e);
+		}
 		memset(&e, 0, sizeof e);
 		e.version = OBJ_DEVICE_ABI_VERSION;
-		e.family = ObjDeviceUsbControl;
+		e.family = ObjDeviceUsbEndpoint;
 		e.selector0 = entries[i].devno;
 		e.selector1 = entries[i].epno;
-		e.maxsend = Rsetuplen+OBJ_DEVICE_MAXPAYLOAD;
-		e.maxrecv = OBJ_DEVICE_MAXPAYLOAD;
-		if(total < cap)
-			memmove((uchar*)out + total*sizeof e, &e, sizeof e);
-		total++;
+		e.kind = entries[i].ttype;
+		deventryput(out, cap, &total, &e);
 	}
-    total += vetherlist(total < cap ? (ObjDeviceEntry*)((uchar*)out+total*sizeof e) : nil,
-        total < cap ? cap-total : 0);
-	/* UART ports are discovery-only catalog records.  Opening still uses
-	 * ObjOpenUart, which owns the provider-specific rights and lifetime;
-	 * there is no UART object invented just to count ports. */
+	{
+		int left = total < cap ? cap-total : 0;
+		ObjDeviceEntry *dst = total < cap ?
+			(ObjDeviceEntry*)((uchar*)out + (long)total*sizeof e) : nil;
+
+		total += vetherlist(dst, left);
+	}
 	n = uartnports();
 	for(i = 0; i < n; i++){
 		memset(&e, 0, sizeof e);
 		e.version = OBJ_DEVICE_ABI_VERSION;
 		e.family = ObjDeviceUart;
 		e.selector0 = i;
-		if(total < cap)
-			memmove((uchar*)out + total*sizeof e, &e, sizeof e);
-		total++;
+		e.maxsend = OBJ_STREAM_MAXIO;
+		e.maxrecv = OBJ_STREAM_MAXIO;
+		deventryput(out, cap, &total, &e);
 	}
+	memset(&e, 0, sizeof e);
+	e.version = OBJ_DEVICE_ABI_VERSION;
+	e.family = ObjDeviceKbd;
+	e.maxrecv = OBJ_KBD_MAXREAD;
+	deventryput(out, cap, &total, &e);
 	poperror();
 	free(entries);
 	vhandput(h);
 	return bytes == 0 ? total : (total < cap ? total : cap);
 }
 
-int
-vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
+static int
+devfamilyrights(int family, int mode, int kind)
 {
-	ObjOpenDeviceReq r;
-	Vhand *catalog;
+	switch(family){
+	case ObjDeviceUart:
+		return uartmodebits(mode);
+	case ObjDeviceKbd:
+		return Vread|Vmeta|Vcontrol|Vdelegate;
+	case ObjDeviceUsbControl:
+		return Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate;
+	case ObjDeviceUsbEndpoint:
+		return usbeprights(kind, mode);
+	case ObjDeviceEthernet:
+		return Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate|Vsubscribe;
+	}
+	return 0;
+}
+
+static Vobj*
+vobjusbctrlopen(int devno, int epno)
+{
 	Vobj *o;
 	Vdevice *d;
-	int h, max;
+	Ep *ep;
 
-	if(req == nil || len != sizeof r)
+	usbcore_init();
+	ep = usbcore_getep(devno, epno);
+	if(ep == nil)
 		error(Ebadarg);
-	validaddr((uintptr)req, sizeof r, 0);
-	memmove(&r, req, sizeof r);
-	if(r.version != OBJ_DEVICE_ABI_VERSION || r.reserved != 0
-    || (r.family != ObjDeviceUsbControl && r.family != ObjDeviceEthernet)
-    || r.selector0 < 0 || r.selector1 < 0
-    || (r.family == ObjDeviceEthernet && r.selector1 != 0))
-		error(Ebadarg);
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	max = Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate;
-    if(r.family == ObjDeviceEthernet)
-        max |= Vsubscribe;
-	if(rights == 0)
-		rights = max;
-	if(rights & ~(uvlong)max)
-		error(Eperm);
-	catalog = vlookup(r.catalog, Vcreate);
-	if(catalog->obj->kind != VkindDevices){
-		vhandput(catalog);
+	if(ep->ttype != Tctl){
+		usbcore_putep(ep);
 		error(Ebadarg);
 	}
-	/* Authorization is complete.  No ambient device number grants access. */
-	vhandput(catalog);
-	if(vobjhandlesbykind(up, VkindDevice) >= Vusbepslotmax)
-		error("too many device handles");
 	o = vobjnewkind(VkindDevice, 0);
-	if(o == nil)
+	if(o == nil){
+		usbcore_putep(ep);
 		error(Enomem);
+	}
+	d = mallocz(sizeof *d, 1);
+	if(d == nil){
+		usbcore_putep(ep);
+		vobjput(o);
+		error(Enomem);
+	}
+	d->family = ObjDeviceUsbControl;
+	d->ep = ep;
+	o->priv = d;
+	o->provider = ObjOpenDevice;
 	if(waserror()){
 		vobjput(o);
 		nexterror();
 	}
-	o->provider = ObjOpenDevice;
-	d = mallocz(sizeof *d, 1);
-	if(d == nil)
-		error(Enomem);
-	o->priv = d;
-    d->family = r.family;
-    if(r.family == ObjDeviceEthernet){
-        d->ether = vetheropen(r.selector0);
-    }else{
-	d->ep = usbcore_getep(r.selector0, r.selector1);
-	if(d->ep == nil || d->ep->ttype != Tctl)
-		error(Ebadarg);
-	/* usbcore serializes the exclusive claim against old USB DATA handles.
-	 * CTL metadata handles cannot perform data I/O and do not share it. */
-	usbcore_dataopen(d->ep, ORDWR);
+	/* usbcore serializes the exclusive claim against old USB DATA handles. */
+	usbcore_dataopen(ep, ORDWR);
 	d->opened = 1;
-    }
+	poperror();
+	return o;
+}
+
+static Vobj*
+vobjetheropen(int controller)
+{
+	Vobj *o;
+	Vdevice *d;
+
+	o = vobjnewkind(VkindDevice, 0);
+	if(o == nil)
+		error(Enomem);
+	d = mallocz(sizeof *d, 1);
+	if(d == nil){
+		vobjput(o);
+		error(Enomem);
+	}
+	d->family = ObjDeviceEthernet;
+	o->priv = d;
+	o->provider = ObjOpenDevice;
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	d->ether = vetheropen(controller);
+	poperror();
+	return o;
+}
+
+static int
+vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id)
+{
+	int h;
+
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
 	h = vobjinstallobj(o, (int)rights);
 	poperror();
 	if(id != nil){
@@ -2501,6 +2425,106 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return h;
+}
+
+int
+vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
+{
+	ObjOpenDeviceReq r;
+	ObjDeviceOpenOptions opt;
+	Vhand *catalog;
+	Vobj *o;
+	uvlong max, cr;
+	int mode, kind;
+
+	if(req == nil || len != sizeof r)
+		error(Ebadarg);
+	validaddr((uintptr)req, sizeof r, 0);
+	memmove(&r, req, sizeof r);
+	if(r.version != OBJ_DEVICE_ABI_VERSION || r.flags != 0 || r.reserved != 0
+	|| r.optlen > OBJ_DEVICE_OPTMAX)
+		error(Ebadarg);
+	memset(&opt, 0, sizeof opt);
+	if(r.optlen != 0){
+		if(r.optlen != sizeof opt)
+			error(Ebadarg);
+		memmove(&opt, r.options, sizeof opt);
+		if(opt.version != OBJ_DEVICE_OPT_VERSION)
+			error(Ebadarg);
+	}
+	mode = (int)opt.mode;
+	kind = (int)opt.kind;
+	switch(r.family){
+	case ObjDeviceUsbControl:
+		if(r.optlen != 0 || r.selector0 < 0 || r.selector1 < 0)
+			error(Ebadarg);
+		break;
+	case ObjDeviceEthernet:
+		if(r.optlen != 0 || r.selector0 < 0 || r.selector1 != 0)
+			error(Ebadarg);
+		break;
+	case ObjDeviceUart:
+		if(r.optlen != sizeof opt || opt.kind != 0 || opt.flags != 0
+		|| r.selector1 != 0 || r.selector0 < 0
+		|| (mode != OREAD && mode != OWRITE && mode != ORDWR))
+			error(Ebadarg);
+		if(r.selector0 >= uartnports())
+			error(Ebadarg);
+		break;
+	case ObjDeviceKbd:
+		if(r.optlen != sizeof opt || opt.mode != 0 || opt.kind != 0
+		|| opt.flags != OBJ_DEVICE_KBD_EXCLUSIVE
+		|| r.selector0 != 0 || r.selector1 != 0)
+			error(Ebadarg);
+		break;
+	case ObjDeviceUsbEndpoint:
+		if(r.optlen != sizeof opt || opt.flags != 0
+		|| r.selector0 < 0 || r.selector1 < 0
+		|| (kind != USBDATA && kind != USBCTL)
+		|| (mode != OREAD && mode != OWRITE && mode != ORDWR))
+			error(Ebadarg);
+		break;
+	default:
+		error(Ebadarg);
+	}
+	max = devfamilyrights(r.family, mode, kind);
+	if(rights == 0)
+		rights = max;
+	if((rights & ~max) != 0)
+		error(Eperm);
+	if(id != nil)
+		validaddr((uintptr)id, sizeof *id, 1);
+	/* Authorization is complete before any resource is acquired. */
+	catalog = vlookup(r.catalog, Vcreate);
+	if(catalog->obj->kind != VkindDevices){
+		vhandput(catalog);
+		error(Ebadarg);
+	}
+	cr = (uvlong)catalog->rights;
+	vhandput(catalog);
+	if(r.family == ObjDeviceUsbEndpoint && kind == USBCTL
+	&& (cr & Vcontrol) == 0)
+		error(Eperm);
+	switch(r.family){
+	case ObjDeviceUart:
+		if(vobjhandlesbykind(up, VkindUart) >= Vuartslotmax)
+			error("too many UART handles");
+		return vobjuartdevice(r.selector0, mode, rights, id);
+	case ObjDeviceKbd:
+		if(vobjhandlesbykind(up, VkindKbd) >= Vkbdslotmax)
+			error("too many keyboard handles");
+		return vobjkbddevice(rights, id);
+	case ObjDeviceUsbEndpoint:
+		return vobjusbepref(r.selector0, r.selector1, kind, mode,
+			rights, id);
+	}
+	if(vobjhandlesbykind(up, VkindDevice) >= Vusbepslotmax)
+		error("too many device handles");
+	if(r.family == ObjDeviceUsbControl)
+		o = vobjusbctrlopen(r.selector0, r.selector1);
+	else
+		o = vobjetheropen(r.selector0);
+	return vobjdeviceinstall(o, rights, id);
 }
 
 /* Caller holds a Vhand for the entire operation, pinning the session and
@@ -2726,26 +2750,20 @@ usbioargmin(int req)
 	}
 }
 
-/* Provider-private USB administration.  The caller pins the Vhand and checks
- * Vcontrol.  A copied IN/OUT buffer never escapes this synchronous call. */
+/* USB administration stays provider-specific but is reachable only through
+ * a catalog Handle (global debug) or a catalog-opened CTL endpoint reference.
+ * The caller pins the Vhand and checks Vcontrol.  A copied IN/OUT buffer
+ * never escapes this synchronous call, and no data-transfer API is implied. */
 static long
-vusbctl(Vobj *o, uvlong operation, void *arg, long narg)
+vusbglobalctl(uvlong operation, void *arg, long narg)
 {
-    Vusbep *ve;
     char *buf;
     long r;
     int req;
 
-    if(operation < USBdebug || operation > USBinfo)
-        error(Ebadarg);
     req = (int)operation;
-    ve = nil;
-    if(o->kind == VkindUsb){
-        if(req != USBdebug) error(Ebadarg);
-    }else{
-        ve = o->priv;
-        if(ve == nil || ve->kind != USBCTL) error(Ebadarg);
-    }
+    if(operation < USBdebug || operation > USBinfo || req != USBdebug)
+        error(Ebadarg);
     if(narg < 0 || narg > 4096 || narg < usbioargmin(req)
     || (narg > 0 && arg == nil))
         error(Ebadarg);
@@ -2757,8 +2775,38 @@ vusbctl(Vobj *o, uvlong operation, void *arg, long narg)
         buf = smalloc(narg);
         memmove(buf, arg, narg);
     }
-    r = ve == nil ? usbcore_globalioctl(req, buf, narg)
-                   : usbcore_ioctl(ve->ep, req, buf, narg);
+    r = usbcore_globalioctl(req, buf, narg);
+    if(r < 0) error(up->errstr[0] != 0 ? up->errstr : Eio);
+    if(narg > 0) memmove(arg, buf, narg);
+    poperror();
+    free(buf);
+    return r;
+}
+
+static long
+vusbepctl(Vusbep *ve, uvlong operation, void *arg, long narg)
+{
+    char *buf;
+    long r;
+    int req;
+
+    if(ve == nil || ve->kind != USBCTL)
+        error(Ebadarg);
+    if(operation < USBdebug || operation > USBinfo)
+        error(Ebadarg);
+    req = (int)operation;
+    if(narg < 0 || narg > 4096 || narg < usbioargmin(req)
+    || (narg > 0 && arg == nil))
+        error(Ebadarg);
+    buf = nil;
+    if(waserror()){free(buf);nexterror();}
+    if(narg > 0){
+        validaddr((uintptr)arg, narg, 0);
+        validaddr((uintptr)arg, narg, 1);
+        buf = smalloc(narg);
+        memmove(buf, arg, narg);
+    }
+    r = usbcore_ioctl(ve->ep, req, buf, narg);
     if(r < 0) error(up->errstr[0] != 0 ? up->errstr : Eio);
     if(narg > 0) memmove(arg, buf, narg);
     poperror();
@@ -2771,13 +2819,23 @@ vobjdevicectl(int handle, uvlong op, void *out, long len)
 {
     Vhand *h;
     Vdevice *d;
+    Vusbep *ve;
 
     h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
-    if(h->obj->kind == VkindUsb || h->obj->kind == VkindUsbEp){
+    if(h->obj->kind == VkindDevices){
         long r;
         if(!(h->rights & Vcontrol)) error(Eperm);
-        r = vusbctl(h->obj, op, out, len);
+        r = vusbglobalctl(op, out, len);
+        poperror();
+        vhandput(h);
+        return r;
+    }
+    if(h->obj->kind == VkindUsbEp){
+        long r;
+        if(!(h->rights & Vcontrol)) error(Eperm);
+        ve = h->obj->priv;
+        r = vusbepctl(ve, op, out, len);
         poperror();
         vhandput(h);
         return r;

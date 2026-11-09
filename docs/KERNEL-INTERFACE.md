@@ -111,6 +111,12 @@ feature.
 
 ## Device messages and ObjectFIFO
 
+`docs/DEVICE-ABI.md` is the normative device authority contract. All
+supported physical families (UART, PS/2 keyboard, Ethernet, USB control and
+USB endpoints) are discovered with `ObjOpDeviceList` and opened with
+`ObjOpenDevice` through an authorized catalog Handle. Device selectors are
+hints, never authority; options and rights are validated before acquisition.
+
 ObjectFIFO is the common capability-aware transport for framed messages and
 IPC. Frame bytes and transport metadata should remain separate from object
 identity. A FIFO does not grant independent device-control rights.

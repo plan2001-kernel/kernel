@@ -145,19 +145,13 @@ void	vobjpipeoutputset(Proc *p, int handle);
 long	vobjpipeoutputwrite(int handle, void *data, long n);
 int	vobjpipekernelinstall(Proc *proc, void *pipe, int end);
 
-int	vobjuartopenrights(int port, int mode, uvlong rights, VobjId *id);
 int	vobjuartctl(int handle, void *cfg);
 long	vobjuartstatus(int handle, void *buf, long n);
 
-int	vobjkbdopen(VobjId *id);
 int	vobjkbdleds(int handle, int leds);
 
-/* USB service provider over the existing usbcore endpoint table. */
-int	vobjusbopen(uvlong rights, VobjId *id);
-long	vobjusblist(int handle, void *ents, long nbytes);
-int	vobjusbepopen(int handle, void *req);
-
-/* Common message-device ABI; T12 USB control integration. */
+/* Common device ABI.  UART, KBD, Ethernet and USB are discovered and opened
+ * only through this catalog; provider-specific control/I/O stays distinct. */
 int vobjdevicesopen(uvlong rights, VobjId *id);
 long vobjdevicelist(int handle, void *out, long bytes);
 int vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id);

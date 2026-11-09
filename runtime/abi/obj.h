@@ -21,19 +21,17 @@
 
 #define OBJ_ABI_VERSION 1
 
-/* obj_open providers.  Numbers 1, 2, 3, 8 and 14 are reserved historical
- * identifiers for the retired TCP6/UDP6 object interface, the old ObjOpenGe
- * alias and the synthetic ProcessSelf handle.  They have no provider,
- * declaration or handler. */
+/* obj_open providers.  Numbers 1, 2, 3, 8, 10, 11, 12 and 14 are reserved
+ * historical identifiers for the retired TCP6/UDP6 object interface, the old
+ * ObjOpenGe alias, ObjOpenUart, ObjOpenKbd, ObjOpenUsb and the synthetic
+ * ProcessSelf handle.  They have no provider, declaration or handler.  All
+ * physical device kinds are opened through ObjOpenDevices/ObjOpenDevice. */
 enum {
 	ObjOpenHandle		= 4,
 	ObjOpenBinding		= 5,
 	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */
 	ObjOpenGeSpace		= 7,	/* Space handle + OID -> persistent object */
 	ObjOpenPipe		= 9,	/* provider tag for a native Pipe endpoint */
-	ObjOpenUart		= 10,	/* privileged native UART port open */
-	ObjOpenKbd		= 11,	/* privileged exclusive PS/2 claim */
-	ObjOpenUsb		= 12,	/* USB service: device/endpoint metadata */
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
@@ -62,12 +60,13 @@ enum {
 	ObjBindRemove		= 0x100,
 };
 
-/* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 23, 24 and 35 are reserved
- * historical identifiers for the retired TCP6/UDP6 object interface, the
- * handle-less process listing and UART count, and the synthetic ProcessSelf
- * wait.  Number 22 is the retired one-shot Pipe RFORK selection.  They have
- * no dispatch handler.  Process handle introspection is the direct bounded
- * OBJLIST syscall and child wait is the direct typed OBJWAIT syscall. */
+/* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 20, 21, 22, 23, 24 and 35
+ * are reserved historical identifiers for the retired TCP6/UDP6 object
+ * interface, the handle-less process listing and UART count, ObjOpUsbList,
+ * ObjOpUsbEpOpen, the one-shot Pipe RFORK selection, and the synthetic
+ * ProcessSelf wait.  They have no dispatch handler.  Process handle
+ * introspection is the direct bounded OBJLIST syscall and child wait is the
+ * direct typed OBJWAIT syscall. */
 enum {
 	ObjOpInfo	= 1,
 	ObjOpRead	= 2,
@@ -83,9 +82,10 @@ enum {
 	ObjOpPipePeer	= 16,	/* Pipe end 0: install and return the peer Handle */
 	ObjOpUartCtl	= 17,	/* UART handle: apply one bounded Uartcfg */
 	ObjOpUartStatus	= 18,	/* UART handle: read native status bytes */
-	ObjOpKbdLeds	= 19,	/* KBD handle: privileged LED update */
-	ObjOpUsbList	= 20,	/* USB service: bounded Usbentry snapshot */
-	ObjOpUsbEpOpen	= 21,	/* USB service: open one endpoint Handle */
+	ObjOpKbdLeds	= 19,	/* KBD handle: Vcontrol LED update */
+	/* 20 and 21 are reserved: retired USB service list and endpoint open.
+	 * USB metadata and endpoint acquisition use ObjOpDeviceList and
+	 * ObjOpenDevice like every other supported device family. */
 	/* 22 is reserved: the retired one-shot Pipe RFORK selection.  RFORKEX
 	 * declares its Handle delegation in the creation call itself. */
 	ObjOpPutOid	= 25,	/* Space handle: replace one named OID, no commit */
@@ -112,13 +112,15 @@ enum {
 /* Classification after the OBJINVOKE pragmatization:
  *  - Object-bound (real Handle + identity/rights/lifetime): GE/O read/write/
  *    commit, Space+OID PutOid/Ospawn, ObjectFIFO, namespace views, Pipe, UART,
- *    KBD, USB service/endpoint and common device sessions.
+ *    KBD, USB control sessions/endpoints and common device sessions.
  *  - Direct syscalls: process handle listing (OBJLIST) and child wait
  *    (OBJWAIT), because neither concerns a target object capability.
- *  - Discovery: UART ports are ObjOpDeviceList records, not a handle-less
- *    INVOKE operation; opening still uses ObjOpenUart.
- *  - Removed: the TCP6/UDP6 object interface.  Raw Ethernet and ObjectFIFO
- *    remain; upper-layer protocols are userspace.
+ *  - Discovery and opening: every supported physical family is an
+ *    ObjOpDeviceList record opened through ObjOpenDevice with an authorized
+ *    catalog Handle.  Selectors are hints, never authority.
+ *  - Removed: the TCP6/UDP6 object interface and the separate UART, KBD and
+ *    USB opening providers.  Raw Ethernet and ObjectFIFO remain; upper-layer
+ *    protocols are userspace.
  */
 
 /* Namespace operations require ObjOpenNamespaceCurrent with Vcontrol.
@@ -129,28 +131,44 @@ enum {
  * to out (outlen must be a whole-record capacity); result is record count.
  * No operation accepts extra arguments or buffers. */
 
-/* Common message-device ABI v1.  See docs/DEVICE-ABI.md for the normative
- * ownership/completion contract.  Discovery selectors are boot-local hints,
- * never authority.  Opening requires a catalog Handle with Vcreate; rights
- * are attenuated from Vsend|Vrecv|Vmeta|Vcontrol|Vdelegate.  There is no new
- * syscall.  Existing provider tags/operations keep their numbers.
+/* Common device ABI v2.  See docs/DEVICE-ABI.md for the normative authority,
+ * ownership and completion contract.  Discovery selectors are boot-local
+ * hints, never authority.  Opening always requires a catalog Handle with
+ * Vcreate; USB CTL endpoint references additionally require Vcontrol.
  *
- * T12 integrates USB control endpoints only.  Ethernet frames, USB bulk and
- * Wi-Fi have their own payload/metadata contracts in future integrations.
+ * Family-specific open options are a bounded, versioned record.  The kernel
+ * validates version, option length, flags, mode/kind and selectors before
+ * acquiring a port, the PS/2 controller, a NIC or a USB endpoint.  Rights
+ * requested at open are an attenuation of the family's grantable set, not a
+ * caller claim of authority.  No new syscall is introduced.
  */
-#define OBJ_DEVICE_ABI_VERSION 1
+#define OBJ_DEVICE_ABI_VERSION 2
 #define OBJ_DEVICE_LISTMAX 128
 #define OBJ_DEVICE_MAXPAYLOAD 4096
 #define OBJ_DEVICE_MAXMESSAGE 16384
+#define OBJ_DEVICE_OPTMAX 64
+#define OBJ_DEVICE_OPT_VERSION 1
 
 enum {
-    ObjDeviceUsbControl = 1,
-    ObjDeviceEthernet = 2,
-    ObjDeviceUart = 3,             /* discovery record only; open via ObjOpenUart */
+    ObjDeviceUsbControl = 1,       /* synchronous control session (SEND/RECV) */
+    ObjDeviceEthernet = 2,         /* raw L2 SEND + ObjectFIFO RECV */
+    ObjDeviceUart = 3,             /* authorized bounded byte stream */
+    ObjDeviceKbd = 4,              /* exclusive PS/2 scan-code stream */
+    ObjDeviceUsbEndpoint = 5,      /* referenced DATA or CTL endpoint */
     ObjDeviceUsbClearHalt = 1,
     ObjDeviceEtherStatus = 2,
     ObjDeviceEtherDetach = 3,
 };
+
+/* KBD open must request the exclusive scan-code claim explicitly. */
+#define OBJ_DEVICE_KBD_EXCLUSIVE 1u
+
+typedef struct ObjDeviceOpenOptions {
+    unsigned int version;          /* OBJ_DEVICE_OPT_VERSION */
+    unsigned int mode;             /* UART/USB endpoint: OREAD/OWRITE/ORDWR */
+    unsigned int kind;             /* USB endpoint: OBJ_USB_EP_DATA/CTL */
+    unsigned int flags;            /* KBD: OBJ_DEVICE_KBD_EXCLUSIVE; else 0 */
+} ObjDeviceOpenOptions;
 
 /* Ethernet: complete L2 octets, including MACs/EtherType, excluding FCS.
  * SEND returns accepted bytes, not wire/DMA completion. RECV obtains the
@@ -186,13 +204,14 @@ typedef struct ObjEtherStatus {
 long obj_device_ether_status(int device, ObjEtherStatus *status);
 
 typedef struct ObjDeviceEntry {
-    unsigned int version;
+    unsigned int version;          /* OBJ_DEVICE_ABI_VERSION */
     unsigned int family;
-    int selector0;                 /* USB device number */
-    int selector1;                 /* USB endpoint number */
-    unsigned int maxsend;          /* setup + optional OUT data */
-    unsigned int maxrecv;          /* IN response bytes */
+    int selector0;                 /* USB devno, NIC controller, UART port */
+    int selector1;                 /* USB endpoint number; 0 otherwise */
+    unsigned int maxsend;          /* setup+OUT, frame, or stream bound */
+    unsigned int maxrecv;          /* IN bytes, frame, or stream bound */
     unsigned int flags;            /* zero */
+    int kind;                      /* USB endpoint ttype; 0 otherwise */
     unsigned int reserved;         /* zero */
 } ObjDeviceEntry;
 
@@ -202,7 +221,10 @@ typedef struct ObjOpenDeviceReq {
     int catalog;                   /* process-local discovery authority */
     int selector0;
     int selector1;
-    unsigned int reserved;
+    unsigned int flags;            /* request flags; must be zero */
+    unsigned int optlen;           /* 0 or sizeof ObjDeviceOpenOptions */
+    unsigned int reserved;         /* zero */
+    unsigned char options[OBJ_DEVICE_OPTMAX];
 } ObjOpenDeviceReq;
 
 /* RECV installs one Vread|Vmeta|Vdelegate bytes Handle as result, and copies
@@ -220,16 +242,6 @@ typedef struct ObjDeviceResult {
     unsigned int family;
     unsigned int length;
 } ObjDeviceResult;
-
-long obj_devices_open(unsigned long long rights);
-long obj_device_list(int catalog, ObjDeviceEntry *entries, unsigned int count);
-long obj_device_open(int catalog, unsigned int family, int selector0,
-    int selector1, unsigned long long rights);
-long obj_device_send(int device, void *message, unsigned long long length);
-long obj_device_recv(int device, ObjDeviceResult *completion);
-long obj_device_ctl(int device, unsigned int operation);
-long obj_usb_ctl(int handle, unsigned int operation, void *data,
-                 unsigned long long len);
 
 /* obj_invoke(ObjOpPutOid): replace the content of one explicitly named
  * persistent OID through a VkindSpace Handle carrying Vwrite.  arg0 is the
@@ -283,73 +295,34 @@ typedef struct ObjOpenGeSpaceReq {
 	unsigned long long	oid;
 } ObjOpenGeSpaceReq;
 
-/* obj_open(ObjOpenUart): port is the discovery-local UART index reported by
- * OBJINVOKE(ObjOpDeviceList) records with family ObjDeviceUart (selector0).
- * mode is OREAD(0), OWRITE(1) or ORDWR(2); flags and reserved are zero.  The
- * call requires the existing eve/bootstrap authority.  Read requires Vread,
- * write requires Vwrite, UartCtl requires Vcontrol and UartStatus/Info require
- * Vmeta. */
-typedef struct ObjOpenUartReq {
-	int			port;
-	int			mode;
-	unsigned int		flags;
-	unsigned int		reserved;
-} ObjOpenUartReq;
+/* obj_open(ObjOpenDevice) family requirements:
+ *
+ * Uart (selector0 = discovery port, selector1 = 0): options required;
+ * version/kind/flags must be zero; mode is OREAD(0), OWRITE(1) or ORDWR(2).
+ * The Handle carries only rights attenuated from that mode.  READ/WRITE are
+ * bounded byte streams, UartCtl requires Vcontrol and UartStatus/Info require
+ * Vmeta.  This is not a frame or packet API.
+ *
+ * Kbd (selector0 = selector1 = 0): options required; version/mode/kind zero
+ * and flags == OBJ_DEVICE_KBD_EXCLUSIVE.  The open claims the scan-code
+ * controller.  READ returns raw scan codes; KbdLeds requires Vcontrol.
+ *
+ * UsbControl (selector0 = devno, selector1 = epno): no options.  Opens the
+ * existing synchronous control session with SEND/RECV semantics below.
+ *
+ * UsbEndpoint (selector0 = devno, selector1 = epno): options required with
+ * kind OBJ_USB_EP_DATA or Obj_USB_EP_CTL and a valid mode.  DATA performs the
+ * existing exclusive data open; CTL references the endpoint for provider
+ * administration.  CTL endpoint references additionally require Vcontrol on
+ * the catalog.  There is still no USB bulk data API.
+ *
+ * Ethernet (selector0 = controller, selector1 = 0): no options.
+ */
 
-/* obj_invoke(ObjOpUsbList): one record per live USB endpoint.  The layout is
- * byte-compatible with the kernel/legacy Usbentry (include/usbctl.h): nine
- * int fields followed by a 128-byte name.  out points to an array of records,
- * outlen is the byte capacity and must be a multiple of sizeof(ObjUsbEntry).
- * A capacity above OBJ_USB_LISTMAX records is accepted and clamped to that
- * bound, matching obj_usb_list(); only the copied records are validated and
- * written.  out==NULL or outlen==0 is the legacy size query and returns the
- * total endpoint count without copying.  Otherwise the result is the number
- * of copied records (clamped to the available total), exactly like USBLIST.
- * Listing requires Vmeta on the USB service Handle.  This operation exposes
- * metadata only; it does not open an endpoint and does not provide USBIOCTL
- * or data transfer. */
-#define OBJ_USB_LISTMAX 256
-
-/* Endpoint kinds and open modes are the existing usbcore/legacy USB values.
- * ObjUsbEpReq.mode uses OREAD(0), OWRITE(1) or ORDWR(2). */
+/* USB endpoint kinds are the existing usbcore values; modes use OREAD,
+ * OWRITE and ORDWR. */
 #define OBJ_USB_EP_DATA  0
 #define OBJ_USB_EP_CTL   1
-#define OBJ_USB_MODE_READ  0
-#define OBJ_USB_MODE_WRITE 1
-#define OBJ_USB_MODE_RDWR  2
-
-/* obj_invoke(ObjOpUsbEpOpen): open one USB endpoint through an authorized
- * USB service Handle.  The service Handle must carry Vcreate, which is
- * granted only by OBJOPEN(ObjOpenUsb) to the trusted eve/bootstrap user and
- * never by the metadata-only default rights.  flags and reserved are zero.
- * The request carries no caller rights mask: the new endpoint Handle's
- * rights are derived from kind and mode.  DATA opens with the existing
- * usbcore_dataopen() semantics; CTL acquires the referenced endpoint without
- * a data open.  The result is a new process-local Handle.  OBJCLOSE (or
- * exec/exit) releases the endpoint exactly once when the last reference is
- * dropped.  Data I/O, USBIOCTL and control transfers remain unimplemented. */
-typedef struct ObjUsbEpReq {
-	int			devno;
-	int			epno;
-	int			kind;
-	int			mode;
-	unsigned int		flags;
-	unsigned int		reserved;
-} ObjUsbEpReq;
-
-typedef struct ObjUsbEntry {
-	int			idx;
-	int			devno;
-	int			epno;
-	int			ttype;
-	int			mode;
-	int			speed;
-	int			state;
-	int			inuse;
-	int			maxpkt;
-	char			name[128];
-} ObjUsbEntry;
-#define OBJ_USB_ENTRY_SIZE 164
 
 /* Byte-stream bound shared by the native Pipe, UART and KBD providers. */
 #define OBJ_STREAM_MAXIO 65536
@@ -361,10 +334,12 @@ typedef struct ObjUsbEntry {
  * their rights in the same atomic operation as child creation. */
 
 /* obj_invoke(ObjOpKbdLeds): set the shared keyboard LED state through an
- * authorized KBD Handle carrying Vcontrol.  The call always requires the
- * trusted eve/bootstrap user; handle 0 is rejected, so LED state is never a
- * global-handle privilege bypass.  in/out and their lengths must be zero;
- * arg0 carries the LED bits.  The result is 0. */
+ * authorized KBD Handle carrying Vcontrol.  Authorization is the Handle
+ * capability, not a repeated identity check: a legitimately delegated
+ * Vcontrol Handle remains usable by a non-privileged child.  Handle 0 is
+ * rejected, so LED state is never a global-handle privilege bypass.
+ * in/out and their lengths must be zero; arg0 carries the LED bits.  The
+ * result is 0. */
 
 /*
  * One typed, versioned INVOKE request/response.
@@ -479,21 +454,27 @@ long obj_list(void *records, unsigned long long count);
 /* Native byte-stream providers over the same five-call ABI. */
 long obj_pipe_create(ObjId *out);
 long obj_pipe_peer(int handle);
-/* Discovery helper: counts ObjDeviceUart catalog records.  There is no UART
- * object and no handle-less INVOKE operation. */
-long obj_uart_count(void);
-long obj_uart_open(int port, int mode);
 long obj_uart_ctl(int handle, void *cfg);
 long obj_uart_status(int handle, void *buf, unsigned long long len);
-long obj_kbd_open(void);
 long obj_kbd_leds(int handle, unsigned int leds);
 
-/* USB service provider.  obj_usb_list's count is a record count, not bytes;
- * ents==NULL or count==0 performs the legacy size query.  obj_usb_epopen
- * opens one endpoint through a service Handle carrying Vcreate and returns
- * a new endpoint Handle whose rights are derived from kind and mode. */
-long obj_usb_open(unsigned long long rights);
-long obj_usb_list(int handle, void *ents, unsigned long long count);
-long obj_usb_epopen(int handle, int devno, int epno, int kind, int mode);
+/* Common device catalog.  Opening a supported family requires an authorized
+ * catalog Handle; options is a bounded ObjDeviceOpenOptions record for the
+ * families documented above.  obj_catalog_device_open is a userland
+ * convenience that performs the two authorized operations and still returns
+ * the provider's exact error. */
+long obj_devices_open(unsigned long long rights);
+long obj_device_list(int catalog, ObjDeviceEntry *entries,
+		unsigned int count);
+long obj_device_open(int catalog, unsigned int family, int selector0,
+		int selector1, unsigned long long rights, void *options,
+		unsigned long long optlen);
+long obj_catalog_device_open(unsigned int family, int selector0,
+		int selector1, unsigned long long rights, void *options,
+		unsigned long long optlen);
+long obj_device_send(int device, void *message, unsigned long long length);
+long obj_device_recv(int device, ObjDeviceResult *completion);
+long obj_device_ctl(int device, unsigned int operation, void *data,
+		unsigned long long len);
 
 #endif /* PLAN2001_ABI_OBJ_H */

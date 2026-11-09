@@ -41,17 +41,16 @@ enum {
 	VkindGe		= 3,	/* persistent GE/O object capability (2 reserved) */
 	VkindSpace	= 4,	/* authorized open O Space capability */
 	VkindPipe	= 6,	/* one end of a native byte-stream Pipe pair (5 reserved) */
-	VkindUart	= 7,	/* native UART port, mode from OPEN */
+	VkindUart	= 7,	/* native UART port, opened through the device catalog */
 	VkindKbd	= 8,	/* exclusive PS/2 scan-code source */
-	VkindUsb	= 9,	/* USB service: endpoint metadata, no I/O */
-	VkindUsbEp	= 10,	/* one opened USB endpoint; no data path yet */
+	VkindUsbEp	= 10,	/* catalog-opened USB endpoint reference */
 	VkindConsole	= 11,	/* native process output stream */
 	VkindDevices = 13,	/* common device discovery/open authority */
 	VkindDevice = 14,
 	VkindNamespaceView = 15,	/* sealed role grants */
 	VkindNamespaceControl = 16,	/* caller's current namespace */
-	/* Kinds 2 (TCP), 5 (UDP6) and 12 (ProcessSelf) are reserved historical
-	 * identifiers and are never installed. */
+	/* Kinds 2 (TCP), 5 (UDP6), 9 (USB service) and 12 (ProcessSelf) are
+	 * reserved historical identifiers and are never installed. */
 };
 
 /* VOBJOPEN providers.  These select a concrete provider, not a data schema.

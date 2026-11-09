@@ -53,7 +53,7 @@ def run():
         p.obj_close(h)
         assert f == expected(body), (f,body)
         v,c,l,r,s = struct.unpack('<IIIIQ',env)
-        assert (v,c,l,r) == (1,ctl,len(f),0) and s > 0
+        assert (v,c,l,r) == (2,ctl,len(f),0) and s > 0
         assert rights == 9
         print('T13-RX',repr(f),repr(env))
         return ident
@@ -112,7 +112,7 @@ for i in range(START,8):
     b=p.obj_read(h,16384)
     assert b==p.obj_device_ether_info(d)[4]+bytes((2,0,0,0,19,1))+b'\\x88\\xb5'+('T13:F%02d'%i).encode()+bytes(39)
     assert p.obj_info(h)[10]==9
-    assert struct.unpack('<IIIIQ',env)[:4]==(1,0,60,0)
+    assert struct.unpack('<IIIIQ',env)[:4]==(2,0,60,0)
     ident=struct.pack('<QQQ',*p.obj_info(h)[:3])
     p.obj_close(h)
 assert p.obj_info(s)[13]==DROPS
@@ -132,7 +132,7 @@ p.obj_write(out,b'DONE'+ident+env)
     for pid,rd,gw in children:
         answer=p.obj_read(rd,52,15000)
         ok(answer[:4]==b'DONE' and answer[4:28]==struct.pack('<QQQ',*ident[:3]),'TEE same bytes object identity, ordered frames and independent overflow')
-        ok(struct.unpack('<IIIIQ',answer[28:])==(1,ctl,60,0,9),'TEE identical RX envelope')
+        ok(struct.unpack('<IIIIQ',answer[28:])==(2,ctl,60,0,9),'TEE identical RX envelope')
         p.obj_close(rd)
     reaped=[]
     for i in range(2):

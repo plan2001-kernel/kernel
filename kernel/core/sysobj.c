@@ -119,34 +119,6 @@ sysobjopen(sysva_list list)
 			error(Ebadarg);
 		return vobjopenstream(VopenGeSpace, req, (long)sizeof(VobjGeReq),
 			rights, (VobjId*)id);
-	case ObjOpenUart:
-	{
-		ObjOpenUartReq ur;
-
-		if(req == nil || len != sizeof ur)
-			error(Ebadarg);
-		validaddr((uintptr)req, sizeof ur, 0);
-		memmove(&ur, req, sizeof ur);
-		if(ur.flags != 0 || ur.reserved != 0)
-			error(Ebadarg);
-		/* OPENUART derives its rights from the native mode; an explicit
-		 * attenuation is applied after the open. */
-		if(rights & ~(uvlong)Vall)
-			error(Ebadarg);
-		if(ur.mode != OREAD && ur.mode != OWRITE && ur.mode != ORDWR)
-			error(Ebadarg);
-		return vobjuartopenrights(ur.port, ur.mode, rights, (VobjId*)id);
-	}
-	case ObjOpenKbd:
-		if(req != nil || len != 0)
-			error(Ebadarg);
-		if(rights != 0)
-			error(Eperm);
-		return vobjkbdopen((VobjId*)id);
-	case ObjOpenUsb:
-		if(req != nil || len != 0)
-			error(Ebadarg);
-		return vobjusbopen(rights, (VobjId*)id);
 	case ObjOpenConsole:
 		if(req == nil || len != sizeof(ObjOpenConsoleReq))
 			error(Ebadarg);
@@ -383,31 +355,6 @@ sysobjinvoke(sysva_list list)
 			error(Ebadarg);
 		c.result = vobjkbdleds(handle,
 			(int)bounded(c.arg0, 0x7fffffff, Ebadarg));
-		break;
-	case ObjOpUsbList:
-	{
-		uvlong cap;
-		long outlen;
-
-		if(c.in != nil || c.inlen != 0)
-			error(Ebadarg);
-		if(c.out == nil && c.outlen != 0)
-			error(Ebadarg);
-		if(c.outlen % sizeof(ObjUsbEntry) != 0)
-			error(Ebadarg);
-		/* A capacity beyond the record bound is accepted and clamped,
-		 * exactly like the obj_usb_list() adapter.  The provider then
-		 * validates only the bytes it actually copies. */
-		cap = (uvlong)OBJ_USB_LISTMAX * sizeof(ObjUsbEntry);
-		outlen = c.outlen > cap ? (long)cap : (long)c.outlen;
-		c.result = vobjusblist(handle, c.out, outlen);
-		break;
-	}
-	case ObjOpUsbEpOpen:
-		if(c.in == nil || c.inlen != sizeof(ObjUsbEpReq) ||
-		   c.out != nil || c.outlen != 0)
-			error(Ebadarg);
-		c.result = vobjusbepopen(handle, c.in);
 		break;
 	case ObjOpPutOid:
 		/* Replace one explicitly named OID through the Space's Owrite
