@@ -23,13 +23,16 @@ abortion(void)
 }
 
 /*
- * Shared RFORK core.  The direct RFORK(19) entry uses this function, so
- * forkchild, resource copying, rollback and parent/child linkage cannot
- * diverge.  The caller has already validated the Handle or the raw syscall
- * boundary; this function validates only the flag word and resources.
+ * Shared RFORK core.  The direct RFORK(19) and RFORKEX(143) entries use this
+ * function, so forkchild, resource copying, rollback and parent/child
+ * linkage cannot diverge.  The caller has already validated the Handle or
+ * the raw syscall boundary; this function validates only the flag word and
+ * resources.  VI is a prepared, pinned Handle plan (or nil); it is not
+ * mutated and it is committed only after every non-Handle resource has been
+ * copied successfully.
  */
-ulong
-kernrfork(ulong flag)
+static ulong
+kernrforkcore(ulong flag, Vinherit *vi)
 {
 	/*
 	 * Code using RFNOMNT expects to block all but
@@ -254,8 +257,10 @@ kernrfork(ulong flag)
 			incref(&up->egrp->ref);
 	}
 
-	/* N13: only explicitly selected Pipe endpoints cross this fork. */
-	pipeprocfork(p);
+	/* Only the validated explicit plan crosses this fork.  An ordinary
+	 * RFORK has no plan, so the child keeps its empty handle table. */
+	if(vi != nil)
+		vobjinheritcommit(p, vi);
 	procfork(p);
 
 	poperror();	/* abortion */
@@ -283,6 +288,47 @@ kernrfork(ulong flag)
 
 	ready(p);
 	sched();
+	return pid;
+}
+
+/* Ordinary RFORK: no object Handle ever crosses. */
+ulong
+kernrfork(ulong flag)
+{
+	return kernrforkcore(flag, nil);
+}
+
+/*
+ * RFORKEX: ordinary RFORK flags plus one bounded, explicit Handle plan.  The
+ * complete plan is validated and pinned before a child exists; the child is
+ * published only after every resource copy succeeds.  On failure the parent's
+ * Handle table and reference counts are unchanged.  Assigned child Handles
+ * are copied to CHILDHANDLES when it is non-NULL.
+ */
+ulong
+kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
+{
+	Vinherit vi;
+	ulong pid;
+	int i;
+
+	if((flag & RFPROC) == 0){
+		if(n != 0)
+			error(Ebadarg);
+		return kernrforkcore(flag, nil);
+	}
+	vobjinheritprepare(&vi, list, n);
+	if(waserror()){
+		vobjinheritrelease(&vi);
+		nexterror();
+	}
+	pid = kernrforkcore(flag, &vi);
+	if(childhandles != nil)
+		for(i = 0; i < vi.n; i++)
+			childhandles[i] = (uvlong)vobjinheritchildhandle(&vi,
+				vi.e[i].srchandle);
+	vobjinheritrelease(&vi);
+	poperror();
 	return pid;
 }
 
@@ -942,11 +988,16 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	int argn, cpu, i, nargs;
 	struct Oinherit *inh;
 	struct Oinheritv *inhv;
+	Vinhand plan[24];
+	Vinherit vi;
+	int nplan;
 	int lockup, lockp;
 	long n, cap, len;
 
 	if(soh == nil)
 		error(Ebadarg);
+	memset(&vi, 0, sizeof vi);
+	nplan = 0;
 	inh = nil;
 	inhv = nil;
 	buf = nil;
@@ -969,6 +1020,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			kprocchild(p, abortion);
 			ready(p);
 		}
+		vobjinheritrelease(&vi);
 		free(buf);
 		free(inh);
 		free(inhv);
@@ -1060,6 +1112,35 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		for(i = 0; i < (int)inhv->nhandles; i++)
 			if(inhv->h[i].rights & ~(uvlong)Vall) error(Ebadarg);
 	}
+	/* Translate both OSPAWN delegation lists into the one shared plan.
+	 * vhandles are explicit Handle/rights pairs; the legacy Pipe list is an
+	 * explicit Handle/read-write pair with the same attenuation rules. */
+	if(inhv != nil){
+		for(i = 0; i < (int)inhv->nhandles; i++){
+			if(nplan >= (int)(sizeof plan/sizeof plan[0]) ||
+			   inhv->h[i].handle > 0x7fffffffULL)
+				error(Ebadarg);
+			plan[nplan].handle = (int)inhv->h[i].handle;
+			plan[nplan].rights = inhv->h[i].rights;
+			plan[nplan].dstslot = 0;
+			nplan++;
+		}
+	}
+	if(inh != nil){
+		for(i = 0; i < (int)inh->npipes; i++){
+			int r = inh->pipes[i][1];
+
+			if(nplan >= (int)(sizeof plan/sizeof plan[0]) ||
+			   inh->pipes[i][0] <= 0 || r <= 0 || (r & ~3))
+				error(Ebadarg);
+			plan[nplan].handle = inh->pipes[i][0];
+			plan[nplan].rights = (uvlong)(((r & 1) ? Vread : 0) |
+				((r & 2) ? Vwrite : 0));
+			plan[nplan].dstslot = 0;
+			nplan++;
+		}
+	}
+	vobjinheritprepare(&vi, plan, nplan);
 	cpu = -1;
 	if(opt.cpu != ~0ULL){
 		if(opt.cpu > 0x7fffffffULL)
@@ -1167,18 +1248,18 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->vobjhandles = nil;
 	p->iomask = 0;
 	p->pgrp = newpgrp();
-	if(inhv != nil){
-		for(i = 0; i < (int)inhv->nhandles; i++)
-			vobjspawninherit(p, (int)inhv->h[i].handle, inhv->h[i].rights);
-	}
-	free(inhv);
-	inhv = nil;
+	/* One atomic, already validated Handle delegation.  A failed commit
+	 * aborts the child; the parent's Handle state is untouched. */
+	vobjinheritcommit(p, &vi);
 	if(inh != nil){
 		ocontextspawn(p, inh->view, inh->roles, inh->nroles);
-		pipespawn(p, inh->pipes, inh->npipes);
 		if(inh->stdoutpipe){
+			int ch;
+
 			if(inh->stdoutpipe > 0x7fffffffULL) error(Ebadarg);
-			pipeoutputset(p, inh->stdoutpipe);
+			ch = vobjinheritchildhandle(&vi, (int)inh->stdoutpipe);
+			if(ch == 0) error(Ebadarg);
+			pipeoutputset(p, ch);
 		}
 		for(i = 0; i < inh->nenv; i++){
 			if(memchr(inh->env[i].name, 0, 32) == nil || inh->env[i].name[0] == 0 ||
@@ -1186,6 +1267,9 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			envsetval(p->egrp, inh->env[i].name, inh->env[i].value);
 		}
 	}
+	vobjinheritrelease(&vi);
+	free(inhv);
+	inhv = nil;
 	free(inh);
 	inh = nil;
 	procsetup(p);
@@ -1398,6 +1482,53 @@ uintptr
 sysrfork(sysva_list list)
 {
 	return kernrfork((ulong)sysva_arg(list, long));
+}
+
+/*
+ * RFORKEX(143): direct atomic fork with explicit, validated object-Handle
+ * delegation.  Only the declared entries cross; the caller learns each
+ * assigned child Handle from the optional childhandles array.  The parent's
+ * table is never modified.
+ */
+uintptr
+sysrforkex(sysva_list list)
+{
+	struct Rforkex opt;
+	struct Rforkex *uopt;
+	uvlong *uch;
+	Vinhand list_[RFORKEX_MAXHANDLES];
+	ulong flag;
+	ulong pid;
+	int i;
+
+	flag = (ulong)sysva_arg(list, uvlong);
+	uopt = sysva_arg(list, struct Rforkex*);
+	uch = sysva_arg(list, uvlong*);
+	if(uopt == nil)
+		error(Ebadarg);
+	validaddr((uintptr)uopt, 2*sizeof(unsigned int), 0);
+	memset(&opt, 0, sizeof opt);
+	memmove(&opt, uopt, 2*sizeof(unsigned int));
+	if(opt.version != RFORKEX_VERSION || opt.count > RFORKEX_MAXHANDLES)
+		error(Ebadarg);
+	if(opt.count > 0){
+		validaddr((uintptr)&uopt->h[0],
+			opt.count*sizeof opt.h[0], 0);
+		memmove(opt.h, &uopt->h[0], opt.count*sizeof opt.h[0]);
+	}
+	if(uch != nil && opt.count > 0)
+		validaddr((uintptr)uch, opt.count*sizeof *uch, 1);
+	for(i = 0; i < (int)opt.count; i++){
+		if(opt.h[i].handle > 0x7fffffffULL ||
+		   (opt.h[i].rights & ~(uvlong)Vall) != 0 ||
+		   opt.h[i].dstslot > Vhandmax)
+			error(Ebadarg);
+		list_[i].handle = (int)opt.h[i].handle;
+		list_[i].rights = opt.h[i].rights;
+		list_[i].dstslot = (int)opt.h[i].dstslot;
+	}
+	pid = kernrforkex(flag, list_, (int)opt.count, uch);
+	return pid;
 }
 
 uintptr

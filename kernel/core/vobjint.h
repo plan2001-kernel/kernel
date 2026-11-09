@@ -5,6 +5,7 @@
 #include "../../runtime/abi/obj.h"
 
 typedef struct Ohand Ohand;
+typedef struct Vhand Vhand;
 
 /* Shared, bounded object/ABI limits. */
 enum {
@@ -68,11 +69,47 @@ void	osrevokehand(Ohand*);
 void	osviewgrantvalid(Ohand*);
 int	osvisibility(Ohand **grants, int count, int *allowed);
 
+/*
+ * One explicit process-local Handle delegation request.  Both RFORKEX and
+ * OSPAWN translate their public option records into this kernel form and use
+ * the same validation/commit code.  dstslot is 0 (allocate the lowest free
+ * child slot) or a 1-based child slot.
+ */
+typedef struct Vinhand {
+	int	handle;
+	uvlong	rights;
+	int	dstslot;
+} Vinhand;
+
+/*
+ * A fully validated and pinned inheritance plan.  prepare() looks up every
+ * source Handle and verifies rights, kind, generation and slot conflicts
+ * before a child is created; commit() installs the copies; release() drops
+ * the pinned source references.  The plan never mutates the parent.
+ */
+typedef struct Vinherit Vinherit;
+struct Vinherit {
+	int	n;
+	struct {
+		Vhand	*src;
+		int	srchandle;
+		int	rights;
+		int	slot;
+		ulong	gen;
+	} e[Vhandmax];
+};
+
+int	vobjinheritprepare(Vinherit*, Vinhand*, int);
+void	vobjinheritcommit(Proc*, Vinherit*);
+int	vobjinheritchildhandle(Vinherit*, int);
+void	vobjinheritrelease(Vinherit*);
+
 /* Process-lifecycle providers.  The OBJINVOKE operations validate the
  * caller's own ProcessSelf or Space capability, then call the shared kernel
  * cores that the retired direct syscalls used.  Keeping one core preserves
  * forkchild, OSPAWN layout, parent/child checks and pexit semantics. */
 ulong	kernrfork(ulong flag);
+ulong	kernrforkex(ulong flag, Vinhand*, int, uvlong*);
 long	kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc,
 		struct Ospawn *uopt);
 int	kernoterminate(int pid);
@@ -103,9 +140,6 @@ int	vobjlist(void *buf, long n);
  */
 int	vobjpipecreate(VobjId *id);
 int	vobjpipepeer(int handle);
-int	vobjpipeinherit(int handle, int rights);
-void	vobjpipeprocfork(Proc *child);
-void	vobjpipespawn(Proc *child, int (*entries)[2], int n);
 void	vobjpipeoutputset(Proc *p, int handle);
 long	vobjpipeoutputwrite(int handle, void *data, long n);
 int	vobjpipekernelinstall(Proc *proc, void *pipe, int end);

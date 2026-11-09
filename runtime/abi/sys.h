@@ -103,8 +103,9 @@
 #define	ENVDELETE	90
 #define	ENVLIST		91
 /* N13 experimental object views.  PIPEINHERIT=100 is RESERVED: the number
- * stays allocated forever but has no dispatch entry; use
- * OBJINVOKE(ObjOpPipeInherit). */
+ * stays allocated forever but has no dispatch entry.  Handle inheritance is
+ * declared atomically by RFORKEX(143) or OSPAWN options, never armed ahead
+ * of process creation. */
 #define OBIND           96 /* reserved */
 /* 97-99 reserved: retired object binding calls. */
 #define PIPEINHERIT     100 /* reserved */
@@ -200,10 +201,53 @@ struct Oinherit {
 /* flags=2: explicit attenuation of process-local object handles into a child.
  * Each entry duplicates the named parent handle into the child with the
  * requested subset of the parent's rights (0 means the parent's rights).
- * This is explicit delegation, never implicit inheritance. */
+ * This is explicit delegation, never implicit inheritance.  Child Handle
+ * numbers are allocated in list order to the lowest free child slots; they
+ * are not the parent's numbers. */
 struct Oinheritv {
- uvlong nhandles;
- struct { uvlong handle; uvlong rights; } h[8];
+	uvlong nhandles;
+	struct { uvlong handle; uvlong rights; } h[8];
 };
+
+/* RFORKEX(143): the direct, atomic process-creation call with explicit object
+ * Handle delegation.  It is ordinary RFORK(19) with one addition: a bounded,
+ * versioned options record naming the parent Handles that cross into the
+ * child and their exact rights attenuation.  RFORK(19) itself never copies an
+ * object Handle; there is no pending one-shot state and OBJINVOKE cannot arm
+ * a later fork.
+ *
+ * All entries are validated before the child is published: the source Handle
+ * must be live, carry Vdelegate, not be a subscription, and the requested
+ * rights must be a subset of the source rights (0 copies them).  The child
+ * starts with an empty Handle table; each entry is installed at dstslot
+ * (1..rforkex_maxslot()) or, when dstslot is 0, at the lowest free slot in
+ * list order.  dstslot conflicts are rejected.  The assigned child Handle for
+ * entry i is written to childhandles[i] when childhandles is non-NULL.  On any
+ * failure the parent's Handle state and reference counts are unchanged and no
+ * child is left published.
+ *
+ * flags are ordinary RFORK flags.  RFPROC is required when count is nonzero.
+ * The options pointer may be NULL when count is zero.  This call has no
+ * OContext, environment, Pipe-list or stdout options; those remain explicit
+ * OSPAWN-only fields and are not implicit inheritance. */
+#define RFORKEX			143
+enum {
+	RFORKEX_VERSION		= 1,
+	RFORKEX_MAXHANDLES	= 16,
+};
+
+struct Rforkex {
+	unsigned int	version;	/* RFORKEX_VERSION */
+	unsigned int	count;		/* <= RFORKEX_MAXHANDLES */
+	struct {
+		unsigned long long	handle;	/* parent process-local Handle */
+		unsigned long long	rights;	/* 0 = source rights */
+		unsigned long long	dstslot;/* 0 = lowest free; else 1..maxslot */
+	} h[RFORKEX_MAXHANDLES];
+};
+
+/* Generated user stub for the direct call; returns the child PID or -1. */
+long rforkex(unsigned long flags, struct Rforkex *opts,
+	unsigned long long *childhandles);
 
 #endif /* PLAN2001_ABI_SYS_H */

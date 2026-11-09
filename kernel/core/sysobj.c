@@ -367,14 +367,6 @@ sysobjinvoke(sysva_list list)
 			error(Ebadarg);
 		c.result = vobjpipepeer(handle);
 		break;
-	case ObjOpPipeInherit:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
-			error(Ebadarg);
-		if(c.arg0 > 3)
-			error(Ebadarg);
-		vobjpipeinherit(handle, (int)c.arg0);
-		c.result = 0;
-		break;
 	case ObjOpUartCtl:
 		if(c.in == nil || c.inlen != sizeof(Uartcfg))
 			error(Ebadarg);

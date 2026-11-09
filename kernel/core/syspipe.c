@@ -30,19 +30,6 @@ pipeprocexec(Proc *p)
 	p->stdoutpipe = 0;
 }
 
-void
-pipeprocfork(Proc *child)
-{
-	vobjpipeprocfork(child);
-}
-
-/* OSPAWN delegates only this call's validated, explicit list. */
-void
-pipespawn(Proc *child, int (*entries)[2], int n)
-{
-	vobjpipespawn(child, entries, n);
-}
-
 /* A console route is only a selected Pipe right, not hardware authority. */
 void
 pipeoutputset(Proc *p, int h)

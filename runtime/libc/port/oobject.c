@@ -258,18 +258,6 @@ obj_pipe_peer(int handle)
 	return obj_invoke(handle, &c, sizeof c);
 }
 
-/* One-shot, attenuated RFORK(RFPROC) selection.  rights uses the legacy
- * Pipe bits 1 (read) and 2 (write); the next successful RFPROC consumes it. */
-long
-obj_pipe_inherit(int handle, unsigned int rights)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpPipeInherit);
-	c.arg0 = rights;
-	return obj_invoke(handle, &c, sizeof c);
-}
-
 /* Discovery helper: count ObjDeviceUart records in the authorized common
  * device catalog.  There is no handle-less INVOKE operation and no UART
  * object invented just to report a count. */

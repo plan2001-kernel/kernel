@@ -65,9 +65,9 @@ enum {
 /* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 23, 24 and 35 are reserved
  * historical identifiers for the retired TCP6/UDP6 object interface, the
  * handle-less process listing and UART count, and the synthetic ProcessSelf
- * wait.  They have no dispatch handler.  Process handle introspection is the
- * direct bounded OBJLIST syscall and child wait is the direct typed OBJWAIT
- * syscall. */
+ * wait.  Number 22 is the retired one-shot Pipe RFORK selection.  They have
+ * no dispatch handler.  Process handle introspection is the direct bounded
+ * OBJLIST syscall and child wait is the direct typed OBJWAIT syscall. */
 enum {
 	ObjOpInfo	= 1,
 	ObjOpRead	= 2,
@@ -86,7 +86,8 @@ enum {
 	ObjOpKbdLeds	= 19,	/* KBD handle: privileged LED update */
 	ObjOpUsbList	= 20,	/* USB service: bounded Usbentry snapshot */
 	ObjOpUsbEpOpen	= 21,	/* USB service: open one endpoint Handle */
-	ObjOpPipeInherit = 22,	/* Pipe handle: arm one-shot RFORK selection */
+	/* 22 is reserved: the retired one-shot Pipe RFORK selection.  RFORKEX
+	 * declares its Handle delegation in the creation call itself. */
 	ObjOpPutOid	= 25,	/* Space handle: replace one named OID, no commit */
 	ObjOpHeapBreak	= 26,	/* RETIRED: direct BRK_(24) is used */
 	ObjOpTimeNow	= 27,	/* RETIRED: direct _NSEC(53) */
@@ -355,15 +356,9 @@ typedef struct ObjUsbEntry {
 #define OBJ_KBD_MAXREAD 4096
 #define OBJ_UART_STATMAX 65536
 
-/* obj_invoke(ObjOpPipeInherit): arm one explicit, one-shot RFPROC selection
- * on a Pipe Handle.  arg0 carries the legacy Pipe right bits 1 (read) and 2
- * (write); any other bit is Ebadarg.  The mapped Vread/Vwrite set must be a
- * subset of the Handle's rights (Eperm).  in/out and their lengths must be
- * zero.  The next successful RFORK(RFPROC) copies only armed endpoints,
- * preserving slot and generation, and consumes the mark.  The caller still
- * gets no implicit inheritance: an unarmed endpoint never crosses.  OSPAWN's
- * explicit `pipes` list is a separate path and never consumes this mark.
- * The result is 0. */
+/* Pipe inheritance is never armed through OBJINVOKE.  Use the direct
+ * RFORKEX(143) call, whose options record declares the crossing Handles and
+ * their rights in the same atomic operation as child creation. */
 
 /* obj_invoke(ObjOpKbdLeds): set the shared keyboard LED state through an
  * authorized KBD Handle carrying Vcontrol.  The call always requires the
@@ -484,7 +479,6 @@ long obj_list(void *records, unsigned long long count);
 /* Native byte-stream providers over the same five-call ABI. */
 long obj_pipe_create(ObjId *out);
 long obj_pipe_peer(int handle);
-long obj_pipe_inherit(int handle, unsigned int rights);
 /* Discovery helper: counts ObjDeviceUart catalog records.  There is no UART
  * object and no handle-less INVOKE operation. */
 long obj_uart_count(void);
