@@ -34,7 +34,7 @@ T13_PEER_PID=$!
 trap 'kill "$T13_PEER_PID" 2>/dev/null || true' EXIT
 sleep .1
 kill -0 "$T13_PEER_PID"
-( qob_main --no-build --tcg --cpus 2 --ncpu 2 --obootcpu 0 --timeout 180 \
+( qob_main --no-build --accel kvm:tcg --cpus 2 --ncpu 2 --obootcpu 0 --timeout 180 \
   --udp6-peer 31301:31302 --obootexec 0x4f45584543000003 \
   --output-dir "$T13_OUT" --expect '^T13-RESULT [0-9]+ PASS' "$@" )
 python3 - "$T13_OUT" <<'PY'
