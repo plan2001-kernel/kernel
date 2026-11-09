@@ -350,6 +350,9 @@ struct Pgrp
 	RWLock	ns;			/* protects devmask */
 	void	*ocontext;		/* bounded native object view */
 	uchar	devmask[256/8];		/* Room for 256 devices */
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	ulong	diagid;			/* diagnostic identity, never an ABI handle */
+#endif
 };
 
 struct Rgrp

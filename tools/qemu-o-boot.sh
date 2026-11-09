@@ -561,6 +561,7 @@ qob_stop_qemu()
 
 QOB_CURRENT_PID=
 QOB_MONDIR=
+QOB_ACCEL_SELECTED=
 
 qob_cleanup()
 {
@@ -572,6 +573,53 @@ qob_cleanup()
 		rm -rf "$QOB_MONDIR"
 		QOB_MONDIR=
 	fi
+}
+
+# Run one HMP monitor command and print its reply without ANSI escapes.
+# Used only for validation evidence, e.g. the actually selected accelerator.
+qob_monitor_query()
+{
+	local mon=$1 cmd=$2
+	python3 - "$mon" "$cmd" <<'PY'
+import re
+import socket
+import sys
+import time
+
+mon, cmd = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+deadline = time.time() + 5
+while True:
+    try:
+        s.connect(mon)
+        break
+    except OSError:
+        if time.time() >= deadline:
+            raise SystemExit("qemu monitor socket did not appear")
+        time.sleep(0.1)
+
+def read_to_prompt():
+    buf = b""
+    end = time.time() + 5
+    while time.time() < end:
+        s.settimeout(0.2)
+        try:
+            part = s.recv(4096)
+        except socket.timeout:
+            continue
+        if not part:
+            break
+        buf += part
+        if b"(qemu) " in buf:
+            break
+    return buf
+
+read_to_prompt()                 # discard the monitor banner / first prompt
+s.sendall((cmd + "\n").encode())
+buf = read_to_prompt()
+text = re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", buf).decode("utf-8", "replace")
+print(text.replace("\r", " ").strip())
+PY
 }
 
 # Type an ASCII file into the guest's native PS/2 REPL through the QEMU HMP
@@ -736,6 +784,13 @@ qob_boot_once()
 		fi
 		if [ "$success_seen" = 0 ] && qob_has_ere "$success" "$serial"; then
 			success_seen=1
+			if [ -z "${QOB_ACCEL_SELECTED:-}" ]; then
+				QOB_ACCEL_SELECTED=$(qob_monitor_query "$mon" "info kvm" 2>/dev/null |
+					tr '\n' ' ')
+				QOB_ACCEL_SELECTED=$(printf '%s' "$QOB_ACCEL_SELECTED" |
+					grep -o 'kvm support: [a-z]*' | head -1 || true)
+				[ -n "$QOB_ACCEL_SELECTED" ] || QOB_ACCEL_SELECTED=unknown
+			fi
 			if [ "$mode" = repl ]; then
 				# The native REPL prints its prompt without a newline.
 				local pdeadline=$(( $(date +%s) + 10 ))
@@ -1017,6 +1072,7 @@ PY
 		printf 'controller=%s\n' "$QOB_CONTROLLER"
 		printf 'network=%s\n' "$([ -n "$QOB_UDP6_PEER" ] && echo "udp-encapsulated-peer:$QOB_UDP6_PEER" || echo none)"
 		printf 'accel=%s\n' "$QOB_ACCEL"
+		printf 'accel_selected=%s\n' "${QOB_ACCEL_SELECTED:-unknown}"
 		printf 'qemu=%s\n' "$("$QOB_QEMU" --version | head -1)"
 		printf 'ovmf_code=%s\novmf_vars=%s\n' "$QOB_OVMF_CODE" "$QOB_OVMF_VARS"
 		printf 'kernel=%s\nkernel_sha256=%s\n' "$QOB_KERNEL" "$(sha256sum "$QOB_KERNEL" | awk '{print $1}')"

@@ -788,9 +788,21 @@ ocontextspawn(Proc *child, int mode, char (*roles)[32], int nr)
 		/* SHARE opts into the whole mutable view, with every role listed. */
 		if(!octxsame(snapshot, child->pgrp->ocontext) ||
 					!octxmatches(up->pgrp->ocontext, snapshot)) error("O: selected view changed");
-		closepgrp(child->pgrp);
-		child->pgrp = up->pgrp;
-		incref(&child->pgrp->ref);
+		/*
+		 * Acquire the parent's reference before dropping the child's
+		 * fresh group.  The child stays unpublished, but ordering the
+		 * transfer this way never leaves it with a released Pgrp and
+		 * makes a later spawn-failure rollback unambiguous.
+		 */
+		{
+			Pgrp *parent = up->pgrp;
+			Pgrp *old;
+
+			incref(&parent->ref);
+			old = child->pgrp;
+			child->pgrp = parent;
+			closepgrp(old);
+		}
 	}
 	poperror();
 	octxput(snapshot);
