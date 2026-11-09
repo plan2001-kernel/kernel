@@ -2130,6 +2130,18 @@ vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id)
 	ep = usbcore_getep(devno, epno);
 	if(ep == nil)
 		error(Ebadarg);
+	/* The selector is not authority and the requested kind is not a
+	 * description of the endpoint: validate it against the actual usbcore
+	 * transfer type before any data-open or public Handle exists. */
+	if(ep->dev->state == Ddetach){
+		usbcore_putep(ep);
+		error("device is detached");
+	}
+	if((kind == USBCTL && ep->ttype != Tctl)
+	|| (kind == USBDATA && (ep->ttype == Tctl || ep->ttype == Tnone))){
+		usbcore_putep(ep);
+		error(Ebadarg);
+	}
 	ve = smalloc(sizeof *ve);
 	if(ve == nil){
 		usbcore_putep(ep);

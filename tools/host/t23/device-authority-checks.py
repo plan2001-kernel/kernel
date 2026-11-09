@@ -190,6 +190,31 @@ p.obj_close(h)
     ok(d > 0, 'USB control session close/reopen')
     p.obj_close(d)
 
+    auth = p.obj_devices_open(2248)
+    rootctl = usbeps[0]
+    deny(lambda: p.obj_device_open(auth, p.OBJ_DEVICE_USB_ENDPOINT,
+         rootctl[2], rootctl[3], 0, opt(2, 0, 0)), bad)
+    eh = p.obj_device_open(auth, p.OBJ_DEVICE_USB_ENDPOINT,
+                           rootctl[2], rootctl[3], 0, opt(2, 1, 0))
+    ok(p.obj_info(eh)[8] == p.VKIND_USB_EP,
+       'CTL kind accepted after wrong-kind rejection')
+    p.obj_close(eh)
+    data_eps = [e for e in usbeps if e[7] not in (0, 1)]
+    if data_eps:
+        dp = data_eps[0]
+        deny(lambda: p.obj_device_open(auth, p.OBJ_DEVICE_USB_ENDPOINT,
+             dp[2], dp[3], 0, opt(2, 1, 0)), bad)
+        deny(lambda: p.obj_device_open(auth, p.OBJ_DEVICE_USB_CONTROL,
+             dp[2], dp[3]), bad)
+        eh = p.obj_device_open(auth, p.OBJ_DEVICE_USB_ENDPOINT,
+                               dp[2], dp[3], 0, opt(2, 0, 0))
+        ok(p.obj_info(eh)[8] == p.VKIND_USB_EP,
+           'DATA endpoint kind accepted after wrong-kind rejection')
+        p.obj_close(eh)
+    else:
+        skip('DATA endpoint kind', 'no enumerated DATA endpoint in this boot')
+    p.obj_close(auth)
+
     data_svc = p.obj_devices_open(2184)
     deny(lambda: p.obj_device_ctl(data_svc, 1, bytearray(4)), perm)
     p.obj_close(data_svc)
