@@ -216,11 +216,11 @@ p.obj_close(h)
     p.obj_close(auth)
 
     data_svc = p.obj_devices_open(2184)
-    deny(lambda: p.obj_device_ctl(data_svc, 1, bytearray(4)), perm)
+    deny(lambda: p.obj_device_usb_global_ctl(data_svc, 1, bytearray(4)), perm)
     p.obj_close(data_svc)
     admincat = p.obj_devices_open(2248)
     admin = p.obj_grant(admincat, 8 + 64 + 128)
-    ok(p.obj_device_ctl(admin, 1, bytearray(struct.pack('<i', 0))) == 0,
+    ok(p.obj_device_usb_global_ctl(admin, 1, bytearray(struct.pack('<i', 0))) == 0,
        'catalog Vcontrol USB debug administration')
     p.obj_close(admin)
     p.obj_close(admincat)

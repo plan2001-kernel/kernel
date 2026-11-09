@@ -408,12 +408,7 @@ static mp_obj_t p9_vobjgrant(mp_obj_t h,mp_obj_t rights){
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_vobjgrant_obj,p9_vobjgrant);
 
 static mp_obj_t p9_vobjrevoke(mp_obj_t h){
- VobjInfo i;int handle=mp_obj_get_int(h);
- if(obj_info(handle,&i)==0 && i.kind==VkindFifo)
-  check(obj_fifo_shutdown(handle));
- else
-  check(obj_revoke(handle));
- return mp_const_none;
+ check(obj_revoke(mp_obj_get_int(h)));return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjrevoke_obj,p9_vobjrevoke);
 
@@ -633,15 +628,10 @@ static mp_obj_t p9_objgrant(mp_obj_t h,mp_obj_t rights){
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objgrant_obj,p9_objgrant);
 
+/* Capability revocation only.  A FIFO is a transport, not a revoked grant;
+ * use obj_fifo_shutdown() for FIFO shutdown. */
 static mp_obj_t p9_objrevoke(mp_obj_t h){
- VobjInfo i;int handle=mp_obj_get_int(h);
- /* Historical convenience name: GE/O revocation and FIFO transport
-  * shutdown are separate kernel operations. */
- if(obj_info(handle,&i)==0 && i.kind==VkindFifo)
-  check(obj_fifo_shutdown(handle));
- else
-  check(obj_revoke(handle));
- return mp_const_none;
+ check(obj_revoke(mp_obj_get_int(h)));return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objrevoke_obj,p9_objrevoke);
 
@@ -847,33 +837,54 @@ static mp_obj_t p9_devicerx(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicerx_obj,p9_devicerx);
 
-/* Device control is IOCTL(145).  The historical (handle, op, buffer)
- * convenience form maps the provider-specific operation to a typed IOCTL
- * based on the handle kind; no device payload travels through this route. */
-static mp_obj_t p9_devicectl(size_t n,const mp_obj_t *a){
+/* Device control is IOCTL(145).  Each adapter names its own typed operation
+ * and passes the real Python buffer length, so choosing a provider never
+ * requires a metadata (Vmeta) lookup. */
+static void devctlargs(size_t n,const mp_obj_t *a,void **buf,unsigned long long *len){
  mp_buffer_info_t b;
- VobjInfo i;
- int h=mp_obj_get_int(a[0]),op=mp_obj_get_int(a[1]);
- void *buf=nil;unsigned long long len=0;
- if(n>2){
+ *buf=nil;*len=0;
+ if(n>2 && a[2]!=mp_const_none){
   mp_get_buffer_raise(a[2],&b,MP_BUFFER_WRITE);
   if(b.len>OBJ_DEVICE_MAXPAYLOAD)
    mp_raise_ValueError(MP_ERROR_TEXT("device control buffer limit"));
-  buf=b.buf;len=b.len;
+  *buf=b.buf;*len=b.len;
  }
- if(obj_info(h,&i)<0)raise_err();
- if(i.kind==VkindDevices)
-  return check(obj_device_usb_global_ctl(h,(unsigned)op,buf,len));
- if(i.kind==VkindUsbEp)
-  return check(obj_device_usb_ep_ctl(h,(unsigned)op,buf,len));
- if(op==1)return check(obj_device_usb_clear_halt(h));
- if(op==2)return check(obj_device_ether_status(h,buf));
- if(op==3)return check(obj_device_ether_detach(h));
- /* Unknown provider request: pass an unknown IOCTL operation so the kernel
-  * returns its normal Ebadctl error instead of inventing a userland one. */
- return check(obj_device_ioctl(h,0xffffffffu,nil,0,0));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devicectl_obj,2,3,p9_devicectl);
+
+static mp_obj_t p9_deviceioctl(size_t n,const mp_obj_t *a){
+ void *buf;unsigned long long len,arg0=0;
+ devctlargs(n,a,&buf,&len);
+ if(n>3)arg0=(unsigned long long)mp_obj_get_int(a[3]);
+ return check(obj_device_ioctl(mp_obj_get_int(a[0]),
+   (unsigned)mp_obj_get_int(a[1]),buf,len,arg0));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_deviceioctl_obj,2,4,p9_deviceioctl);
+
+static mp_obj_t p9_devusbglobal(size_t n,const mp_obj_t *a){
+ void *buf;unsigned long long len;
+ devctlargs(n,a,&buf,&len);
+ return check(obj_device_usb_global_ctl(mp_obj_get_int(a[0]),
+   (unsigned)mp_obj_get_int(a[1]),buf,len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devusbglobal_obj,2,3,p9_devusbglobal);
+
+static mp_obj_t p9_devusbep(size_t n,const mp_obj_t *a){
+ void *buf;unsigned long long len;
+ devctlargs(n,a,&buf,&len);
+ return check(obj_device_usb_ep_ctl(mp_obj_get_int(a[0]),
+   (unsigned)mp_obj_get_int(a[1]),buf,len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devusbep_obj,2,3,p9_devusbep);
+
+static mp_obj_t p9_devusbclearhalt(mp_obj_t h){
+ return check(obj_device_usb_clear_halt(mp_obj_get_int(h)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_devusbclearhalt_obj,p9_devusbclearhalt);
+
+static mp_obj_t p9_devedetach(mp_obj_t h){
+ return check(obj_device_ether_detach(mp_obj_get_int(h)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_devedetach_obj,p9_devedetach);
 
 static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
  ObjEtherStatus i;mp_obj_t a[15];
@@ -997,7 +1008,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_send), MP_ROM_PTR(&p9_devicesend_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_recv), MP_ROM_PTR(&p9_devicerecv_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_rx), MP_ROM_PTR(&p9_devicerx_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_device_ctl), MP_ROM_PTR(&p9_devicectl_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_ioctl), MP_ROM_PTR(&p9_deviceioctl_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_usb_global_ctl), MP_ROM_PTR(&p9_devusbglobal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_space), MP_ROM_PTR(&p9_objopenspace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },

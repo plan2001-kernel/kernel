@@ -95,7 +95,7 @@ exec(source.decode())
     # Real revoke closes the RX queue while the child polls it.
     pid,command,output,response,rf=start()
     receive()
-    p.obj_revoke(rf)
+    p.obj_fifo_shutdown(rf)
     s=receive()
     ok(s[0] and s[1]=='transport-error' and s[7]['transport_error']==1,'RX revoke stops service and releases device')
     got,status=p.wait()

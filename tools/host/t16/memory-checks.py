@@ -284,7 +284,11 @@ def run():
     p.obj_bind(fifo, 't16fifo', p.VSUBSCRIBE | p.VMETA | p.VCONTROL)
     opened_fifo = p.obj_open_binding('t16fifo')
     sub = p.obj_subscribe(opened_fifo, p.VRECV | p.VMETA)
-    p.obj_revoke(fifo)
+    try: p.obj_revoke(fifo)
+    except OSError: pass
+    else: raise AssertionError('FIFO revoke accepted')
+    assert not p.obj_stat(fifo)[5]
+    p.obj_fifo_shutdown(fifo)
     assert p.obj_stat(fifo)[5] and p.obj_stat(sub)[6]
     denied(lambda: p.obj_receive(sub, 0))
     p.obj_bind(0, 't16fifo', 0, p.OBJ_BIND_REMOVE)

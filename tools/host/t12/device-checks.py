@@ -78,7 +78,7 @@ def run():
     meta = p.obj_grant(d, 8)
     deny(lambda: p.obj_device_send(meta, query), perm)
     deny(lambda: p.obj_device_recv(meta), perm)
-    deny(lambda: p.obj_device_ctl(meta, 1), perm)
+    deny(lambda: p.obj_device_usb_clear_halt(meta), perm)
     deny(lambda: p.obj_grant(meta, 2), perm)
     p.obj_close(meta)
     send = p.obj_grant(d, 2|4|8)
@@ -89,11 +89,15 @@ def run():
     deny(lambda: p.obj_device_send(send, bytes((163, 3, 8, 0, 1, 0, 4, 0))), perm)
     ok(len(exchange(d, query)) == 4, 'denial does not poison session')
     p.obj_close(send)
-    ok(p.obj_device_ctl(d, 1) == 0, 'authorized native control')
-    deny(lambda: p.obj_device_ctl(d, 99), 'bad process or channel control request')
+    ok(p.obj_device_usb_clear_halt(d) == 0, 'authorized native control')
+    ctl_only = p.obj_grant(d, p.VCONTROL)
+    ok(p.obj_device_usb_clear_halt(ctl_only) == 0,
+       'Vcontrol-only control works without Vmeta')
+    p.obj_close(ctl_only)
+    deny(lambda: p.obj_device_ioctl(d, 99), 'bad process or channel control request')
     seq = p.obj_device_send(d, query)
     deny(lambda: p.obj_device_send(d, query), busy)
-    deny(lambda: p.obj_device_ctl(d, 1), busy)
+    deny(lambda: p.obj_device_usb_clear_halt(d), busy)
     h, got, fam, length = p.obj_device_recv(d)
     data = p.obj_read(h, 32)
     ok(got == seq and fam == 1 and length == 4 and len(data) == 4, 'complete root status')
@@ -137,7 +141,7 @@ def run():
     alias_handle = p.obj_grant(d, 206)
     deny(lambda: p.obj_device_send(d, bytes((192, 1, 0, 0, 0, 0, 0, 0))), 'root hub is a toy hub')
     deny(lambda: p.obj_device_send(alias_handle, query), failed)
-    deny(lambda: p.obj_device_ctl(alias_handle, 1), failed)
+    deny(lambda: p.obj_device_usb_clear_halt(alias_handle), failed)
     deny(lambda: p.obj_device_recv(alias_handle), 'device: no completion')
     p.obj_close(d)
     p.obj_close(alias_handle)
@@ -149,7 +153,7 @@ def run():
     # transfers below exercise the T12 OBJ device session and actual HCI ring.
     svc = p.obj_devices_open(2248)
     meta_svc = p.obj_devices_open()
-    deny(lambda: p.obj_device_ctl(meta_svc, 1, bytearray(4)), perm)
+    deny(lambda: p.obj_device_usb_global_ctl(meta_svc, 1, bytearray(4)), perm)
     deny(lambda: p.obj_device_open(meta_svc, 5, dev, 0, 0, epo(1, 2)), perm)
     p.obj_close(meta_svc)
     data_svc = p.obj_devices_open(2184)
@@ -158,9 +162,9 @@ def run():
     p.obj_close(data_svc)
     ctl = p.obj_device_open(svc, 5, dev, 0, 0, epo(1, 2))
     denied_ctl = p.obj_grant(ctl, 8)
-    deny(lambda: p.obj_device_ctl(denied_ctl, 8, bytearray()), perm)
+    deny(lambda: p.obj_device_usb_ep_ctl(denied_ctl, 8, bytearray()), perm)
     p.obj_close(denied_ctl)
-    deny(lambda: p.obj_device_ctl(ctl, 3, bytearray(1)), bad)
+    deny(lambda: p.obj_device_usb_ep_ctl(ctl, 3, bytearray(1)), bad)
     usb_entries = [e for e in p.obj_device_list(svc) if e[1] in (1, 5)]
     port = 0
     print('T12-USB-ENTRIES', usb_entries)
@@ -180,11 +184,11 @@ def run():
     newdev = bytearray(24)
     newdev[0] = speed
     newdev[4] = port
-    ok(p.obj_device_ctl(ctl, 3, newdev) == 0, 'OBJ administration prepares real child endpoint')
+    ok(p.obj_device_usb_ep_ctl(ctl, 3, newdev) == 0, 'OBJ administration prepares real child endpoint')
     name = bytes(newdev[8:]).split(b'\x00')[0].decode()
     child = int(name[2:].split('.')[0])
     child_ctl = p.obj_device_open(svc, 5, child, 0, 0, epo(1, 2))
-    p.obj_device_ctl(child_ctl, 8, bytearray())  # existing USBaddress
+    p.obj_device_usb_ep_ctl(child_ctl, 8, bytearray())  # existing USBaddress
     peripheral = p.obj_device_open(c, 1, child, 0)
     descriptor_req = bytes((128, 6, 0, 1, 0, 0, 18, 0))
     descriptor = exchange(peripheral, descriptor_req)
@@ -198,7 +202,7 @@ def run():
     if not dataeps:
         # The fixture has no device driver to configure a data endpoint.
         # Existing USBnew administration creates one for kind validation.
-        p.obj_device_ctl(child_ctl, 2,
+        p.obj_device_usb_ep_ctl(child_ctl, 2,
                          bytearray(struct.pack('<iii', 5, 4, 2)))
         eps = [e for e in p.obj_device_list(svc)
                if e[1] == 5 and e[2] == child]
@@ -340,7 +344,7 @@ p.obj_write(out,b'SENT')
     # old aliases.  HCI transfers interrupted by hot unplug are not simulated.
     seq = p.obj_device_send(peripheral, descriptor_req)
     detached_reply, got, fam, length = p.obj_device_recv(peripheral)
-    p.obj_device_ctl(child_ctl, 4, bytearray())  # existing USBdetach
+    p.obj_device_usb_ep_ctl(child_ctl, 4, bytearray())  # existing USBdetach
     deny(lambda: p.obj_device_send(peripheral, descriptor_req), 'device is detached')
     deny(lambda: p.obj_device_send(peripheral, descriptor_req), failed)
     deny(lambda: p.obj_device_open(svc, 5, child, 0, 0, epo(1, 2)),
