@@ -87,7 +87,10 @@ Visibility uses an epoch-validated snapshot and omits unauthorized identities.
 seal is monotonic and group-scoped: it denies new or replacement `OBJBIND`
 role bindings and `NamespaceView` creation/attachment, while removal of an
 existing role, opening an unchanged role, visibility enumeration, view detach,
-and already opened Handles remain permitted. A plain `RFPROC` child shares the
+and already opened Handles remain permitted. Extension admission and the
+corresponding `OContext` update are performed under one `Pgrp` gate, so a
+concurrent `RFNOMNT` cannot be interleaved between the check and the mutation.
+A plain `RFPROC` child shares the
 same seal; `RFNAMEG` copies the seal together with an independent `OContext`;
 `RFCNAMEG` keeps the inherited seal but starts with no roles. `SPAWN` still
 creates a fresh unsealed group with only explicitly selected authorities,

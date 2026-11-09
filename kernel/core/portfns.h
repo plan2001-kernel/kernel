@@ -201,7 +201,8 @@ ulong		perfticks(void);
 _Noreturn void	pexit(char*, int);
 void		pgrpcpy(Pgrp*, Pgrp*, int);
 void		pgrpsealnamespace(Pgrp*);
-int		pgrpnamespaceextendok(Pgrp*);
+int		pgrpnamespaceextendbegin(Pgrp*);
+void		pgrpnamespaceextendend(Pgrp*);
 ulong		pidalloc(Proc*);
 #define		waserror()		setlabel(&up->errlab[up->nerrlab++])
 #define		poperror()		up->nerrlab--

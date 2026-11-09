@@ -119,6 +119,13 @@ pgrpcpy(Pgrp *to, Pgrp *from, int copyview)
  * gain new role bindings or attach additional namespace views. It does not
  * delete existing bindings, revoke opened Handles, or block removal,
  * visibility or detach. Every process sharing the group observes the seal.
+ *
+ * Admission and the following OContext mutation must happen under one read
+ * hold. A successful begin returns with the gate held and must be paired with
+ * exactly one end, including on error paths. This makes the check and the
+ * extension one linearizable step against pgrpsealnamespace(). Lock order is
+ * Pgrp.ns before OContext locks; no caller may hold an OContext or authority
+ * gate when calling begin.
  */
 void
 pgrpsealnamespace(Pgrp *pgrp)
@@ -130,15 +137,23 @@ pgrpsealnamespace(Pgrp *pgrp)
 }
 
 int
-pgrpnamespaceextendok(Pgrp *pgrp)
+pgrpnamespaceextendbegin(Pgrp *pgrp)
 {
-	int ok;
-
-	assert(pgrp != nil);
+	if(pgrp == nil)
+		return 0;
 	rlock(&pgrp->ns);
-	ok = (pgrp->flags & PgrpNsSealed) == 0;
+	if(pgrp->flags & PgrpNsSealed){
+		runlock(&pgrp->ns);
+		return 0;
+	}
+	return 1;
+}
+
+void
+pgrpnamespaceextendend(Pgrp *pgrp)
+{
+	assert(pgrp != nil);
 	runlock(&pgrp->ns);
-	return ok;
 }
 
 /*

@@ -689,20 +689,6 @@ obootstrap(Proc *p)
 	return p != nil && p == bootowner && p->pid == bootpid;
 }
 
-/* RFNOMNT seals the Pgrp against namespace extension. */
-static void
-onscanextend(void)
-{
- if(up->pgrp==nil || !pgrpnamespaceextendok(up->pgrp)) error(Eperm);
-}
-/* Low-level grant admission for the NamespaceControl provider.  The
- * provider owns the sealed view and attachment lifecycle in sysvobj.c. */
-void
-osviewpermitted(void)
-{
- onscanextend();
-}
-
 void
 oscheckrole(void *context, char *name, int geonly)
 {

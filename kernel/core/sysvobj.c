@@ -3027,7 +3027,6 @@ vobjnamespacecreate(int control, char (*roles)[32], int nr)
 	int i, j, handle;
 
 	vobjnamespacecheck(control);
-	osviewpermitted();
 	if(roles == nil || nr <= 0 || nr > Obindmax)
 		error(Ebadarg);
 	validaddr((uintptr)roles, nr*Onamemax, 0);
@@ -3055,10 +3054,20 @@ vobjnamespacecreate(int control, char (*roles)[32], int nr)
 			if(strcmp(names[i], names[j]) == 0)
 				error(Ebadarg);
 		oscheckrole(up->pgrp->ocontext, names[i], 1);
-		octxcopybinding(view->provider, up->pgrp->ocontext, names[i]);
 	}
+	/* The view's authority is acquired under the same gate as binding and
+	 * attachment, so RFNOMNT cannot interleave with creation. */
+	if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
+	if(waserror()){
+		pgrpnamespaceextendend(up->pgrp);
+		nexterror();
+	}
+	for(i=0; i<nr; i++)
+		octxcopybinding(view->provider, up->pgrp->ocontext, names[i]);
 	if(epoch != octxepoch(up->pgrp->ocontext))
 		error("O: namespace changed; retry");
+	poperror();
+	pgrpnamespaceextendend(up->pgrp);
 	handle = vobjinstallohand(view, VkindNamespaceView);
 	view = nil;
 	poperror();
@@ -3073,7 +3082,6 @@ vobjnamespaceattach(int control, int handle, int mode)
 	int n=0, i;
 
 	vobjnamespacecheck(control);
-	osviewpermitted();
 	if(mode < 0 || mode > 2)
 		error(Ebadarg);
 	view = vobjholdohand(handle, VkindNamespaceView, Vcontrol);
@@ -3088,7 +3096,15 @@ vobjnamespaceattach(int control, int handle, int mode)
 	for(i=0; i<n; i++)
 		osviewgrantvalid(grants[i]);
 	token = voidget();
+	/* Admission and composition are one step against RFNOMNT. */
+	if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
+	if(waserror()){
+		pgrpnamespaceextendend(up->pgrp);
+		nexterror();
+	}
 	octxcompose(up->pgrp->ocontext, view->provider, mode, token);
+	poperror();
+	pgrpnamespaceextendend(up->pgrp);
 	poperror();
 	for(i=0; i<n; i++) ohandput(grants[i]);
 	ohandput(view);
@@ -3541,8 +3557,6 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
  if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
  if(h->sub) error(Eperm);
  if(h->obj->kind==VkindNamespaceControl) error(Eperm);
- /* RFNOMNT forbids namespace extension, not removal of an existing role. */
- if(!pgrpnamespaceextendok(up->pgrp)) error(Eperm);
  if(rights==0) rights=h->rights;
  if(rights & ~(uvlong)h->rights) error(Eperm);
  if(h->obj->kind==VkindGe){
@@ -3558,7 +3572,13 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
   vobjput(bound);bound=nil;
  }else
   nh=vhandalloc(h->obj,nil,(int)rights);
+ /* RFNOMNT forbids namespace extension, not removal of an existing role.
+  * Admission and the bind are one step against pgrpsealnamespace(). */
+ if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
+ if(waserror()){pgrpnamespaceextendend(up->pgrp);nexterror();}
  octxbindobject(up->pgrp->ocontext,name,nh,m);
+ poperror();
+ pgrpnamespaceextendend(up->pgrp);
  poperror();vhandput(nh);vhandput(h);return 0;
 }
 

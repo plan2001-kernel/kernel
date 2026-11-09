@@ -352,7 +352,7 @@ enum
 struct Pgrp
 {
 	Ref ref;
-	RWLock	ns;			/* protects flags */
+	RWLock	ns;			/* protects flags; extension/ seal gate */
 	void	*ocontext;		/* bounded native object view */
 	uint	flags;
 #ifdef PLAN2001_LIFECYCLE_DIAG
