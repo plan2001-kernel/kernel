@@ -49,6 +49,7 @@ qob_set_defaults()
 	: "${QOB_CONTROLLER:=virtio}"
 	: "${QOB_UDP6_PEER:=}"
 	: "${QOB_TCG:=0}"
+	: "${QOB_ACCEL:=}"
 	: "${QOB_INTERACTIVE:=0}"
 	: "${QOB_BUILD:=auto}"
 	: "${QOB_REPL_INPUT:=}"
@@ -94,6 +95,7 @@ options:
                         Ethernet peer (host service port, QEMU local port)
   --timeout SEC         boot timeout (default 120)
   --tcg                 use TCG instead of KVM (slow fallback)
+  --accel MODE          kvm, tcg or kvm:tcg (try KVM, then TCG)
   --interactive         open a GTK window and hold it QOB_HOLD seconds
                         (default 15) after boot; serial is still logged
   --no-repl             boot with -N (SYSTEM IDLE) instead of -I (REPL)
@@ -194,11 +196,16 @@ qob_preflight()
 		esac
 	fi
 
-	if [ "$QOB_TCG" != 1 ]; then
+	QOB_ACCEL=${QOB_ACCEL:-$([ "$QOB_TCG" = 1 ] && echo tcg || echo kvm)}
+	case "$QOB_ACCEL" in
+	kvm|tcg|kvm:tcg) ;;
+	*) qob_die "--accel must be kvm, tcg or kvm:tcg" ;;
+	esac
+	if [ "$QOB_ACCEL" = kvm ]; then
 		[ -r /dev/kvm ] && [ -w /dev/kvm ] ||
-			qob_die "KVM is unavailable; pass --tcg for the slow software fallback"
+			qob_die "KVM is unavailable; pass --accel kvm:tcg for fallback"
 	fi
-	if [ "$QOB_INTERACTIVE" = 1 ] && [ "$QOB_TCG" != 1 ]; then
+	if [ "$QOB_INTERACTIVE" = 1 ] && [ "$QOB_ACCEL" = kvm ]; then
 		qob_say "interactive mode: GTK display requested (KVM)"
 	fi
 	if [ "$QOB_BUILD" = never ]; then
@@ -682,9 +689,9 @@ qob_boot_once()
 	QOB_MONDIR=$mondir
 	mon=$mondir/mon
 
-	local accel=(-machine "q35,accel=tcg") cpu=(-cpu max)
-	if [ "$QOB_TCG" != 1 ]; then
-		accel=(-machine "q35,accel=kvm") cpu=(-cpu host)
+	local accel=(-machine "q35,accel=$QOB_ACCEL") cpu=(-cpu max)
+	if [ "$QOB_ACCEL" = kvm ]; then
+		cpu=(-cpu host)
 	fi
 	local display=(-display none)
 	local extra=() qemu_net=(-nic none)
@@ -708,7 +715,7 @@ qob_boot_once()
 			-device "virtio-net-pci-non-transitional,netdev=net0,mac=52:54:00:12:34:56")
 	fi
 
-	qob_say "booting $tag with $QOB_CONTROLLER ($([ "$QOB_TCG" = 1 ] && echo tcg || echo kvm))"
+	qob_say "booting $tag with $QOB_CONTROLLER (accel=$QOB_ACCEL)"
 	"$QOB_QEMU" -name "p2001-qemu-o-$tag" -nodefaults \
 		-m "$QOB_MEM" -smp "$QOB_CPUS" "${accel[@]}" "${cpu[@]}" \
 		-drive "if=pflash,format=raw,readonly=on,file=$QOB_OVMF_CODE" \
@@ -871,7 +878,8 @@ qob_main()
 			QOB_UDP6_PEER=$2
 			shift ;;
 		--timeout) [ $# -ge 2 ] || qob_die "--timeout needs a value"; QOB_TIMEOUT=$2; shift ;;
-		--tcg) QOB_TCG=1 ;;
+		--tcg) QOB_TCG=1; QOB_ACCEL=tcg ;;
+		--accel) [ $# -ge 2 ] || qob_die "--accel needs a value"; QOB_ACCEL=$2; shift ;;
 		--interactive) QOB_INTERACTIVE=1 ;;
 		--no-repl) QOB_NO_REPL=1; repl=0 ;;
 		--repl-input) [ $# -ge 2 ] || qob_die "--repl-input needs a file"; QOB_REPL_INPUT=$2; shift ;;
@@ -1008,7 +1016,7 @@ PY
 		printf 'reason=%s\n' "$QOB_BOOT_REASON"
 		printf 'controller=%s\n' "$QOB_CONTROLLER"
 		printf 'network=%s\n' "$([ -n "$QOB_UDP6_PEER" ] && echo "udp-encapsulated-peer:$QOB_UDP6_PEER" || echo none)"
-		printf 'accel=%s\n' "$([ "$QOB_TCG" = 1 ] && echo tcg || echo kvm)"
+		printf 'accel=%s\n' "$QOB_ACCEL"
 		printf 'qemu=%s\n' "$("$QOB_QEMU" --version | head -1)"
 		printf 'ovmf_code=%s\novmf_vars=%s\n' "$QOB_OVMF_CODE" "$QOB_OVMF_VARS"
 		printf 'kernel=%s\nkernel_sha256=%s\n' "$QOB_KERNEL" "$(sha256sum "$QOB_KERNEL" | awk '{print $1}')"
