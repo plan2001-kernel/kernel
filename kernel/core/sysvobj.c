@@ -38,6 +38,17 @@
 #include	"../core/vobjint.h"
 #include	"lifediag.h"
 #include	"ocontext.h"
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+#include	"env/envapi.h"
+#endif
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+static int
+injectfault(char *point)
+{
+	return envfaulttake("PLAN2001_FAULT", point);
+}
+#endif
 
 enum {
 	Vobjmax		= 4096,
@@ -828,21 +839,44 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			 * An explicitly inherited Vexecute capability gets a
 			 * delegated caps=2 Space copy instead, so the child can
 			 * OEXECUTE under the rights it was actually granted.
+			 *
+			 * DOH and O change ownership through this block: the
+			 * error path releases whichever objects are still owned
+			 * here, exactly once, before the child Vhand exists.
 			 */
+			doh = nil;
+			o = nil;
 			doh = oscopycapdelegate((Ohand*)src->priv,
 				((Ohand*)src->priv)->rights);
 			if(waserror()){
+				if(o != nil){
+					o->priv = nil;
+					vobjput(o);
+				}
 				oshandput(doh);
 				nexterror();
 			}
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+			if(injectfault("inherit-space-ohand"))
+				error("vobj: injected delegated Ohand failure");
+#endif
 			vgecaplimit(doh, vi->e[i].rights);
 			o = vobjalloc(VkindSpace, src->space, 0);
 			if(o == nil)
 				error(Enomem);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+			if(injectfault("inherit-space-vobj"))
+				error("vobj: injected delegated Vobj failure");
+#endif
 			o->provider = VopenSpace;
 			o->priv = doh;
 			o->space = ossid(doh);
 			o->oid = 0;
+			doh = nil;		/* O owns the Ohand now */
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+			if(injectfault("inherit-space-vhand"))
+				error("vobj: injected delegated Vhand failure");
+#endif
 			poperror();
 			h = vhandalloc(o, nil, vi->e[i].rights);
 			vobjput(o);

@@ -33,12 +33,6 @@ injectfault(char *point)
 }
 #endif
 
-static void
-abortion(void)
-{
-	pexit("fork aborted", 1);
-}
-
 /*
  * Shared fork core.  RFORKEX(143) and its empty-plan wrapper use this
  * function, so forkchild, resource copying, rollback and parent/child
@@ -207,11 +201,9 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	qunlock(&p->debug);
 	qunlock(&up->debug);
 
-	/* Abort the child process on error */
+	/* The child is still unpublished; release it synchronously. */
 	if(waserror()){
-		p->kp = 1;
-		kprocchild(p, abortion);
-		ready(p);
+		procdiscard(p);
 		nexterror();
 	}
 
@@ -281,7 +273,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		vobjinheritcommit(p, vi);
 	procfork(p);
 
-	poperror();	/* abortion */
+	poperror();	/* prepublication error region */
 
 	if(flag & RFNOMNT)
 		pgrpsealnamespace(p->pgrp);
@@ -1028,12 +1020,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			qunlock(&p->debug);
 		if(lockup)
 			qunlock(&up->debug);
-		if(p != nil){
-			vobjprocexit(p);
-			p->kp = 1;
-			kprocchild(p, abortion);
-			ready(p);
-		}
+		procdiscard(p);
 		vobjinheritrelease(&vi);
 		free(buf);
 		free(inh);
@@ -1384,18 +1371,20 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	procpriority(p, up->basepri, up->fixedpri);
 	procfirstlog(p, cpu);
 
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Latest safe prepublication point: the child is fully built,
+	 * including Handle-plan commit and Pgrp COPY/SHARE, but parent/child
+	 * accounting has not been committed and it is not schedulable. */
+	if(injectfault("spawn-child-late-abort"))
+		error("ospawn: injected late child abort");
+#endif
+
+	/* Publication boundary: from here the child is parent-visible and
+	 * must not be rolled back as if it never existed. */
 	lock(&up->exl);
 	p->parent = up;
 	up->nchild++;
 	unlock(&up->exl);
-
-#ifdef	PLAN2001_LIFECYCLE_DIAG
-	/* Safe late-abort point: the child is fully built and linked, but the
-	 * caller has not received it.  The normal child-abort path must return
-	 * every reference and leave exactly one reapable wait record. */
-	if(injectfault("spawn-child-late-abort"))
-		error("ospawn: injected late child abort");
-#endif
 
 	print("o: SPAWN pid=%lud oid=%#llux cpu=%d\n", pid, oid, cpu);
 	poperror();

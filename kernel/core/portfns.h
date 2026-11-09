@@ -183,6 +183,7 @@ Pgrp*		newpgrp(void);
 Pgrp*		kprocpgrp(void);
 Rgrp*		newrgrp(void);
 Proc*		newproc(void);
+void		procdiscard(Proc*);
 _Noreturn void	nexterror(void);
 Ureg*		notify(Ureg*, char*);
 int		noted(Ureg*, Ureg*, int);

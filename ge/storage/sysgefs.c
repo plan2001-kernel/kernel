@@ -604,10 +604,11 @@ oscopycapdelegate(Ohand *src, int rights)
 		free(n);
 		error(Eperm);
 	}
-	if(src->origin != nil){
-		n->origin = src->origin;
-		incref(&n->origin->ref);
-	}
+	/* Pin the grant origin across the process boundary.  The capability
+	 * copy owns its own Ospace, but revocation and its gate continue to
+	 * follow the originating Ohand. */
+	n->origin = src->origin ? src->origin : src;
+	incref(&n->origin->ref);
 	poperror();
 	qunlock(ohgate(src));
 	return n;
