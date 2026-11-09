@@ -82,8 +82,8 @@ void p9_space_native_mode(int on) {
     nativepath = on;
 }
 
-// D2b/T4a: nsec() now reads the caller's ProcessSelf OBJ time service, so
-// both the native and fallback paths use the same pathless OBJ calls.
+// D2b/T4a: nsec() is the direct historical time syscall; both the native and
+// fallback paths use the same pathless call.
 vlong p9_now(void) {
     return nsec();
 }
@@ -1105,13 +1105,12 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         { MP_QSTR_view, MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_roles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_pipes, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_network, MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_env, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_stdout, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_vhandles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     struct {
-        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, pipes, network, env, stdout, vhandles;
+        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, pipes, env, stdout, vhandles;
     } a;
     struct { struct Ospawn base; struct Oinherit extra; } ext;
     struct Oinheritv *hv;
@@ -1181,7 +1180,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     hasv = a.vhandles.u_obj != mp_const_none;
     hv = (struct Oinheritv *)&ext.extra;
     if (hasv) {
-        if (a.view.u_int != 0 || a.network.u_bool
+        if (a.view.u_int != 0
         || a.stdout.u_obj != mp_const_none || a.roles.u_obj != mp_const_none
         || a.pipes.u_obj != mp_const_none || a.env.u_obj != mp_const_none) {
             mp_raise_msg(&mp_type_ValueError,
@@ -1211,7 +1210,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     ext.base.flags = hasv ? 2 : 1;
     if (!hasv) {
     ext.extra.view = a.view.u_int;
-    ext.extra.network = a.network.u_bool;
     if(a.stdout.u_obj != mp_const_none) ext.extra.stdoutpipe = mp_obj_get_uint(a.stdout.u_obj);
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);

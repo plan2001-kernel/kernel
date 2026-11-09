@@ -22,9 +22,6 @@ struct Ipv6Native {
 	uchar		ll[IPaddrlen];
 
 	Rendez		done;
-	Lock		udplock;
-	int		udp6active;
- int tcp6active;
 	int		state;
 	int		stop;
 	int		worker_started;

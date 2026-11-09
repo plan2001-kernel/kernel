@@ -443,7 +443,6 @@ execcommit(Segment *ts, Segment *ds, Segment *bs, uintptr tstk,
 		up->procctl = Proc_stopme;
 	oprocexec(up);
 	vobjprocexec(up);
-	net6procexec(up);
 	pipeprocexec(up);
 	espctl_bootstrap(up);
 	kbdprocexec(up);
@@ -1045,10 +1044,9 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		if(inh == nil) error(Enomem);
 		validaddr((uintptr)(uopt+1), sizeof *inh, 0);
 		memmove(inh, uopt+1, sizeof *inh);
-		if(inh->view > 2 || inh->nroles > 32 || inh->npipes > 16 || inh->network > 1 || inh->nenv > 8)
+		if(inh->view > 2 || inh->nroles > 32 || inh->npipes > 16 || inh->nenv > 8)
 			error(Ebadarg);
 		if(inh->view == 0 && inh->nroles != 0) error(Ebadarg);
-		if(inh->network && !net6allowed(up)) error(Eperm);
 	}
 	if(opt.flags & 2){
 		uchar *base = (uchar*)(uopt+1);
@@ -1182,7 +1180,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			if(inh->stdoutpipe > 0x7fffffffULL) error(Ebadarg);
 			pipeoutputset(p, inh->stdoutpipe);
 		}
-		p->net6permit = inh->network;
 		for(i = 0; i < inh->nenv; i++){
 			if(memchr(inh->env[i].name, 0, 32) == nil || inh->env[i].name[0] == 0 ||
 						memchr(inh->env[i].value, 0, 128) == nil) error(Ebadarg);

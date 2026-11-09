@@ -68,9 +68,12 @@ def run():
     p.obj_close(m)
     deny(lambda:p.obj_device_send(d,b'x'*59),bad)
     deny(lambda:p.obj_device_send(d,b'x'*(info[3]+1)),bad)
-    disabled='obj: kernel network protocols disabled; use raw device'
-    deny(lambda:p.obj_open_udp6(bytes(16),1313),disabled)
-    deny(lambda:p.obj_open_tcp(bytes(16),1313),disabled)
+    try: p.obj_open_udp6
+    except AttributeError: ok(True,'UDP6 object provider removed')
+    else: raise AssertionError('UDP6 object provider still present')
+    try: p.obj_open_tcp
+    except AttributeError: ok(True,'TCP object provider removed')
+    else: raise AssertionError('TCP object provider still present')
     fifo,seq,fam,length = p.obj_device_recv(d)
     ok((seq,fam,length)==(0,2,0), 'RX yields ordinary FIFO capability')
     ok(p.obj_info(fifo)[8]==1, 'no Ethernet FIFO kind')

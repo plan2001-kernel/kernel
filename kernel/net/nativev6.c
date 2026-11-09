@@ -459,24 +459,10 @@ ipv6native_stop(Ipv6Native *ni)
 		return EtherErrBadArg;
 	}
 	if(ni->state == NvRunning){
-		ilock(&ni->udplock);
-		if((ni->udp6active != 0 || ni->tcp6active != 0)){
-			iunlock(&ni->udplock);
-			qunlock(&nativelk);
-			return EtherErrBusy;	/* live UDP6 endpoints still use Fs */
-		}
 		ni->state = NvStopping;
 		ni->stop = 1;
 		wasrunning = 1;
-		iunlock(&ni->udplock);
 	}else if(ni->state == NvStopping){
-		ilock(&ni->udplock);
-		if((ni->udp6active != 0 || ni->tcp6active != 0)){
-			iunlock(&ni->udplock);
-			qunlock(&nativelk);
-			return EtherErrBusy;
-		}
-		iunlock(&ni->udplock);
 		wasrunning = 0;
 	}else {
 		qunlock(&nativelk);

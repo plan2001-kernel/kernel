@@ -42,7 +42,8 @@
 #define	SEGFLUSH	33
 #define	RENDEZVOUS	34
 #define	UNMOUNT		35 /* reserved */
-/* _WAIT(36) is RESERVED: use OBJINVOKE(ObjOpWait). */
+/* _WAIT(36) is RESERVED: if a name is ever wanted it may not reuse this
+ * number; child wait is the direct typed OBJWAIT syscall (142). */
 #define	_WAIT		36 /* reserved */
 #define	SEMACQUIRE	37
 #define	SEMRELEASE	38
@@ -54,7 +55,7 @@
 #define	WSTAT		44 /* reserved */
 #define	FWSTAT		45 /* reserved */
 #define	MOUNT		46 /* reserved */
-/* AWAIT(47) is RESERVED: libc await()/wait() use ObjOpWait. */
+/* AWAIT(47) is RESERVED: libc await()/wait() use the direct OBJWAIT call. */
 #define	AWAIT		47 /* reserved */
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */
@@ -136,10 +137,9 @@ struct Ospawn {
 };
 
 /* 116-120 RESERVED: former NET6* UDP6 compatibility family.  The numbers
- * stay allocated forever but have no dispatch entry; use the OBJ* five-call
- * ABI.  The interface address lookup is OBJINVOKE(ObjOpNet6Addr),
- * endpoints are OBJOPEN(ObjOpenUdp6), and data is
- * OBJINVOKE(SendTo/RecvFrom)/OBJCLOSE. */
+ * stay allocated forever but have no dispatch entry.  There is no kernel
+ * UDP6/TCP6 object interface; network protocols are userspace over raw
+ * device frames/ObjectFIFO. */
 #define	NET6ADDR	116 /* reserved */
 #define	NET6OPEN	117 /* reserved */
 #define	NET6RECVFROM	118 /* reserved */
@@ -174,17 +174,24 @@ struct Ospawn {
 #define	OBJCLOSE	138
 #define	OBJBIND		139
 #define	OBJINVOKE	140
+/* Direct bounded introspection of the caller's own object handle table.
+ * Arguments are (VobjListRec *records, unsigned long count); the result is
+ * the total number of live handles, or the copied count when records is
+ * non-NULL.  It never names another process and transfers no authority. */
+#define	OBJLIST		141
+/* Direct typed child wait.  The single argument points to one ObjWait
+ * record; the kernel fills pid, the three times and the bounded status text
+ * exactly as the historical _WAIT did.  No ProcessSelf Handle is created. */
+#define	OBJWAIT		142
 /* flags=1 opts into this bounded extension immediately after Ospawn.
  * view: 0 EMPTY, 1 COPY listed roles, 2 SHARE (list must name whole view).
  * Pipe rights: 1 read, 2 write, 3 both. No implicit endpoint selection.
- * network: non-transferable UDP6 permit; revoked by exec/exit.
  */
 struct Oinherit {
  uvlong view, nroles;
  char roles[32][32];
  uvlong npipes;
  int pipes[16][2];
- uvlong network;
  uvlong stdoutpipe; /* 0 or one of the selected writable Pipe handles */
  uvlong nenv;
  struct { char name[32]; char value[128]; } env[8];

@@ -184,157 +184,9 @@ static mp_obj_t p9_pipeinherit(mp_obj_t h,mp_obj_t rights) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_pipeinherit_obj,p9_pipeinherit);
-/* Historical net6_* Python names.  They are userland adapters over the
- * canonical five-operation OBJ* ABI; the NET6* kernel numbers are reserved
- * and dispatch to nothing. */
-static mp_obj_t p9_net6addr(void) {
-    vstr_t v;
-
-    vstr_init_len(&v, 16);
-    if (obj_udp6_addr((unsigned char*)v.buf) < 0) {
-        vstr_clear(&v);
-        raise_err();
-    }
-    return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_net6addr_obj, p9_net6addr);
-
-static mp_obj_t p9_net6open(mp_obj_t local, mp_obj_t port_obj) {
-    mp_buffer_info_t addr;
-    mp_int_t port;
-    long h;
-
-    mp_get_buffer_raise(local, &addr, MP_BUFFER_READ);
-    port = mp_obj_get_int(port_obj);
-    if (addr.len != 16 || port < 1 || port > 65535) {
-        mp_raise_ValueError(MP_ERROR_TEXT("expected a 16-byte IPv6 address and port 1..65535"));
-    }
-    h = obj_udp6_open((unsigned char*)addr.buf, (unsigned int)port);
-    if (h < 0) {
-        raise_err();
-    }
-    return mp_obj_new_int(h);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_net6open_obj, p9_net6open);
-
-static mp_obj_t p9_net6sendto(size_t n_args, const mp_obj_t *args) {
-    mp_buffer_info_t addr, data;
-    mp_int_t port, h;
-    long r;
-
-    h = mp_obj_get_int(args[0]);
-    mp_get_buffer_raise(args[1], &addr, MP_BUFFER_READ);
-    port = mp_obj_get_int(args[2]);
-    mp_get_buffer_raise(args[3], &data, MP_BUFFER_READ);
-    if (addr.len != 16 || port < 1 || port > 65535 || data.len > 1232) {
-        mp_raise_ValueError(MP_ERROR_TEXT("invalid IPv6 datagram address, port, or payload length"));
-    }
-    r = obj_udp6_sendto(h, (unsigned char*)addr.buf, (unsigned int)port,
-        data.buf, (unsigned long long)data.len);
-    if (r < 0) {
-        raise_err();
-    }
-    (void)n_args;
-    return mp_obj_new_int(r);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_net6sendto_obj, 4, 4, p9_net6sendto);
-
-static mp_obj_t p9_net6recvfrom(size_t n_args, const mp_obj_t *args) {
-    vstr_t data;
-    uchar peersrc[18];
-    ushort port;
-    mp_int_t h, timeout;
-    unsigned long long wait;
-    long r;
-    mp_obj_t out[3];
-
-    h = mp_obj_get_int(args[0]);
-    timeout = n_args > 1 ? mp_obj_get_int(args[1]) : 1000;
-    if (timeout < -1 || (timeout >= 0 && (unsigned long long)timeout > 0xffffffffULL)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("timeout must be -1 or a 32-bit millisecond value"));
-    }
-    wait = timeout == -1 ? 0xffffffffULL : (unsigned long long)timeout;
-    p9_space_rest();
-    vstr_init_len(&data, 1232);
-    r = obj_udp6_recvfrom(h, data.buf, (unsigned long long)data.len,
-        peersrc, wait);
-    if (r < 0) {
-        vstr_clear(&data);
-        raise_err();
-    }
-    data.len = r;
-    out[0] = mp_obj_new_bytes_from_vstr(&data);
-    out[1] = mp_obj_new_bytes(peersrc, 16);
-    port = (peersrc[16] << 8) | peersrc[17];
-    out[2] = mp_obj_new_int(port);
-    return mp_obj_new_tuple(3, out);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_net6recvfrom_obj, 1, 2, p9_net6recvfrom);
-
-static mp_obj_t p9_net6close(mp_obj_t handle) {
-    if (obj_close(mp_obj_get_int(handle)) < 0) {
-        raise_err();
-    }
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_net6close_obj, p9_net6close);
-
-/* UDP6 through the canonical OBJ* five-operation ABI.  These are userland
- * adapters only; there is no separate NET6* entry point. */
-static mp_obj_t p9_objopenudp6(size_t n,const mp_obj_t *a){
-    mp_buffer_info_t b;unsigned long long rights=n>2?(unsigned long long)mp_obj_get_int(a[2]):0;
-    mp_int_t port=mp_obj_get_int(a[1]);long h;
-    mp_get_buffer_raise(a[0],&b,MP_BUFFER_READ);
-    if(b.len!=16||port<1||port>65535)
-        mp_raise_ValueError(MP_ERROR_TEXT("expected a 16-byte IPv6 address and port 1..65535"));
-    h=obj_udp6_open_rights(b.buf,(unsigned int)port,rights);
-    if(h<0)raise_err();
-    return mp_obj_new_int((mp_int_t)h);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenudp6_obj,2,3,p9_objopenudp6);
-
-static mp_obj_t p9_objudp6sendto(size_t n,const mp_obj_t *a){
-    mp_buffer_info_t addr,data;mp_int_t port;long r;
-    mp_get_buffer_raise(a[1],&addr,MP_BUFFER_READ);
-    port=mp_obj_get_int(a[2]);
-    mp_get_buffer_raise(a[3],&data,MP_BUFFER_READ);
-    if(addr.len!=16||port<1||port>65535||data.len>OBJ_UDP6_MAXPAYLOAD)
-        mp_raise_ValueError(MP_ERROR_TEXT("invalid IPv6 datagram address, port, or payload length"));
-    r=obj_udp6_sendto(mp_obj_get_int(a[0]),addr.buf,(unsigned int)port,
-        data.buf,data.len);
-    if(r<0)raise_err();
-    (void)n;
-    return mp_obj_new_int(r);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objudp6sendto_obj,4,4,p9_objudp6sendto);
-
-static mp_obj_t p9_objudp6recvfrom(size_t n,const mp_obj_t *a){
-    vstr_t v;uchar peersrc[18];ushort port;mp_int_t timeout;long r;
-    mp_obj_t out[3];
-    timeout=n>1?mp_obj_get_int(a[1]):1000;
-    if(timeout< -1||(timeout>=0&&(unsigned long long)timeout>0xffffffffULL))
-        mp_raise_ValueError(MP_ERROR_TEXT("timeout must be -1 or a 32-bit millisecond value"));
-    p9_space_rest();
-    vstr_init_len(&v,OBJ_UDP6_MAXPAYLOAD);
-    r=obj_udp6_recvfrom(mp_obj_get_int(a[0]),v.buf,(unsigned long long)v.len,
-        peersrc,timeout<0?0xffffffffULL:(unsigned long long)timeout);
-    if(r<0){vstr_clear(&v);raise_err();}
-    v.len=r;
-    out[0]=mp_obj_new_bytes_from_vstr(&v);
-    out[1]=mp_obj_new_bytes(peersrc,16);
-    port=(peersrc[16]<<8)|peersrc[17];
-    out[2]=mp_obj_new_int(port);
-    return mp_obj_new_tuple(3,out);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objudp6recvfrom_obj,1,2,p9_objudp6recvfrom);
-
-static mp_obj_t p9_objudp6addr(void){
-    vstr_t v;
-    vstr_init_len(&v,16);
-    if(obj_udp6_addr((unsigned char*)v.buf)<0){vstr_clear(&v);raise_err();}
-    return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_objudp6addr_obj,p9_objudp6addr);
+/* The TCP6/UDP6 object interface and its Python adapters were removed.  The
+ * supported network boundary is raw device frames/ObjectFIFO with userspace
+ * protocol handling. */
 
 /* Historical Python object/object-FIFO method names.  They are compatibility
  * adapters over the canonical five-operation OBJ* ABI; the retired VOBJ*
@@ -456,24 +308,6 @@ static mp_obj_t p9_vobjlist(void){
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_vobjlist_obj,p9_vobjlist);
 
-static mp_obj_t p9_vobjtcpopen(size_t n,const mp_obj_t *a){
- mp_buffer_info_t b;VobjTcpReq req;long h;int listen=n>2?mp_obj_get_int(a[2]):1;
- mp_get_buffer_raise(a[0],&b,MP_BUFFER_READ);
- if(b.len!=16)mp_raise_ValueError(MP_ERROR_TEXT("IPv6 address must be 16 bytes"));
- memset(&req,0,sizeof req);
- memmove(req.addr,b.buf,16);
- req.port=(unsigned int)mp_obj_get_int(a[1]);
- h=obj_open(listen?ObjOpenTcpListen:ObjOpenTcpConnect,&req,sizeof req,0,NULL);
- if(h<0)raise_err();
- return mp_obj_new_int((mp_int_t)h);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjtcpopen_obj,2,3,p9_vobjtcpopen);
-
-static mp_obj_t p9_vobjaccept(mp_obj_t h,mp_obj_t ms){
- return check(obj_accept(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(ms)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_vobjaccept_obj,p9_vobjaccept);
-
 /* Universal five-operation object ABI (runtime/abi/obj.h).  These are the
  * critical test bindings: they call libc obj_* wrappers over CREATE, OPEN,
  * CLOSE, BIND and INVOKE, not the legacy VOBJ* or TCP6* families. */
@@ -511,28 +345,12 @@ static mp_obj_t p9_objopenbinding(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenbinding_obj,1,2,p9_objopenbinding);
 
-static mp_obj_t p9_objopentcp(size_t n,const mp_obj_t *a){
- mp_buffer_info_t b;VobjTcpReq req;int listen=n>2?mp_obj_get_int(a[2]):1;
- mp_get_buffer_raise(a[0],&b,MP_BUFFER_READ);
- if(b.len!=16)mp_raise_ValueError(MP_ERROR_TEXT("IPv6 address must be 16 bytes"));
- memset(&req,0,sizeof req);memmove(req.addr,b.buf,16);
- req.port=(unsigned int)mp_obj_get_int(a[1]);
- return check(obj_open(listen?ObjOpenTcpListen:ObjOpenTcpConnect,&req,sizeof req,0,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopentcp_obj,2,3,p9_objopentcp);
-
 /* Persistent GE/O through the five-operation ABI only. */
 static mp_obj_t p9_objopenspace(mp_obj_t name){
  const char *n=mp_obj_str_get_str(name);
  return check(obj_open(ObjOpenSpace,(void*)n,strlen(n),0,NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objopenspace_obj,p9_objopenspace);
-
-static mp_obj_t p9_objopenprocessself(size_t n,const mp_obj_t *a){
- unsigned long long rights=n>0?(unsigned long long)mp_obj_get_int(a[0]):0;
- return check(obj_open(ObjOpenProcessSelf,nil,0,rights,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenprocessself_obj,0,1,p9_objopenprocessself);
 
 static mp_obj_t p9_objopennamespacecurrent(void){
  return check(obj_open(ObjOpenNamespaceCurrent,nil,0,0,NULL));
@@ -676,11 +494,6 @@ static mp_obj_t p9_objreceive(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objreceive_obj,1,3,p9_objreceive);
 
-static mp_obj_t p9_objaccept(mp_obj_t h,mp_obj_t ms){
- return check(obj_accept(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(ms)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_objaccept_obj,p9_objaccept);
-
 static mp_obj_t p9_objgrant(mp_obj_t h,mp_obj_t rights){
  return check(obj_grant(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(rights)));
 }
@@ -774,38 +587,13 @@ static mp_obj_t p9_notify_probe_framevals(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_notify_probe_framevals_obj,p9_notify_probe_framevals);
 
-/* Native TCP6 streams and read-only system information (UJ1). */
+/* Read-only system information (UJ1). */
 extern long syssnapshot(void*);
 static mp_obj_t p9_system(void){
  unsigned long long v[7];check(syssnapshot(v));mp_obj_t a[7];
  for(int i=0;i<7;i++)a[i]=mp_obj_new_int_from_ull(v[i]);return mp_obj_new_tuple(7,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_system_obj,p9_system);
-static mp_obj_t p9_tcpopen(mp_obj_t address,mp_obj_t port,int listen){
- mp_buffer_info_t b;VobjTcpReq req;mp_get_buffer_raise(address,&b,MP_BUFFER_READ);
- if(b.len!=16)mp_raise_ValueError(MP_ERROR_TEXT("IPv6 address must be 16 bytes"));
- memset(&req,0,sizeof req);memmove(req.addr,b.buf,16);
- req.port=(unsigned int)mp_obj_get_int(port);
- return check(obj_open(listen?ObjOpenTcpListen:ObjOpenTcpConnect,&req,sizeof req,0,NULL));
-}
-static mp_obj_t p9_tcplisten(mp_obj_t a,mp_obj_t p){return p9_tcpopen(a,p,1);}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_tcplisten_obj,p9_tcplisten);
-static mp_obj_t p9_tcpconnect(mp_obj_t a,mp_obj_t p){return p9_tcpopen(a,p,0);}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_tcpconnect_obj,p9_tcpconnect);
-static mp_obj_t p9_tcpaccept(mp_obj_t h,mp_obj_t ms){return check(obj_accept(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(ms)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_tcpaccept_obj,p9_tcpaccept);
-static mp_obj_t p9_tcpread(mp_obj_t h,mp_obj_t size,mp_obj_t ms){
- mp_int_t n=mp_obj_get_int(size);if(n<0||n>65536)mp_raise_ValueError(MP_ERROR_TEXT("TCP read limit"));
- vstr_t v;vstr_init_len(&v,n);long result=obj_read(mp_obj_get_int(h),v.buf,(unsigned long long)n,(unsigned long long)mp_obj_get_int(ms));
- if(result<0){vstr_clear(&v);raise_err();}v.len=result;return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(p9_tcpread_obj,p9_tcpread);
-static mp_obj_t p9_tcpwrite(mp_obj_t h,mp_obj_t data){
- mp_buffer_info_t b;mp_get_buffer_raise(data,&b,MP_BUFFER_READ);return check(obj_write(mp_obj_get_int(h),b.buf,(unsigned long long)b.len,0));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_tcpwrite_obj,p9_tcpwrite);
-static mp_obj_t p9_tcpclose(mp_obj_t h){return check(obj_close(mp_obj_get_int(h)));}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_tcpclose_obj,p9_tcpclose);
 
 /* Native Pipe, UART and KBD: canonical OBJ* adapters and the historical
  * compatibility calls.  Both routes hit the same Vhand table. */
@@ -1067,8 +855,16 @@ static mp_obj_t p9_kbdread(mp_obj_t h,mp_obj_t count){
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_kbdread_obj,p9_kbdread);
 static mp_obj_t p9_kbdclose(mp_obj_t h){check(obj_close(mp_obj_get_int(h)));return mp_const_none;}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_kbdclose_obj,p9_kbdclose);
-/* handle 0 is the eve-only global LED control; it does not claim KBD. */
-static mp_obj_t p9_kbdleds(mp_obj_t leds){check(obj_kbd_leds(0,(unsigned int)mp_obj_get_int(leds)));return mp_const_none;}
+/* Compatibility convenience: acquire an authorized KBD Handle, set the LEDs
+ * and release it.  There is no handle-less global LED control. */
+static mp_obj_t p9_kbdleds(mp_obj_t leds){
+ long h=obj_kbd_open(),r;
+ if(h<0)raise_err();
+ r=obj_kbd_leds(h,(unsigned int)mp_obj_get_int(leds));
+ obj_close(h);
+ check(r);
+ return mp_const_none;
+}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_kbdleds_obj,p9_kbdleds);
 
 /* Direct memory services operate on user segments and byte buffers. */
@@ -1140,17 +936,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_getpid), MP_ROM_PTR(&p9_getpid_obj) },
     { MP_ROM_QSTR(MP_QSTR_exits), MP_ROM_PTR(&p9_exits_obj) },
     { MP_ROM_QSTR(MP_QSTR_system), MP_ROM_PTR(&p9_system_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tcp6_listen), MP_ROM_PTR(&p9_tcplisten_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tcp6_connect), MP_ROM_PTR(&p9_tcpconnect_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tcp6_accept), MP_ROM_PTR(&p9_tcpaccept_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tcp6_read), MP_ROM_PTR(&p9_tcpread_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tcp6_write), MP_ROM_PTR(&p9_tcpwrite_obj) },
-    { MP_ROM_QSTR(MP_QSTR_tcp6_close), MP_ROM_PTR(&p9_tcpclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_net6_addr), MP_ROM_PTR(&p9_net6addr_obj) },
-    { MP_ROM_QSTR(MP_QSTR_net6_open), MP_ROM_PTR(&p9_net6open_obj) },
-    { MP_ROM_QSTR(MP_QSTR_net6_recvfrom), MP_ROM_PTR(&p9_net6recvfrom_obj) },
-    { MP_ROM_QSTR(MP_QSTR_net6_sendto), MP_ROM_PTR(&p9_net6sendto_obj) },
-    { MP_ROM_QSTR(MP_QSTR_net6_close), MP_ROM_PTR(&p9_net6close_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjcreate), MP_ROM_PTR(&p9_vobjcreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjread), MP_ROM_PTR(&p9_vobjread_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjinfo), MP_ROM_PTR(&p9_vobjinfo_obj) },
@@ -1164,18 +949,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_vobjrevoke), MP_ROM_PTR(&p9_vobjrevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjio), MP_ROM_PTR(&p9_vobjio_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjlist), MP_ROM_PTR(&p9_vobjlist_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjtcp_open), MP_ROM_PTR(&p9_vobjtcpopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjaccept), MP_ROM_PTR(&p9_vobjaccept_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create), MP_ROM_PTR(&p9_objcreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_fifocreate), MP_ROM_PTR(&p9_objfifocreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_close), MP_ROM_PTR(&p9_objclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_handle), MP_ROM_PTR(&p9_objopenhandle_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_binding), MP_ROM_PTR(&p9_objopenbinding_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_open_tcp), MP_ROM_PTR(&p9_objopentcp_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_udp6_addr), MP_ROM_PTR(&p9_objudp6addr_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_open_udp6), MP_ROM_PTR(&p9_objopenudp6_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_udp6_sendto), MP_ROM_PTR(&p9_objudp6sendto_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_udp6_recvfrom), MP_ROM_PTR(&p9_objudp6recvfrom_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_pipe_create), MP_ROM_PTR(&p9_objpipecreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_pipe_peer), MP_ROM_PTR(&p9_objpipepeer_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_open), MP_ROM_PTR(&p9_objuartopen_obj) },
@@ -1209,7 +987,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_open_space), MP_ROM_PTR(&p9_objopenspace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_open_process_self), MP_ROM_PTR(&p9_objopenprocessself_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_namespace_current), MP_ROM_PTR(&p9_objopennamespacecurrent_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
@@ -1222,7 +999,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_subscribe), MP_ROM_PTR(&p9_objsubscribe_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_publish), MP_ROM_PTR(&p9_objpublish_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_receive), MP_ROM_PTR(&p9_objreceive_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_accept), MP_ROM_PTR(&p9_objaccept_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_grant), MP_ROM_PTR(&p9_objgrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_revoke), MP_ROM_PTR(&p9_objrevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_list), MP_ROM_PTR(&p9_objlist_obj) },
@@ -1233,13 +1009,10 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_notify_probe_lastnote), MP_ROM_PTR(&p9_notify_probe_lastnote_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_framevals), MP_ROM_PTR(&p9_notify_probe_framevals_obj) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_TCP_LISTEN), MP_ROM_INT(ObjOpenTcpListen) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_TCP_CONNECT), MP_ROM_INT(ObjOpenTcpConnect) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_BINDING), MP_ROM_INT(ObjOpenBinding) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_SPACE), MP_ROM_INT(ObjOpenGeSpace) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_PROCESS_SELF), MP_ROM_INT(ObjOpenProcessSelf) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_NAMESPACE_CURRENT), MP_ROM_INT(ObjOpenNamespaceCurrent) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_NAMESPACE_CONTROL), MP_ROM_INT(VkindNamespaceControl) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_CREATE), MP_ROM_INT(ObjOpNamespaceCreate) },
@@ -1250,9 +1023,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_NDFLT), MP_ROM_INT(NDFLT) },
     { MP_ROM_QSTR(MP_QSTR_NSAVE), MP_ROM_INT(NSAVE) },
     { MP_ROM_QSTR(MP_QSTR_NRSTR), MP_ROM_INT(NRSTR) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_UDP6), MP_ROM_INT(ObjOpenUdp6) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SENDTO), MP_ROM_INT(ObjOpSendTo) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_RECVFROM), MP_ROM_INT(ObjOpRecvFrom) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_UART), MP_ROM_INT(ObjOpenUart) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_KBD), MP_ROM_INT(ObjOpenKbd) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_USB), MP_ROM_INT(ObjOpenUsb) },
@@ -1268,7 +1038,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_INHERIT), MP_ROM_INT(ObjOpPipeInherit) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_COUNT), MP_ROM_INT(ObjOpUartCount) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_CTL), MP_ROM_INT(ObjOpUartCtl) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_STATUS), MP_ROM_INT(ObjOpUartStatus) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_KBD_LEDS), MP_ROM_INT(ObjOpKbdLeds) },
@@ -1281,7 +1050,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_UART_OREAD), MP_ROM_INT(UARTOREAD) },
     { MP_ROM_QSTR(MP_QSTR_UART_OWRITE), MP_ROM_INT(UARTOWRITE) },
     { MP_ROM_QSTR(MP_QSTR_UART_ORDWR), MP_ROM_INT(UARTORDWR) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_UDP6_MAXPAYLOAD), MP_ROM_INT(OBJ_UDP6_MAXPAYLOAD) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_GE), MP_ROM_INT(ObjKindGe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_COMMIT), MP_ROM_INT(ObjOpCommit) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PUT_OID), MP_ROM_INT(ObjOpPutOid) },
@@ -1292,9 +1060,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SEND), MP_ROM_INT(ObjOpSend) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_RECV), MP_ROM_INT(ObjOpRecv) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SUBSCRIBE), MP_ROM_INT(ObjOpSubscribe) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_ACCEPT), MP_ROM_INT(ObjOpAccept) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_LIST), MP_ROM_INT(ObjOpList) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_COPY), MP_ROM_INT(ObjBindCopy) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_EXCLUSIVE), MP_ROM_INT(ObjBindExclusive) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_SHARE), MP_ROM_INT(ObjBindShare) },
@@ -1313,10 +1079,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VCOMMIT), MP_ROM_INT(Vcommit) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_BYTES), MP_ROM_INT(VkindBytes) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_FIFO), MP_ROM_INT(VkindFifo) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_TCP), MP_ROM_INT(VkindTcp) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_GE), MP_ROM_INT(VkindGe) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_SPACE), MP_ROM_INT(VkindSpace) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_UDP6), MP_ROM_INT(VkindUdp6) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_PIPE), MP_ROM_INT(VkindPipe) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_KBD), MP_ROM_INT(VkindKbd) },
@@ -1324,8 +1088,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VKIND_USB_EP), MP_ROM_INT(VkindUsbEp) },
     { MP_ROM_QSTR(MP_QSTR_VIO_READ), MP_ROM_INT(VioRead) },
     { MP_ROM_QSTR(MP_QSTR_VIO_WRITE), MP_ROM_INT(VioWrite) },
-    { MP_ROM_QSTR(MP_QSTR_VOPEN_TCP_LISTEN), MP_ROM_INT(VopenTcpListen) },
-    { MP_ROM_QSTR(MP_QSTR_VOPEN_TCP_CONNECT), MP_ROM_INT(VopenTcpConnect) },
     { MP_ROM_QSTR(MP_QSTR_VOPEN_SPACE), MP_ROM_INT(VopenSpace) },
     { MP_ROM_QSTR(MP_QSTR_VOPEN_GE_SPACE), MP_ROM_INT(VopenGeSpace) },
     { MP_ROM_QSTR(MP_QSTR_RFNAMEG), MP_ROM_INT(RFNAMEG) },

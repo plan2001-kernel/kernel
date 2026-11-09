@@ -1,15 +1,18 @@
 /*
  * Universal five-operation object ABI: CREATE, OPEN, CLOSE, BIND, INVOKE.
  *
- * These five entry points are the kernel boundary.  READ/WRITE,
- * PUBLISH/SUBSCRIBE/RECEIVE and ACCEPT/CONNECT are userland adapters over
- * INVOKE; the kernel does not grow a syscall family per provider.  INVOKE is
- * a request router: it validates the authorized Handle, the operation and
- * each buffer, then calls the existing provider implementation in
- * sysvobj.c/systcp6.c.  It is not an object class hierarchy and contains no
- * network stack.
+ * These five entry points are the kernel boundary.  READ/WRITE and
+ * PUBLISH/SUBSCRIBE/RECEIVE are userland adapters over INVOKE; the kernel
+ * does not grow a syscall family per provider.  INVOKE is a request router:
+ * it validates the authorized Handle, the operation and each buffer, then
+ * calls the existing provider implementation in sysvobj.c.  It is not an
+ * object class hierarchy and contains no network stack.
  *
- * Historical VOBJ* syscall numbers are reserved and have no handlers.
+ * Historical VOBJ* syscall numbers are reserved and have no handlers.  The
+ * TCP6/UDP6 object providers are gone: the permitted network boundary is raw
+ * device frames/ObjectFIFO plus userspace protocol handling.  Process handle
+ * introspection and child wait are direct bounded syscalls (OBJLIST and
+ * OBJWAIT), not synthetic handle operations.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -93,9 +96,6 @@ sysobjopen(sysva_list list)
 	if(rights & ~(uvlong)Vall)
 		error(Ebadarg);
 	switch(provider){
-	case ObjOpenTcpListen:
-	case ObjOpenTcpConnect:
-        error("obj: kernel network protocols disabled; use raw device");
 	case ObjOpenHandle:
 		if(req == nil || len != sizeof hr)
 			error(Ebadarg);
@@ -119,8 +119,6 @@ sysobjopen(sysva_list list)
 			error(Ebadarg);
 		return vobjopenstream(VopenGeSpace, req, (long)sizeof(VobjGeReq),
 			rights, (VobjId*)id);
-	case ObjOpenUdp6:
-        error("obj: kernel network protocols disabled; use raw device");
 	case ObjOpenUart:
 	{
 		ObjOpenUartReq ur;
@@ -159,10 +157,6 @@ sysobjopen(sysva_list list)
         return vobjdevicesopen(rights, (VobjId*)id);
     case ObjOpenDevice:
         return vobjdeviceopen(req, len, rights, (VobjId*)id);
-    case ObjOpenProcessSelf:
-		if(req != nil || len != 0)
-			error(Ebadarg);
-		return vobjprocessselfopen(rights, (VobjId*)id);
 	case ObjOpenNamespaceCurrent:
 		if(req != nil || len != 0)
 			error(Ebadarg);
@@ -194,6 +188,36 @@ sysobjbind(sysva_list list)
 	mode = sysva_arg(list, uvlong);
 	if(rolelen <= 0 || rolelen >= 32 || mode > 0x1ff) error(Ebadarg);
 	return vobjbind(handle, role, (int)rolelen, rights, (uint)mode);
+}
+
+/* Direct bounded introspection of the caller's own handle table.  It is not
+ * an INVOKE operation: there is no target-object authority and no Handle is
+ * created, but also no handle-less pseudo-object. */
+uintptr
+sysobjlist(sysva_list list)
+{
+	void *records;
+	long count;
+
+	records = sysva_arg(list, void*);
+	count = sysva_arg(list, long);
+	if(count < 0 || count > Vhandmax || (count != 0 && records == nil))
+		error(Ebadarg);
+	return vobjlist(records, count);
+}
+
+/* Direct typed child wait.  The caller waits on its own children; no
+ * synthetic ProcessSelf Handle is created or delegated. */
+uintptr
+sysobjwait(sysva_list list)
+{
+	ObjWait *w;
+
+	w = sysva_arg(list, ObjWait*);
+	if(w == nil)
+		error(Ebadarg);
+	validaddr((uintptr)w, sizeof *w, 1);
+	return vobjwait(w);
 }
 
 uintptr
@@ -331,36 +355,12 @@ sysobjinvoke(sysva_list list)
 		c.result = vobjfifosub(handle, c.arg0,
 			bounded(c.arg1, Vsubcapmax, Ebadarg));
 		break;
-	case ObjOpAccept:
-		c.result = vobjaccept(handle,
-			(int)bounded(c.arg0, 0x7fffffff, Ebadarg));
-		break;
 	case ObjOpRevoke:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
 		   c.arg0 != 0 || c.arg1 != 0)
 			error(Ebadarg);
 		vobjrevoke(handle);
 		c.result = 0;
-		break;
-	case ObjOpList:
-		c.result = vobjlist(c.out,
-			bounded(c.outlen, Vhandmax, Ebadarg));
-		break;
-	case ObjOpSendTo:
-		if(c.in == nil || c.inlen < sizeof(ObjUdp6SendReq))
-			error(Ebadarg);
-		c.result = vobjudp6send(handle, c.in,
-			bounded(c.inlen, Vobjpaymax, Ebadarg));
-		break;
-	case ObjOpRecvFrom:
-		if(c.out == nil || c.outlen < sizeof(ObjUdp6RecvHdr))
-			error(Ebadarg);
-		if(c.arg0 > 0xffffffffULL)
-			error(Ebadarg);
-		c.result = vobjudp6recv(handle, c.out,
-			bounded(c.outlen,
-				sizeof(ObjUdp6RecvHdr) + OBJ_UDP6_MAXPAYLOAD,
-				Ebadarg), c.arg0);
 		break;
 	case ObjOpPipePeer:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
@@ -374,18 +374,6 @@ sysobjinvoke(sysva_list list)
 			error(Ebadarg);
 		vobjpipeinherit(handle, (int)c.arg0);
 		c.result = 0;
-		break;
-	case ObjOpUartCount:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
-			error(Ebadarg);
-		c.result = uartnports();
-		break;
-	case ObjOpNet6Addr:
-		if(c.in != nil || c.inlen != 0 || c.out == nil
-		|| c.outlen != OBJ_NET6_ADDRLEN)
-			error(Ebadarg);
-		validaddr((uintptr)c.out, OBJ_NET6_ADDRLEN, 1);
-		c.result = vudp6addr(c.out, OBJ_NET6_ADDRLEN);
 		break;
 	case ObjOpUartCtl:
 		if(c.in == nil || c.inlen != sizeof(Uartcfg))
@@ -462,13 +450,6 @@ sysobjinvoke(sysva_list list)
 		|| c.out != nil || c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
 			error(Ebadarg);
 		c.result = vobjospawn(handle, c.in);
-		break;
-	case ObjOpWait:
-		if(c.in != nil || c.inlen != 0 || c.out == nil
-		|| c.outlen != sizeof(ObjWait) || c.arg0 != 0 || c.arg1 != 0)
-			error(Ebadarg);
-		validaddr((uintptr)c.out, sizeof(ObjWait), 1);
-		c.result = vobjwait(handle, (ObjWait*)c.out);
 		break;
 	default:
 		error("obj: operation not supported");

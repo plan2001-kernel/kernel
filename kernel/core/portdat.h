@@ -538,7 +538,6 @@ struct Proc
 	Pgrp	*pgrp;		/* Process group for namespace */
 	Egrp 	*egrp;		/* Environment group */
 	Ref	*fdgrp;		/* legacy RFORK FD-group presence token, nil = absent */
-	int	net6permit;	/* explicit UDP6 authority, never rfork inherited */
 	int	stdoutpipe;	/* explicit Pipe-backed IOWRITE route, otherwise 0 */
 	void	*vobjhandles;	/* Unified process-local OBJ, GE and namespace Handles */
 	ulong	iomask;		/* Process-local native output grants */
