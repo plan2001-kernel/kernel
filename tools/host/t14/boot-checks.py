@@ -31,7 +31,7 @@ exec(source.decode())
 """
     def start():
         d = p.obj_device_open(cat,2,ctl,0)
-        rf,_,_,_ = p.obj_device_recv(d)
+        rf = p.obj_device_rx(d)
         command, output = p.obj_fifocreate(4), p.obj_fifocreate(4)
         response = p.obj_subscribe(output,12,4)
         code = p.obj_create(NODE_SOURCE.encode())
@@ -95,7 +95,7 @@ exec(source.decode())
     # Real revoke closes the RX queue while the child polls it.
     pid,command,output,response,rf=start()
     receive()
-    p.obj_revoke(rf)
+    p.obj_fifo_shutdown(rf)
     s=receive()
     ok(s[0] and s[1]=='transport-error' and s[7]['transport_error']==1,'RX revoke stops service and releases device')
     got,status=p.wait()

@@ -81,9 +81,7 @@ class Node:
             self.maxframe = min(info[3], 1294)
             if not mac_ok(self.mac) or info[3] < 1294 or self.minframe > 60:
                 raise ValueError('Ethernet MTU unsupported')
-            self.fifo, _, family, _ = api.obj_device_recv(device)
-            if family != 2:
-                raise ValueError('Ethernet device required')
+            self.fifo = api.obj_device_rx(device)
             self.sub = api.obj_subscribe(self.fifo, 12, 16)
         except Exception:
             self.close('open-failed')

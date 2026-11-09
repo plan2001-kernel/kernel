@@ -11,8 +11,9 @@
  * Historical VOBJ* syscall numbers are reserved and have no handlers.  The
  * TCP6/UDP6 object providers are gone: the permitted network boundary is raw
  * device frames/ObjectFIFO plus userspace protocol handling.  Process handle
- * introspection and child wait are direct bounded syscalls (OBJLIST and
- * OBJWAIT), not synthetic handle operations.
+ * introspection is SYSCTL SysctlHandleList; child wait is the direct typed
+ * PROCWAIT call; device control is IOCTL.  None is a synthetic object
+ * operation.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -25,6 +26,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/namespace.h"
+#include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 
 static long
@@ -162,34 +164,46 @@ sysobjbind(sysva_list list)
 	return vobjbind(handle, role, (int)rolelen, rights, (uint)mode);
 }
 
-/* Direct bounded introspection of the caller's own handle table.  It is not
- * an INVOKE operation: there is no target-object authority and no Handle is
- * created, but also no handle-less pseudo-object. */
-uintptr
-sysobjlist(sysva_list list)
-{
-	void *records;
-	long count;
-
-	records = sysva_arg(list, void*);
-	count = sysva_arg(list, long);
-	if(count < 0 || count > Vhandmax || (count != 0 && records == nil))
-		error(Ebadarg);
-	return vobjlist(records, count);
-}
-
 /* Direct typed child wait.  The caller waits on its own children; no
  * synthetic ProcessSelf Handle is created or delegated. */
 uintptr
-sysobjwait(sysva_list list)
+sysprocwait(sysva_list list)
 {
-	ObjWait *w;
+	ProcWait *w;
 
-	w = sysva_arg(list, ObjWait*);
+	w = sysva_arg(list, ProcWait*);
 	if(w == nil)
 		error(Ebadarg);
 	validaddr((uintptr)w, sizeof *w, 1);
-	return vobjwait(w);
+	return vobjprocwait(w);
+}
+
+/* IOCTL(145): device configuration, control and device-specific status.
+ * Authority is the device Handle and its rights per operation.  Object
+ * payload stays in OBJINVOKE. */
+uintptr
+sysioctl(sysva_list list)
+{
+	IoctlReq r;
+	IoctlReq *ur;
+	unsigned int op;
+	long size;
+	int handle;
+
+	handle = sysva_arg(list, int);
+	op = (unsigned int)sysva_arg(list, uvlong);
+	ur = sysva_arg(list, IoctlReq*);
+	size = sysva_arg(list, long);
+	if(ur == nil || size != sizeof r)
+		error(Ebadarg);
+	validaddr((uintptr)ur, sizeof r, 1);
+	memmove(&r, ur, sizeof r);
+	if(r.version != IOCTL_ABI_VERSION || r.flags != 0 ||
+	   r.reserved != 0 || r.reserved2 != 0)
+		error(Ebadarg);
+	r.result = vobjioctl(handle, op, r.data, (long)r.datalen, r.arg0);
+	memmove(ur, &r, sizeof r);
+	return (uintptr)r.result;
 }
 
 uintptr
@@ -256,22 +270,36 @@ sysobjinvoke(sysva_list list)
             bounded(c.outlen, OBJ_DEVICE_LISTMAX*sizeof(ObjDeviceEntry), Ebadarg));
         break;
     case ObjOpDeviceSend:
+    {
+        unsigned int kind;
+
         if(c.out != nil || c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
+        kind = 0;
         c.result = vobjdevicesend(handle, c.in,
-            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg));
+            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg), &kind);
+        /* Accepted L2 bytes and a USB completion sequence are different
+         * typed results even though both fit in the I/O return slot. */
+        c.aux = kind;
         break;
+    }
     case ObjOpDeviceRecv:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0
         || c.out == nil || c.outlen != sizeof(ObjDeviceResult))
             error(Ebadarg);
         c.result = vobjdevicerecv(handle, c.out);
         break;
-    case ObjOpDeviceCtl:
-        if(c.in != nil || c.inlen != 0 || c.arg1 != 0)
+    case ObjOpDeviceRx:
+        if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+           c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
-        c.result = vobjdevicectl(handle, c.arg0, c.out,
-            bounded(c.outlen, OBJ_DEVICE_MAXPAYLOAD, Ebadarg));
+        c.result = vobjdevicerx(handle);
+        break;
+    case ObjOpFifoShutdown:
+        if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+           c.arg0 != 0 || c.arg1 != 0)
+            error(Ebadarg);
+        c.result = vobjfifoshutdown(handle);
         break;
     case ObjOpInfo:
 		if(c.out == nil || c.outlen != sizeof(VobjInfo))
@@ -289,10 +317,14 @@ sysobjinvoke(sysva_list list)
 	{
 		uvlong ver;
 
+		/* READ/WRITE have no provider timeout.  Zero keeps the
+		 * provider's existing blocking behavior; a finite timeout is
+		 * rejected explicitly rather than silently ignored. */
+		if(c.arg0 != 0)
+			error("obj: read timeout not supported");
 		ver = 0;
 		c.result = vobjreadver(handle, c.out,
-			bounded(c.outlen, Vobjpaymax, Ebadarg),
-			bounded(c.arg0, 0x7fffffff, Ebadarg), &ver);
+			bounded(c.outlen, Vobjpaymax, Ebadarg), 0, &ver);
 		/* A GE read publishes the version it returned; every other
 		 * provider leaves aux at its previous zero value. */
 		if(c.result >= 0)
@@ -300,9 +332,10 @@ sysobjinvoke(sysva_list list)
 		break;
 	}
 	case ObjOpWrite:
+		if(c.arg0 != 0)
+			error("obj: write timeout not supported");
 		c.result = vobjio(handle, VioWrite, c.in,
-			bounded(c.inlen, Vobjpaymax, Ebadarg),
-			bounded(c.arg0, 0x7fffffff, Ebadarg));
+			bounded(c.inlen, Vobjpaymax, Ebadarg), 0);
 		break;
 	case ObjOpSend:
   if(c.arg0 > 0x7fffffffULL) error(Ebadarg);
@@ -339,23 +372,6 @@ sysobjinvoke(sysva_list list)
 			error(Ebadarg);
 		c.result = vobjpipepeer(handle);
 		break;
-	case ObjOpUartCtl:
-		if(c.in == nil || c.inlen != sizeof(Uartcfg))
-			error(Ebadarg);
-		vobjuartctl(handle, c.in);
-		c.result = 0;
-		break;
-	case ObjOpUartStatus:
-		if(c.out == nil || c.outlen == 0 || c.outlen > OBJ_UART_STATMAX)
-			error(Ebadarg);
-		c.result = vobjuartstatus(handle, c.out, (long)c.outlen);
-		break;
-	case ObjOpKbdLeds:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
-			error(Ebadarg);
-		c.result = vobjkbdleds(handle,
-			(int)bounded(c.arg0, 0x7fffffff, Ebadarg));
-		break;
 	case ObjOpPutOid:
 		/* Replace one explicitly named OID through the Space's Owrite
 		 * authority.  It never allocates, never commits and keeps the
@@ -384,12 +400,6 @@ sysobjinvoke(sysva_list list)
 		c.result = 0;
 		break;
 	}
-	case ObjOpOspawn:
-		if(c.in == nil || c.inlen != sizeof(ObjOspawnReq)
-		|| c.out != nil || c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
-			error(Ebadarg);
-		c.result = vobjospawn(handle, c.in);
-		break;
 	default:
 		error("obj: operation not supported");
 	}

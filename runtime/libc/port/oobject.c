@@ -10,8 +10,11 @@
 #include	<u.h>
 #include	<libc.h>
 #include	<uartapi.h>
+#include	<usbctl.h>
 #include	"../../abi/vobj.h"
 #include	"../../abi/obj.h"
+#include	"../../abi/sysctl.h"
+#include	"../../abi/ioctl.h"
 
 extern long objcreate(unsigned long long, unsigned long long, void *,
 		unsigned long long, void *);
@@ -21,8 +24,11 @@ extern long objclose(int);
 extern long objbind(int, void *, long, unsigned long long,
 		unsigned long long);
 extern long objinvoke(int, void *, long);
-extern long objlist(void *, long);
-extern long objwait(void *);
+extern long sysctl(unsigned int, unsigned int, SysctlReq *, long);
+extern long ioctl(int, unsigned int, IoctlReq *, long);
+extern long procwait(void *);
+extern long spawn(int, unsigned long long, char **, int, struct Ospawn *);
+extern long rforkex(unsigned long, void *, unsigned long long *);
 
 long
 obj_create(unsigned long long space, unsigned int kind, void *data,
@@ -225,6 +231,7 @@ obj_grant(int handle, unsigned long long rights)
     return obj_open(ObjOpenHandle, &req, sizeof req, rights, nil);
 }
 
+/* GE/O capability revocation only. */
 long
 obj_revoke(int handle)
 {
@@ -234,10 +241,41 @@ obj_revoke(int handle)
 	return obj_invoke(handle, &c, sizeof c);
 }
 
+/* Close the FIFO transport for all subscribers.  This is not revocation. */
+long
+obj_fifo_shutdown(int handle)
+{
+	ObjCall c;
+
+	callinit(&c, ObjOpFifoShutdown);
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_list_count(void *records, unsigned long long count,
+		unsigned long long *copied)
+{
+	SysctlReq r;
+	long ret;
+
+	memset(&r, 0, sizeof r);
+	r.version = SYSCTL_ABI_VERSION;
+	r.data = records;
+	r.datalen = count * sizeof(VobjListRec);
+	ret = sysctl(SysctlScopeOwnProcess, SysctlHandleList, &r, sizeof r);
+	if(ret < 0)
+		return ret;
+	if(copied != nil)
+		*copied = r.aux;
+	return (long)r.result;
+}
+
+/* The return value is the total live Handle count; an undersized buffer is
+ * safe and *copied (in obj_list_count) reports how many records were copied. */
 long
 obj_list(void *records, unsigned long long count)
 {
-	return objlist(records, (long)count);
+	return obj_list_count(records, count, nil);
 }
 
 /* Native Pipe, UART and KBD userland adapters.  They add no kernel entry
@@ -258,69 +296,93 @@ obj_pipe_peer(int handle)
 	return obj_invoke(handle, &c, sizeof c);
 }
 
+/* Device control is IOCTL(145); payload stays in OBJINVOKE. */
+long
+obj_device_ioctl(int device, unsigned int operation, void *data,
+		unsigned long long len, unsigned long long arg0)
+{
+	IoctlReq r;
+
+	memset(&r, 0, sizeof r);
+	r.version = IOCTL_ABI_VERSION;
+	r.data = data;
+	r.datalen = len;
+	r.arg0 = arg0;
+	return ioctl(device, operation, &r, sizeof r);
+}
+
 long
 obj_uart_ctl(int handle, void *cfg)
 {
-	ObjCall c;
-
 	if(cfg == nil)
 		return -1;
-	callinit(&c, ObjOpUartCtl);
-	c.in = cfg;
-	c.inlen = sizeof(Uartcfg);
-	return obj_invoke(handle, &c, sizeof c);
+	return obj_device_ioctl(handle, IoctlUartConfig, cfg,
+		sizeof(Uartcfg), 0);
 }
 
 long
 obj_uart_status(int handle, void *buf, unsigned long long len)
 {
-	ObjCall c;
-
 	if(buf == nil || len == 0)
 		return -1;
-	callinit(&c, ObjOpUartStatus);
-	c.out = buf;
-	c.outlen = len;
-	return obj_invoke(handle, &c, sizeof c);
+	return obj_device_ioctl(handle, IoctlUartStatus, buf, len, 0);
 }
 
 long
 obj_kbd_leds(int handle, unsigned int leds)
 {
-	ObjCall c;
-
-	callinit(&c, ObjOpKbdLeds);
-	c.arg0 = leds;
-	return obj_invoke(handle, &c, sizeof c);
+	return obj_device_ioctl(handle, IoctlKbdLeds, nil, 0, leds);
 }
 
 long
-obj_wait(ObjWait *w)
+obj_device_usb_global_ctl(int catalog, unsigned int request, void *data,
+		unsigned long long len)
+{
+	return obj_device_ioctl(catalog, IoctlUsbGlobal, data, len, request);
+}
+
+long
+obj_device_usb_ep_ctl(int endpoint, unsigned int request, void *data,
+		unsigned long long len)
+{
+	return obj_device_ioctl(endpoint, IoctlUsbEndpoint, data, len, request);
+}
+
+long
+obj_device_usb_clear_halt(int device)
+{
+	return obj_device_ioctl(device, IoctlUsbClearHalt, nil, 0, 0);
+}
+
+long
+obj_device_ether_detach(int device)
+{
+	return obj_device_ioctl(device, IoctlEtherDetach, nil, 0, 0);
+}
+
+long
+proc_wait(ProcWait *w)
 {
 	if(w == nil)
 		return -1;
-	return objwait(w);
+	return procwait(w);
 }
 
+/* Ordinary fork is the canonical extended fork with an empty Handle plan. */
+int
+rfork(int flags)
+{
+	return (int)rforkex((unsigned long)flags, nil, nil);
+}
+
+/* Direct SPAWN: an authorized Space Handle plus OID, never an INVOKE route. */
 long
 obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options)
 {
-	ObjCall c;
-	ObjOspawnReq r;
-
 	if(argc < 0)
 		return -1;
-	r.oid = oid;
-	r.argv = argv;
-	r.argc = argc;
-	r.flags = 0;
-	r.reserved = 0;
-	r.options = options;
-	callinit(&c, ObjOpOspawn);
-	c.in = &r;
-	c.inlen = sizeof r;
-	return obj_invoke(space, &c, sizeof c);
+	return spawn(space, oid, argv, argc, options);
 }
 
 /* Common device adapters; concrete wire messages remain provider-specific. */
@@ -384,16 +446,28 @@ obj_catalog_device_open(unsigned int family, int selector0, int selector1,
 }
 
 long
-obj_device_send(int device, void *message, unsigned long long length)
+obj_device_send_kind(int device, void *message, unsigned long long length,
+		unsigned int *kind)
 {
 	ObjCall c;
+	long r;
 
 	callinit(&c, ObjOpDeviceSend);
 	c.in = message;
 	c.inlen = length;
-	return obj_invoke(device, &c, sizeof c);
+	r = obj_invoke(device, &c, sizeof c);
+	if(kind != nil)
+		*kind = (unsigned int)c.aux;
+	return r;
 }
 
+long
+obj_device_send(int device, void *message, unsigned long long length)
+{
+	return obj_device_send_kind(device, message, length, nil);
+}
+
+/* One completed USB control message. */
 long
 obj_device_recv(int device, ObjDeviceResult *completion)
 {
@@ -405,22 +479,19 @@ obj_device_recv(int device, ObjDeviceResult *completion)
 	return obj_invoke(device, &c, sizeof c);
 }
 
+/* Acquire the Ethernet receive FIFO channel (not a completed message). */
 long
-obj_device_ctl(int device, unsigned int operation, void *data,
-		unsigned long long len)
+obj_device_rx(int device)
 {
 	ObjCall c;
 
-	callinit(&c, ObjOpDeviceCtl);
-	c.arg0 = operation;
-	c.out = data;
-	c.outlen = len;
+	callinit(&c, ObjOpDeviceRx);
 	return obj_invoke(device, &c, sizeof c);
 }
 
 long
 obj_device_ether_status(int device, ObjEtherStatus *status)
 {
-    return obj_device_ctl(device, ObjDeviceEtherStatus, status,
-        sizeof *status);
+    return obj_device_ioctl(device, IoctlEtherStatus, status,
+        sizeof *status, 0);
 }

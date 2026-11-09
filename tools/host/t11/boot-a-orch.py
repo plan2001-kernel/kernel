@@ -95,7 +95,7 @@ say(b'M6'+chr(10).encode())
 
 plan9.obj_close(sr)
 plan9.obj_close(s)
-plan9.obj_revoke(f)
+plan9.obj_fifo_shutdown(f)
 plan9.obj_close(f)
 plan9.obj_close(rr)
 say(('T11-A-RESULT '+('PASS' if bad==0 and not (ok==0) else 'FAIL')+' '+str(ok)+' '+str(bad)+chr(10)).encode())

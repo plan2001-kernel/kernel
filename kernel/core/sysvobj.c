@@ -15,8 +15,9 @@
  *
  * Handles are process-local, generation-tagged and rights-bearing.  They are
  * not OIDs, pointers or ambient authority.  Process exec/exit releases all
- * handles.  A FIFO can be revoked explicitly; this marks every subscription
- * closed and wakes blocked receivers.
+ * handles.  A FIFO can be shut down explicitly; this marks every subscription
+ * closed and wakes blocked receivers.  FIFO shutdown is a transport
+ * operation, not capability revocation of a GE/O grant.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -33,6 +34,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/namespace.h"
+#include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 #include	"ocontext.h"
 
@@ -725,7 +727,7 @@ vobjprocexec(Proc *p)
 }
 
 /*
- * Shared process-creation Handle delegation.  RFORKEX and OSPAWN both build a
+ * Shared process-creation Handle delegation.  RFORKEX and SPAWN both build a
  * bounded Vinhand request list; this validates the complete plan against the
  * parent before any child is created and pins every source Vhand so neither
  * its rights nor its object lifetime can change between validation and commit.
@@ -833,7 +835,7 @@ vobjinheritchildhandle(Vinherit *vi, int index)
 
 /* Resolve a named parent Handle to its unique plan destination.  Returns the
  * child Handle, 0 when the source is absent, or -1 when it appears more than
- * once (ambiguous).  OSPAWN's stdoutpipe uses this and rejects both absent and
+ * once (ambiguous).  SPAWN's stdoutpipe uses this and rejects both absent and
  * ambiguous sources instead of silently choosing the first match. */
 int
 vobjinheritsrchandle(Vinherit *vi, int srchandle)
@@ -1095,8 +1097,6 @@ vobjinfo(int handle, VobjInfo *out)
 {
 	Vhand *h;
 	Vobj *o;
-	Vsub *s;
-	Vfifo *f;
 
 	if(out == nil)
 		error(Ebadarg);
@@ -1119,24 +1119,8 @@ vobjinfo(int handle, VobjInfo *out)
 		out->oid = o->oid;
 		osvolumeid((Ohand*)o->priv, out->volume);
 	}
-	if(o->kind == VkindFifo && o->fifo != nil){
-		f = o->fifo;
-		qlock(&f->lk);
-		out->subscribers = f->nsubs;
-		out->sends = f->sends;
-		out->drops = f->drops;
-		out->fifo_closed = f->closed;
-		out->sub_capacity = f->capacity;
-		qunlock(&f->lk);
-	}
-	if((s = h->sub) != nil){
-		lock(&s->lk);
-		out->sub_capacity = s->capacity;
-		out->sub_queued = s->len;
-		out->sub_dropped = s->dropped;
-		out->sub_closed = s->closed;
-		unlock(&s->lk);
-	}
+	/* Generic metadata only.  FIFO/subscription counters are the separate
+	 * VobjFifostat contract (ObjOpStat); Info never duplicates them. */
 	vhandput(h);
 	return 0;
 }
@@ -1507,6 +1491,7 @@ vobjfifostat(int handle, VobjFifostat *out)
 		out->queued = s->len;
 		out->capacity = s->capacity;
 		out->sub_closed = s->closed;
+		out->sub_dropped = s->dropped;
 		unlock(&s->lk);
 	}
 	vhandput(h);
@@ -1547,23 +1532,35 @@ vobjfifoclose(Vobj *o)
     vfifoclose(o, 0);
 }
 
+/* GE/O capability revocation only.  A FIFO channel shutdown is explicitly
+ * vobjfifoshutdown(); closing one Handle just releases its reference. */
 int
 vobjrevoke(int handle)
 {
     Vhand *h;
 
-    h = vlookup(handle, 0);
+    h = vlookup(handle, Vdelegate);
     if(waserror()){vhandput(h);nexterror();}
-    if(h->obj->kind == VkindGe){
-        if((h->rights & Vdelegate) == 0 || h->obj->priv == nil)
-            error(Eperm);
-        osrevokehand(h->obj->priv);
-    }else if(h->obj->kind == VkindFifo){
-        if((h->rights & Vcontrol) == 0)
-            error(Eperm);
-        vfifoclose(h->obj, 1);
-    }else
+    if(h->obj->kind != VkindGe || h->obj->priv == nil)
         error(Ebadarg);
+    osrevokehand(h->obj->priv);
+    poperror();
+    vhandput(h);
+    return 0;
+}
+
+/* Close the FIFO transport for every subscriber.  This does not revoke any
+ * GE/O capability and does not invalidate unrelated Handles. */
+int
+vobjfifoshutdown(int handle)
+{
+    Vhand *h;
+
+    h = vlookup(handle, Vcontrol);
+    if(waserror()){vhandput(h);nexterror();}
+    if(h->obj->kind != VkindFifo)
+        error(Ebadarg);
+    vfifoclose(h->obj, 1);
     poperror();
     vhandput(h);
     return 0;
@@ -2565,7 +2562,7 @@ vusbreadonly(Ep *ep, uchar *m)
 }
 
 long
-vobjdevicesend(int handle, void *in, long len)
+vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
 {
 	Vhand *h;
 	Vdevice *d;
@@ -2575,6 +2572,8 @@ vobjdevicesend(int handle, void *in, long len)
 	long got;
 	uvlong seq;
 
+    if(kind != nil)
+        *kind = 0;
     h = vlookup(handle, Vsend);
     if(waserror()){vhandput(h);nexterror();}
     d = vdevice(h);
@@ -2582,6 +2581,8 @@ vobjdevicesend(int handle, void *in, long len)
         got = vethersend(d->ether, in, len);
         poperror();
         vhandput(h);
+        if(kind != nil)
+            *kind = ObjDeviceSendAcceptedBytes;
         return got;
     }
     poperror();
@@ -2667,9 +2668,39 @@ vobjdevicesend(int handle, void *in, long len)
 	vhandput(h);
 	poperror();
 	free(message);
+	if(kind != nil)
+		*kind = ObjDeviceSendSequence;
 	return (long)seq;
 }
 
+/* Ethernet receive-channel acquisition: return the ObjectFIFO capability.
+ * This is deliberately not the completed-message receive path. */
+int
+vobjdevicerx(int handle)
+{
+	Vhand *h;
+	Vdevice *d;
+	int rights, result;
+
+	h = vlookup(handle, Vrecv);
+	if(waserror()){
+		vhandput(h);
+		nexterror();
+	}
+	d = vdevice(h);
+	if(d->family != ObjDeviceEthernet)
+		error(Ebadarg);
+	if(!(h->rights & Vsubscribe))
+		error(Eperm);
+	rights = Vsubscribe|Vmeta;
+	rights |= h->rights & (Vdelegate|Vcontrol);
+	result = vobjinstallobj(vetherfifo(d->ether), rights);
+	poperror();
+	vhandput(h);
+	return result;
+}
+
+/* USB control completion retrieval only. */
 int
 vobjdevicerecv(int handle, void *out)
 {
@@ -2685,21 +2716,8 @@ vobjdevicerecv(int handle, void *out)
 		nexterror();
 	}
 	d = vdevice(h);
-    if(d->family == ObjDeviceEthernet){
-        int rights;
-        if(!(h->rights & Vsubscribe))
-            error(Eperm);
-        rights = Vsubscribe|Vmeta;
-        rights |= h->rights & (Vdelegate|Vcontrol);
-        result = vobjinstallobj(vetherfifo(d->ether), rights);
-        r.sequence = 0;
-        r.family = ObjDeviceEthernet;
-        r.length = 0;
-        memmove(out, &r, sizeof r);
-        poperror();
-        vhandput(h);
-        return result;
-    }
+	if(d->family == ObjDeviceEthernet)
+		error(Ebadarg);
 
 	qlock(&d->lk);
 	if(waserror()){
@@ -2814,51 +2832,76 @@ vusbepctl(Vusbep *ve, uvlong operation, void *arg, long narg)
     return r;
 }
 
-int
-vobjdevicectl(int handle, uvlong op, void *out, long len)
+/* IOCTL(145): device configuration, control and device-specific status.
+ * Device payload (UART bytes, Ethernet frames, USB transfers) stays in the
+ * object interface.  Each operation checks its own required rights and its
+ * own bounded request shape. */
+long
+vobjioctl(int handle, uvlong op, void *data, long len, uvlong arg0)
 {
     Vhand *h;
     Vdevice *d;
     Vusbep *ve;
+    long r;
+
+    if(len < 0 || (len > 0 && data == nil))
+        error(Ebadarg);
+    switch(op){
+    case IoctlUartConfig:
+        if(len != sizeof(Uartcfg))
+            error(Ebadarg);
+        vobjuartctl(handle, data);
+        return 0;
+    case IoctlUartStatus:
+        if(len <= 0 || len > OBJ_UART_STATMAX)
+            error(Ebadarg);
+        return vobjuartstatus(handle, data, len);
+    case IoctlKbdLeds:
+        if(data != nil || len != 0 || arg0 > 0x7fffffffULL)
+            error(Ebadarg);
+        return vobjkbdleds(handle, (int)arg0);
+    case IoctlUsbGlobal:
+        h = vlookup(handle, Vcontrol);
+        if(waserror()){vhandput(h);nexterror();}
+        if(h->obj->kind != VkindDevices)
+            error(Ebadarg);
+        r = vusbglobalctl(arg0, data, len);
+        poperror();
+        vhandput(h);
+        return r;
+    case IoctlUsbEndpoint:
+        h = vlookup(handle, Vcontrol);
+        if(waserror()){vhandput(h);nexterror();}
+        if(h->obj->kind != VkindUsbEp)
+            error(Ebadarg);
+        ve = h->obj->priv;
+        r = vusbepctl(ve, arg0, data, len);
+        poperror();
+        vhandput(h);
+        return r;
+    }
 
     h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
-    if(h->obj->kind == VkindDevices){
-        long r;
-        if(!(h->rights & Vcontrol)) error(Eperm);
-        r = vusbglobalctl(op, out, len);
-        poperror();
-        vhandput(h);
-        return r;
-    }
-    if(h->obj->kind == VkindUsbEp){
-        long r;
-        if(!(h->rights & Vcontrol)) error(Eperm);
-        ve = h->obj->priv;
-        r = vusbepctl(ve, op, out, len);
-        poperror();
-        vhandput(h);
-        return r;
-    }
     d = vdevice(h);
     if(d->family == ObjDeviceEthernet){
-        if(op == ObjDeviceEtherStatus){
+        if(op == IoctlEtherStatus){
             ObjEtherStatus status;
             if(!(h->rights & Vmeta)) error(Eperm);
-            if(out == nil || len != sizeof status) error(Ebadarg);
-            validaddr((uintptr)out, sizeof status, 1);
+            if(data == nil || len != sizeof status) error(Ebadarg);
+            validaddr((uintptr)data, sizeof status, 1);
             vetherstatus(d->ether, &status);
-            memmove(out, &status, sizeof status);
-        }else if(op == ObjDeviceEtherDetach){
+            memmove(data, &status, sizeof status);
+        }else if(op == IoctlEtherDetach){
             if(!(h->rights & Vcontrol)) error(Eperm);
-            if(out != nil || len != 0) error(Ebadarg);
+            if(data != nil || len != 0) error(Ebadarg);
             vetherdetach(d->ether);
         }else
             error(Ebadctl);
-    }else{
-        if(op != ObjDeviceUsbClearHalt) error(Ebadctl);
+    }else if(d->family == ObjDeviceUsbControl){
+        if(op != IoctlUsbClearHalt) error(Ebadctl);
         if(!(h->rights & Vcontrol)) error(Eperm);
-        if(out != nil || len != 0) error(Ebadarg);
+        if(data != nil || len != 0) error(Ebadarg);
         qlock(&d->lk);
         if(waserror()){qunlock(&d->lk);nexterror();}
         if(d->failed) error("device: transfer failed; close and reopen");
@@ -2866,7 +2909,8 @@ vobjdevicectl(int handle, uvlong op, void *out, long len)
         usbcore_ioctl(d->ep, USBclrhalt, nil, 0);
         poperror();
         qunlock(&d->lk);
-    }
+    }else
+        error(Ebadctl);
     poperror();
     vhandput(h);
     return 0;
@@ -3112,37 +3156,7 @@ vobjnamespacevisible(int control, void *out, long bytes)
  * dispatch is re-entered and no second scheduler/exit path exists.
  */
 long
-vobjospawn(int handle, void *req)
-{
-	ObjOspawnReq r;
-	Vobj *o;
-	long pid;
-
-	if(req == nil)
-		error(Ebadarg);
-	validaddr((uintptr)req, sizeof r, 0);
-	memmove(&r, req, sizeof r);
-	if(r.flags != 0 || r.reserved != 0)
-		error(Ebadarg);
-	if(r.argc < 0 || r.argc > 0x7fffffffL)
-		error(Ebadarg);
-	o = vobjholdobj(handle, Vexecute);
-	if(o->kind != VkindSpace || o->priv == nil){
-		vobjput(o);
-		error(Ebadarg);
-	}
-	if(waserror()){
-		vobjput(o);
-		nexterror();
-	}
-	pid = kernospawn((Ohand*)o->priv, r.oid, r.argv, (int)r.argc, r.options);
-	poperror();
-	vobjput(o);
-	return pid;
-}
-
-long
-vobjwait(ObjWait *out)
+vobjprocwait(ProcWait *out)
 {
 	Waitmsg w;
 	ulong pid;
@@ -3157,8 +3171,8 @@ vobjwait(ObjWait *out)
 	out->time[1] = w.time[1];
 	out->time[2] = w.time[2];
 	n = strlen(w.msg);
-	if(n > OBJ_WAITMSG_MAX)
-		n = OBJ_WAITMSG_MAX;
+	if(n > PROCWAIT_MSG_MAX)
+		n = PROCWAIT_MSG_MAX;
 	memmove(out->msg, w.msg, n);
 	out->msglen = (unsigned int)n;
 	return 0;

@@ -105,17 +105,15 @@ int	vobjinheritchildhandle(Vinherit*, int);
 int	vobjinheritsrchandle(Vinherit*, int);
 void	vobjinheritrelease(Vinherit*);
 
-/* Process-lifecycle providers.  The OBJINVOKE operations validate the
- * caller's own ProcessSelf or Space capability, then call the shared kernel
- * cores that the retired direct syscalls used.  Keeping one core preserves
- * forkchild, OSPAWN layout, parent/child checks and pexit semantics. */
-ulong	kernrfork(ulong flag);
+/* Process-lifecycle providers.  SPAWN resolves an explicit Space Handle to
+ * the shared spawn core; the direct OEXECUTE/OTERMINATE/PROCWAIT/EXITS calls
+ * use the same kernel semantics.  Keeping one core preserves forkchild,
+ * spawn layout, parent/child checks and pexit semantics. */
 ulong	kernrforkex(ulong flag, Vinhand*, int, uvlong*);
 long	kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc,
 		struct Ospawn *uopt);
 int	kernoterminate(int pid);
-long	vobjospawn(int handle, void *req);
-long	vobjwait(ObjWait *out);
+long	vobjprocwait(ProcWait *out);
 
 int	vobjopenstream(uvlong provider, void *req, long len, uvlong rights,
 		VobjId *id);
@@ -128,6 +126,7 @@ int	vobjfifosub(int fifoh, uvlong rights, long capacity);
 int	vobjfifosend(int fifoh, int objh, void *env, long envlen);
 int	vobjfiforecv(int subh, void *env, long envlen, int timeout, long *got);
 int	vobjrevoke(int handle);
+int	vobjfifoshutdown(int handle);
 long	vobjio(int handle, uvlong op, void *buf, long n, long timeout);
 long	vobjreadver(int handle, void *buf, long n, long timeout, uvlong *ver);
 int	vobjlist(void *buf, long n);
@@ -155,9 +154,10 @@ int	vobjkbdleds(int handle, int leds);
 int vobjdevicesopen(uvlong rights, VobjId *id);
 long vobjdevicelist(int handle, void *out, long bytes);
 int vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id);
-long vobjdevicesend(int handle, void *in, long len);
+long vobjdevicesend(int handle, void *in, long len, unsigned int *kind);
 int vobjdevicerecv(int handle, void *out);
-int vobjdevicectl(int handle, uvlong op, void *out, long len);
+int vobjdevicerx(int handle);
+long vobjioctl(int handle, uvlong op, void *data, long len, uvlong arg0);
 /* Kernel-owned references and envelope, process context only.  This is the
  * same ObjectFIFO publisher used by user Handle sends, without ambient
  * process Handle lookup.  Caller pins fifo/object throughout the call. */
@@ -173,6 +173,14 @@ void vetherstatus(Veth*, ObjEtherStatus*);
 
 /* CLOSE only when the Handle still names the expected provider kind. */
 int	vobjclosekind(int handle, int kind);
+
+/* SYSCTL provider helpers. */
+long	sysctlsnapshot(void *user, uvlong n);
+long	sysctlenvget(char *name, int namelen, void *buf, long n, long *outlen);
+long	sysctlenvset(char *name, int namelen, void *val, long n);
+long	sysctlenvdelete(char *name, int namelen);
+long	sysctlenvlist(void *buf, long n, long *need);
+long	osvolumeopen(char *spec, int n);
 
 /* GE/O provider helpers implemented in sysgefs.c. */
 int	vobjrightsfromo(int rights);

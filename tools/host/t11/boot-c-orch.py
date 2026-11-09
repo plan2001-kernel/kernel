@@ -40,7 +40,7 @@ ck('ge-interproc',gr==(str(oid).encode()+bytes((58,))+b'GE-PAYLOAD'))
 a,bs=space.wait()
 ck('ge-wait',bs=='')
 plan9.obj_close(sg)
-plan9.obj_revoke(gf)
+plan9.obj_fifo_shutdown(gf)
 plan9.obj_close(gf)
 plan9.obj_close(gh)
 
@@ -144,7 +144,7 @@ ck('quota-witness-full',wfull==1)
 ck('quota-queues-unchanged',wb==wa)
 
 plan9.obj_close(qo)
-plan9.obj_revoke(qf)
+plan9.obj_fifo_shutdown(qf)
 for w in wit:
     plan9.obj_close(w)
 rel=plan9.obj_create(b'REL')

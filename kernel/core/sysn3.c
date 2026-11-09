@@ -1,3 +1,11 @@
+/*
+ * Process environment operations reached through SYSCTL(144).
+ *
+ * The old ENVGET/ENVSET/ENVDELETE/ENVLIST syscall numbers are reserved.
+ * These helpers keep the existing bounded name/value sizes and the existing
+ * OContext/group environment sharing semantics; they take plain arguments
+ * and are called only from the SYSCTL dispatcher.
+ */
 #include	"u.h"
 #include	"../core/lib.h"
 #include	"mem.h"
@@ -33,22 +41,13 @@ envnamecopy(char *u, int n)
 	return k;
 }
 
-uintptr
-sysenvget(sysva_list list)
+long
+sysctlenvget(char *uname, int nname, void *buf, long n, long *ulen)
 {
-	int nname;
-	char *uname, *name, *kb;
-	void *buf;
-	long n, vlen, *ulen;
+	char *name, *kb;
+	long vlen;
 
-	nname = sysva_arg(list, int);
-	uname = sysva_arg(list, char*);
-	buf = sysva_arg(list, void*);
-	n = sysva_arg(list, long);
-	ulen = sysva_arg(list, long*);
 	if(n < 0 || n > Envvalmax)
-		error(Ebadarg);
-	if(ulen != nil && !okaddr((uintptr)ulen, sizeof(long), 1))
 		error(Ebadarg);
 	name = envnamecopy(uname, nname);
 	if(waserror()){
@@ -90,18 +89,11 @@ sysenvget(sysva_list list)
 	return 0;
 }
 
-uintptr
-sysenvset(sysva_list list)
+long
+sysctlenvset(char *uname, int nname, void *uval, long n)
 {
-	int nname;
-	char *uname, *name, *kb;
-	void *uval;
-	long n;
+	char *name, *kb;
 
-	nname = sysva_arg(list, int);
-	uname = sysva_arg(list, char*);
-	uval = sysva_arg(list, void*);
-	n = sysva_arg(list, long);
 	if(n < 0 || n > Envvalmax)
 		error(Ebadarg);
 	if(n > 0 && uval == nil)
@@ -128,14 +120,11 @@ sysenvset(sysva_list list)
 	return 0;
 }
 
-uintptr
-sysenvdelete(sysva_list list)
+long
+sysctlenvdelete(char *uname, int nname)
 {
-	int nname;
-	char *uname, *name;
+	char *name;
 
-	nname = sysva_arg(list, int);
-	uname = sysva_arg(list, char*);
 	name = envnamecopy(uname, nname);
 	if(waserror()){
 		free(name);
@@ -147,19 +136,13 @@ sysenvdelete(sysva_list list)
 	return 0;
 }
 
-uintptr
-sysenvlist(sysva_list list)
+long
+sysctlenvlist(void *buf, long n, long *uneed)
 {
 	char *kb;
-	void *buf;
-	long n, need, r, *uneed;
+	long need, r;
 
-	buf = sysva_arg(list, void*);
-	n = sysva_arg(list, long);
-	uneed = sysva_arg(list, long*);
 	if(n < 0 || n > Envlistmax)
-		error(Ebadarg);
-	if(uneed != nil && !okaddr((uintptr)uneed, sizeof(long), 1))
 		error(Ebadarg);
 	need = 0;
 	if(envnativelist(nil, 0, &need) < 0)

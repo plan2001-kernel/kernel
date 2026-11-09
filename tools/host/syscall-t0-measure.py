@@ -12,7 +12,7 @@ and performs one normal smoke boot.  Without --run the script only re-parses
 the logs already under build/syscall-t0/.
 
 The trace kernel stores dispatch records in a bounded buffer and flushes them
-at SYSSNAPSHOT checkpoints.  The normal build has no trace code.
+at SYSCTL snapshot checkpoints.  The normal build has no trace code.
 """
 
 from __future__ import annotations

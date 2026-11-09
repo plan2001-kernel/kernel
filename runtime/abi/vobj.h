@@ -14,7 +14,7 @@
 #ifndef PLAN2001_ABI_VOBJ_H
 #define PLAN2001_ABI_VOBJ_H
 
-#define VOBJ_ABI_VERSION 2
+#define VOBJ_ABI_VERSION 3
 
 /* Independent, attenuable rights on an object or subscription handle. */
 enum {
@@ -78,26 +78,21 @@ typedef struct VobjId {
 	unsigned long long	oid;
 } VobjId;
 
-/* VOBJINFO result. */
+/* VOBJINFO result: generic identity/type/size/rights metadata only.  It
+ * never carries FIFO or subscription counters; those are the separate
+ * VOBJFIFOSTAT contract used by ObjOpStat. */
 typedef struct VobjInfo {
 	unsigned long long	incarnation;
 	unsigned long long	space;
 	unsigned long long	oid;
 	unsigned long long	size;
 	unsigned long long	holds;
-	unsigned long long	subscribers;
-	unsigned long long	sends;
-	unsigned long long	drops;
 	unsigned int		kind;
 	unsigned int		flags;
 	unsigned int		rights;
-	unsigned int		sub_capacity;
-	unsigned int		sub_queued;
-	unsigned int		sub_dropped;
-	unsigned int		fifo_closed;
-	unsigned int		sub_closed;
 	unsigned int		provider;
 	unsigned int		abi_version;
+	unsigned int		reserved;
 	unsigned char		volume[16];
 } VobjInfo;
 
@@ -127,7 +122,7 @@ typedef struct VobjFifostat {
 	unsigned int		capacity;
 	unsigned int		fifo_closed;
 	unsigned int		sub_closed;
-	unsigned int		reserved;
+	unsigned int		sub_dropped;
 } VobjFifostat;
 
 #endif /* PLAN2001_ABI_VOBJ_H */

@@ -13,7 +13,8 @@ OBJOPEN(ObjOpenDevices, rights)
   -> OBJOPEN(ObjOpenDevice, catalog Handle, family,
              selectors, versioned options, attenuated rights)
   -> armed catalog Handle also accepts global USB administration
-  -> provider-specific READ/WRITE/SEND/RECV/INVOKE operations
+  -> provider-specific READ/WRITE/SEND/RECV object operations
+  -> IOCTL(device Handle, operation, IoctlReq*, size) for control/status
 ```
 
 - A catalog Handle must carry `Vcreate` for every device open. A USB CTL
@@ -33,17 +34,23 @@ OBJOPEN(ObjOpenDevices, rights)
 
 | Family | Open input | Required behavior |
 | --- | --- | --- |
-| `ObjDeviceUart` | `mode` = `OREAD`/`OWRITE`/`ORDWR` | Authorized bounded byte-stream READ/WRITE; `Vread`/`Vwrite`; `UartCtl` needs `Vcontrol`, status/info need `Vmeta`. No artificial frames. |
-| `ObjDeviceKbd` | `flags` = `OBJ_DEVICE_KBD_EXCLUSIVE` | Exclusive PS/2 scan-code claim; READ returns raw scan codes; LED control needs `Vcontrol`. |
-| `ObjDeviceEthernet` | no options | Raw L2 SEND of complete frames; SEND returns accepted/enqueued bytes. RECV returns the existing ObjectFIFO capability. |
+| `ObjDeviceUart` | `mode` = `OREAD`/`OWRITE`/`ORDWR` | Authorized bounded byte-stream READ/WRITE; `Vread`/`Vwrite`. `IOCTL(IoctlUartConfig)` needs `Vcontrol`; `IOCTL(IoctlUartStatus)` needs `Vmeta`. No artificial frames. |
+| `ObjDeviceKbd` | `flags` = `OBJ_DEVICE_KBD_EXCLUSIVE` | Exclusive PS/2 scan-code claim; READ returns raw scan codes; `IOCTL(IoctlKbdLeds)` needs `Vcontrol`. |
+| `ObjDeviceEthernet` | no options | Raw L2 SEND of complete frames; SEND returns accepted/enqueued bytes. `ObjOpDeviceRx` returns the ObjectFIFO receive-channel capability; `IOCTL(IoctlEtherStatus/Detach)` needs `Vmeta`/`Vcontrol`. |
 | `ObjDeviceUsbControl` | no options | Synchronous control transfer; exactly one session-owned pending immutable completion, not an Ethernet FIFO and not a bulk API. |
 | `ObjDeviceUsbEndpoint` | `kind` = data/CTL, `mode` | DATA performs the existing exclusive endpoint data open; CTL references the endpoint for provider administration. No USB bulk data API is implied. |
 
-Global USB administration (`USBIOCTL`) remains provider-specific. It is
+Global USB administration (`IoctlUsbGlobal`) is provider-specific. It is
 reachable only through a catalog Handle carrying `Vcontrol`, and endpoint
-administration only through a catalog-opened CTL endpoint reference carrying
-`Vcontrol`. It is synchronous and copies any IN/OUT buffer for the duration
-of the call only.
+administration (`IoctlUsbEndpoint`) only through a catalog-opened CTL endpoint
+reference carrying `Vcontrol`. It is synchronous and copies any IN/OUT buffer
+for the duration of the call only. `IoctlUsbClearHalt` is the synchronous
+USB-control status operation and separately requires `Vcontrol`.
+
+Device payload transport is not IOCTL: UART bytes, Ethernet frames and USB
+transfer requests/completions remain object READ/WRITE/SEND/RECV operations.
+A USB control *transfer* is transport with its own send/completion sequence;
+the naming of "control transfer" does not make it an IOCTL.
 
 The Ethernet receive path publishes immutable byte objects through
 ObjectFIFO, with ordinary subscription rights and frame boundaries. The USB
