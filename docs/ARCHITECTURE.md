@@ -90,6 +90,261 @@ migration: experimental volumes may be reamed and objects reimported. No
 persistent set-relation engine or automatic namespace-definition loader is
 claimed as implemented.
 
+## Console sessions and namespace-bound terminal I/O (design target; not implemented)
+
+### Purpose and separation of concerns
+
+Console and terminal I/O are foundational device services, not a special feature
+of a shell, a GE/O filesystem, or the MicroPython runtime. The target is the
+useful Plan 9 principle that a process receives *its own authorized view of
+services*: a keyboard/terminal service may be bound to roles in one process's
+namespace, and a different service may fill the same roles in another. This
+does not require Plan 9's pathname, mount, Chan/fid/qid or 9P ABI.
+
+Keep the following identities and lifetimes separate:
+
+- **Physical device:** PS/2 keyboard, UART, display/framebuffer, or a future
+  USB keyboard. The driver and its exclusive acquisition remain kernel/device
+  concerns; a device selector alone grants no authority.
+- **Console service:** a privileged-enough userspace owner of selected device
+  Handles. It translates and routes input/output without granting raw device
+  control to ordinary applications. Initially it may be a small MicroPython
+  service; a new userspace subsystem is not a prerequisite.
+- **Console session:** a volatile set of input/output endpoints and optional
+  control state, managed by the console service. A session is neither an OID,
+  a stored GE/O namespace nor necessarily one process or one `Pgrp`.
+- **Process namespace:** the existing `Pgrp/OContext` binding view, which
+  names the *authorized session endpoints* a process may use. Sharing/copying
+  a `Pgrp` and delegating process-local Handles are distinct operations.
+- **MicroPython REPL or other client:** consumes and produces bytes/events
+  through the assigned endpoints. It must not need to acquire the physical
+  keyboard, know which output device is active, or have an implicit global
+  terminal grant.
+
+A namespace is an authority and lookup view, **not** a transport or an
+automatic stdin-to-stdout connection. The bound endpoint providers carry
+actual data. Opening a role yields a process-local Handle with explicit rights.
+
+### Verified AMD64 implementation baseline and limitations
+
+The current native boot path is *not* the console-service design:
+
+- **Input:** `kernel/amd64/kbdcore.c` buffers raw PS/2 scan codes.
+  `OBJOPEN(ObjOpenDevice)` for `ObjDeviceKbd` requires the
+  `OBJ_DEVICE_KBD_EXCLUSIVE` claim; `VkindKbd` reads scan-code bytes.
+  `micropython/p9console.c` opens this device directly from the `-I`
+  REPL, retains a private `kbdh`, decodes scan codes (currently including
+  Finnish keyboard mapping), and feeds `mp_hal_stdin_rx_chr()` through
+  `micropython/p9hal.c`. Another independent open cannot take the active
+  exclusive claim. Inherited access to a Handle, if explicitly authorized,
+  must not be confused with a second acquisition or with input arbitration.
+- **Output:** `mp_hal_stdout_tx_strn()` writes through
+  `p9_console_write()` and the `VkindConsole` object provider. That
+  provider ultimately calls `iowritek()` / `putstrn()`, which use
+  kernel-console sinks such as the UEFI framebuffer and serial console.
+  `ObjOpenConsole` creates a write-only Handle, authorized by the caller's
+  `Proc.iomask` or an explicitly configured `stdoutpipe`; the actual
+  write also checks that process-local route. This is not a general duplex
+  session endpoint. The current console Handle has `Vwrite`, not
+  `Vdelegate`, and cannot simply be `OBJBIND`-delegated as-is.
+- **Child process:** `SPAWN` creates a fresh `Pgrp`, empty Handle
+  table and no ambient output grant; selected roles, Pipe endpoints or other
+  delegable Handles can be passed using explicit creation options.
+  Its existing `stdoutpipe` route covers selected output, not an
+  automatically supplied child stdin, keyboard focus or full terminal.
+  `RFORKEX` likewise only transfers explicitly planned Handles.
+- **Namespaces:** `OBJBIND` and `OBJOPEN(ObjOpenBinding)` already support
+  delegable generic object kinds, not only GE/O objects. However,
+  `vobjnamespacecreate()` currently enforces GE/O role validation for
+  sealed views and `vobjnamespacevisible()` reports GE/O identities, not a
+  generic named inventory of device/console roles. Selected role delegation
+  in `SPAWN` is a separate route; do not claim arbitrary console roles
+  already work through every NamespaceView operation.
+- **Display:** `kernel/core/fbconsole.c` is a kernel-owned text sink,
+  not yet a user-delegable terminal display surface. Existing physical
+  framebuffer and serial logging must remain available during early boot
+  and service failure. Current PS/2 support does not imply a working USB
+  HID keyboard-to-console input service.
+
+This target must be treated as **unimplemented** until the full input,
+output, delegation and lifecycle chain is verified in the AMD64 guest and,
+when applicable, on hardware. It does not assert ARM64 parity.
+
+### Target endpoint contract
+
+Use ordinary capability objects with bounded, direction-specific rights
+before inventing a new syscall or a new persistent kind. Proposed namespace
+role labels (contract targets, **not currently standard bindings**) are:
+
+| Role | Client operation | Intended rights and owner |
+| --- | --- | --- |
+| `console_in` | Read terminal text input | Client `Vread`; console service owns the writer. |
+| `console_out` | Write terminal output | Client `Vwrite`; console service owns the reader/sink. |
+| `console_err` | Write application errors | Client `Vwrite`; may route to the same display but must be separately selectable. |
+| `console_ctl` | Session/focus administration | Only an authorized session manager has `Vcontrol`; not inherited by default. |
+| `console_events` (optional) | Receive structured key/resize events | Separate bounded event channel with `Vrecv` where needed; not mandatory for the initial REPL. |
+
+The producer/consumer endpoints can initially use the existing blocking
+**Pipe** byte streams. ObjectFIFO is appropriate for *framed* key events,
+notifications and IPC, where record boundaries and subscriber semantics
+matter; do not change terminal text into fake FIFO frames merely to use
+ObjectFIFO everywhere. A future explicit `ConsoleSession` runtime object is
+justified only if it has actual identity, rights and lifecycle operations
+beyond these endpoint capabilities. Its introduction must preserve the
+small object ABI instead of inventing a console-specific syscall family.
+
+Terminal input, output and diagnostics are **separate authorities**. A client
+can have read-only input, output-only access, both, or neither. `console_ctl`,
+raw keyboard and physical-display ownership must never be inferred from
+`console_in` or `console_out`. Role names, object numbers, a known PID
+or a namespace definition never grant access without the underlying
+legitimately delegated capability. Rights may only be attenuated.
+
+All session endpoints belong to a managed session, but session lifetime
+does not have to equal one process lifetime. The console service maintains
+its own references and closes/revokes them according to its policy. A
+process exiting releases its Handles; a `Pgrp` goes away at its final
+reference; a GE/O object's persistent identity is independent of both.
+Removing an `OContext` role does not implicitly revoke previously opened
+Handles. Switching keyboard focus is a routing operation, not an unbind
+or a GE/O transaction.
+
+### Intended data paths and focus
+
+```text
+Physical PS/2 (future: USB HID)                 UEFI framebuffer / UART
+        |                                              ^
+        v                                              |
+Kernel device capability                        kernel boot/diagnostic path
+        |                                              |
+        v                                              |
+Console service (sole normal keyboard owner) ---------+
+        |            |
+        |            +-- decode/layout, input policy, output routing
+        |
+        +-- Session A: in/out/err/ctl endpoints -- Pgrp A -- MicroPython init
+        |
+        +-- Session B: in/out/err/ctl endpoints -- Pgrp B -- MicroPython child
+```
+
+Only the **active** session receives physical keyboard events. The console
+service, not competing client readers of the raw PS/2 queue, arbitrates
+focus and forwards bytes/events to the chosen input endpoint. Do not share a
+single undifferentiated keyboard read queue between REPLs: that would
+split keystrokes unpredictably. Output remains independently routable from
+each session, with explicit policy for which output is shown, buffered or
+suppressed. The first implementation may offer **one display, one active
+session**, with no windows, pseudo-terminals or compositor.
+
+Keep raw scan codes, keyboard layout translation and terminal input policy
+separate. Move the current `p9console.c` key decoding into a reusable
+service/library boundary, including UTF-8 conversion and modifier state.
+Specify where Ctrl-C, Ctrl-D, echo, line editing, escape sequences and
+raw/cooked modes are handled; do not accidentally deliver a control key twice
+or let inactive sessions consume it. Preserve the MicroPython REPL's
+interrupt and EOF behavior, including wakeup/cancellation of a blocked read.
+
+Ordinary program output must not be conflated with the global kernel
+log. `console_out` and `console_err` are session streams; early-boot,
+kernel panic and diagnostics have a protected fallback console/logging route
+independent of any userspace session. No unprivileged session should gain
+unrestricted framebuffer memory, UART control, raw scan codes or boot
+diagnostic authority merely through terminal output. A blocked/failed
+session must not indefinitely block kernel logging.
+
+### Bootstrap and process lifecycle (target)
+
+1. **Early kernel boot:** retain the existing framebuffer/serial diagnostic
+   sinks before userspace. The current `-I` REPL direct keyboard route may
+   remain temporarily as an explicit compatibility/bootstrap fallback;
+   it is not the final client ABI.
+2. **Console service initialization:** an authorized bootstrap owner opens
+   the device catalog and exclusively acquires the physical keyboard.
+   It establishes a display output route and a session registry, then
+   creates the initial `console_in`, `console_out` and `console_err`
+   endpoints. Exactly one device owner is responsible for keyboard input.
+3. **REPL attachment:** the initial MicroPython process receives only the
+   selected session endpoint capabilities via its `Pgrp/OContext` roles
+   and/or an explicit Handle delegation plan. Its HAL resolves those
+   endpoints and performs text I/O; it does **not** try a second exclusive
+   keyboard open. If endpoints are missing or invalid, failure/fallback is
+   explicit, not a silent attachment to global hardware.
+4. **Child creation:** `SPAWN` (or explicit `RFORKEX` as appropriate)
+   establishes the child's namespace with a defined COPY/EMPTY/SHARE policy,
+   delegates exactly the intended session Handles/roles with attenuated
+   rights, and starts MicroPython. Namespace sharing is not an implicit
+   Handle-table inheritance rule. The parent must not block on child input
+   while still consuming that input itself.
+5. **Focus transfer:** the session manager selects the child session as
+   active. Only then are physical keystrokes routed there. The parent's
+   session remains alive but inactive; the parent may wait on its child,
+   without competing for the keyboard device. Output destinations are
+   independently chosen.
+6. **Exit, failure and recovery:** child exit/EOF/crash releases only the
+   child's references; input focus returns to the surviving session in a
+   defined order. The console service retains the raw keyboard claim when
+   merely switching sessions. If the service itself dies, device claims must
+   be released and an authorized boot/recovery path must be able to regain
+   console access without relying on the failed service or its namespace.
+   Ensure the kernel console still emits diagnostics.
+
+The future `import unix` experiment is a **consumer** of this mechanism:
+its child MicroPython process may receive a distinct namespace and a
+selected console session, then present an optional Unix-like path view over
+GE/O object sets. Building that interpreter must not precede the minimal
+reliable console/REPL handoff, and it must not reintroduce native pathname
+syscalls.
+
+### Implementation order and required checks
+
+Implement in small, independently testable increments; preserve the current
+boot-to-REPL path after every step.
+
+1. **Baseline tests and boundaries:** add reproducible tests for PS/2
+   exclusive acquire/release, scan-code decoding, `ObjOpenConsole` write
+   authorization, `iomask`/`stdoutpipe` behavior, and explicit child
+   Handle/role delegation. Record that an ordinary spawned `-c` child
+   currently lacks a general interactive stdin. Test missing and revoked
+   grants, ownership and resource cleanup.
+2. **Endpoint-driven MicroPython HAL:** allow stdin, stdout and stderr to
+   resolve independent authorized endpoint Handles/roles. Keep direct
+   console fallback limited to bootstrap, with a single clear selection
+   rule. Avoid runtime use of hardwired `kbdh`, `outh` or `diagh` when
+   a session is present. Do not make ordinary console output depend on
+   `Proc.iomask`; the capability endpoint must be sufficient.
+3. **Minimal console owner and switch:** create one service owning the
+   exclusive PS/2 Handle, keyboard decoding and independent session stream
+   routes. Prove one active input session, then switch focus between two
+   MicroPython processes without closing/reopening the physical keyboard.
+   Preserve flow control and define behavior if an input reader exits while
+   blocked, or a session produces output while inactive.
+4. **Namespace consistency:** make generic console/device role delegation
+   work where intended. Review GE/O-only validation/visibility in
+   `NamespaceView` and provide authorized, bounded role introspection
+   for non-GE types *if needed*, without leaking inaccessible identities
+   or bypassing `Vdelegate`. Do not couple namespace lookup to the
+   concrete PS/2 or framebuffer provider.
+5. **Recovery and regression:** boot with no session and with a failed
+   console service, launch child REPL, switch active session, type UTF-8 and
+   control keys, write stdout/stderr independently, exit/crash the child,
+   return to the original REPL, and repeat without leaked Holds or blocked
+   keyboard claims. Verify privilege attenuation, unauthorized raw device
+   access rejection and absence of input theft across sessions. Run the
+   AMD64 QEMU integration tests and relevant hardware checks; do not
+   claim ARM64 parity from AMD64 results.
+
+No mandatory new syscall, POSIX file descriptors, `/dev/cons` path or
+userspace file hierarchy is implied by this plan. Any ABI extension must
+be justified by a missing capability/lifecycle operation, rather than by
+convenience of a particular shell. Treat `docs/DEVICE-ABI.md` as authoritative
+for physical device providers and `docs/KERNEL-INTERFACE.md` for namespace
+and process delegation contracts. Implementation starting points:
+`micropython/p9console.c`, `micropython/p9hal.c`,
+`kernel/amd64/kbdcore.c`, `kernel/core/sysvobj.c`,
+`kernel/core/sysfile.c`, `kernel/core/cons.c`,
+`kernel/core/fbconsole.c`, `kernel/core/sysproc.c`,
+`kernel/core/pgrp.c` and `ge/storage/ocontext.c`.
+
 ## Architecture status
 
 **AMD64:** The current full-system implementation includes UEFI boot,
