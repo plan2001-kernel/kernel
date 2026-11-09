@@ -10,10 +10,19 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 - Persistent identity: GE/O `(SpaceID, OID)`. There is no native hierarchical
   filesystem namespace. Runtime objects, capabilities, and stored occurrences
   are different concepts.
-- Persistent namespaces are OID-identified GE/O objects with explicit
-  OID membership relations, not directory trees. The target set algebra is
-  membership, union, intersection, and difference; process `OContext`
-  visibility and capabilities remain separate from stored membership.
+- Process namespaces follow Plan 9's runtime `Pgrp` lifetime model, not
+  persistent OID identity: a `Pgrp` owns an `OContext` of authorized role/Handle
+  bindings. Processes may share it, copy it (`RFNAMEG`), or start with an empty
+  one (`RFCNAMEG`). The last owning `Pgrp` reference releases the runtime view.
+- A persistent GE/O object may hold a *namespace definition* for userspace to
+  construct or modify an authorized runtime `OContext`. The definition is data,
+  not a live namespace, and knowing its OID grants no object authority.
+  Definition loading and its format are architectural targets, not implemented
+  namespace-construction functionality.
+- Persistent GE/O object *sets* and OID membership relations are separate from
+  process namespaces. Set membership, union, intersection and difference are
+  future data/query semantics, not automatic capability grants or required
+  persistent namespace machinery.
 - Never implement or restore kernel hashtag/tag semantics: no `#`-tag
   validation, tag-name objects, tag-specific indexes or tag query parsers.
   Application-specific tags and query languages belong in userspace. An OID

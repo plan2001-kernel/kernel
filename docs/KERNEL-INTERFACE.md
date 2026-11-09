@@ -22,6 +22,17 @@ object/resource lifetimes coherently.
 from obsolete syscall inventories or try to meet a fixed count. The design
 permits direct process/scalar calls when adding an object would not help.
 
+## Runtime process namespaces and lifecycle
+
+The active process namespace follows Plan 9's `Pgrp` lifecycle model, not a
+persisted GE/O namespace object. A `Pgrp` owns a volatile `OContext` of
+authorized role/Handle bindings. Processes may share one `Pgrp`, copy its view
+with `RFNAMEG` or start a new empty view with `RFCNAMEG`. A newly created
+`Pgrp` owns a new `OContext`; its final reference releases that context.
+`OSPAWN` starts a fresh group whose delegated views/roles are explicitly
+selected. These are runtime semantics implemented in the AMD64 full-system
+path, not a guarantee of ARM64 feature parity.
+
 Namespace views use the object ABI. `OBJOPEN(ObjOpenNamespaceCurrent)` grants
 control over the caller's current namespace; the resulting Handle is bound to
 that namespace and cannot control a different process group. Typed
@@ -51,6 +62,12 @@ copies an object Handle. OSPAWN's existing `Oinherit`/`Oinheritv` options are
 translated into the same internal validation and commit path, so the two
 process-creation entry points cannot diverge.
 
+Namespace-group sharing/copying/creation is a separate decision from
+Handle-capability inheritance. Sharing a `Pgrp` must not imply that a child
+receives every process-local Handle; copying role bindings must preserve the
+underlying authority and attenuation checks. A newly started process need not
+create a distinct namespace when it explicitly shares a group.
+
 The complete Handle plan is validated against the parent before a child is
 published: each source Handle must be live, carry `Vdelegate`, not be a
 subscription, and the requested rights must be an equal or attenuated subset.
@@ -73,41 +90,50 @@ there is no one-shot inheritance mark. A provider-specific argument such as a
 UART mode or USB kind/mode is validation input to its opened Handle, not
 ambient authority and not a hidden process-creation option.
 
-## Persistent namespace and set semantics (architectural target)
 
-The persistent relational namespace is a GE/O object with its own scoped OID.
-Explicit membership relations connect it to member OIDs, including other
-namespaces. This is distinct from the currently implemented process-group
-`OContext` capability/role view described above: persistent membership
-describes *which objects belong to a set*; `OContext` determines *which
-objects the process can see and use*. Attaching a namespace or learning an
-OID must not grant capabilities implicitly.
+## Stored namespace definitions (architectural target, not implemented)
 
-The minimal set model supports membership testing, union, intersection, and
-difference (`A \ B`, or "in A and not in B"). It does not require an
-unbounded universal complement. Dynamic namespace expressions reference
-other namespaces and are evaluated against their later memberships; initial
-implementations may reject cyclic expression dependencies. A query result
-must be restricted to the caller's authorized visibility, without exposing
-unauthorized object identities or granting access by set membership alone.
+A GE/O object may store *instructions/data to construct a runtime namespace*,
+not the namespace itself. A userspace loader can read an authorized definition
+and apply role-binding operations to a process's `OContext`, analogous to Plan
+9's `newns` and `addns`. This need not be a new syscall, a new kernel parser,
+or an on-volume namespace identity. The definition format, when and by whom
+it is applied, and any initial bootstrap authority are future design work.
+Loading a definition does not automatically grant access to any OID, device,
+role or referenced object; each binding requires a legitimately delegated
+capability and checked rights. Changing stored instructions does not
+automatically rewrite an existing runtime namespace.
 
-An object's optional name (at most one) is separate from its identity,
-persistent membership, and process namespace role. Multiple OIDs may have
-the same name; finding by name within a namespace can return zero, one, or
-several authorized identities. `OBJBIND` roles are capability-binding labels,
-not alternate stored-object names or hashtag tags.
+Live namespace visibility and capability authority remain on the process
+`Pgrp`/`OContext` and authorized `NamespaceView` boundary. An `OBJBIND` role
+is an in-memory capability-binding label, not a persistent object name or a
+membership edge. Unbinding only removes a role; independently held Handles
+remain valid until closed/revoked under their own lifetime rules. Runtime
+namespace expiry is independent of GE/O object contents and versions.
 
-The kernel should expose only minimal OID relation/storage and authorization
-mechanisms through the existing object ABI where appropriate. Union,
-intersection, difference, and higher-level query parsing do not each need a
-new syscall; user programs may evaluate complex expressions. Hashtag/tag
-parsing, tag-specific indexes, and application query syntax do not belong in
-the kernel. The legacy GE R1 hashtag implementation has been removed from
-the kernel and MicroPython; `OQUERY` syscall number 106 is reserved and has
-no handler. No old R1 metadata reader or migration is required: experimental
-volumes may be explicitly reamed and their objects reimported. The set-based
-namespace described here remains an architectural target, not an implemented
-feature.
+## Persistent object sets (distinct future data/query semantics)
+
+A GE/O object may separately represent a persistent set with explicit
+membership relations to fully scoped object identities, including other
+sets. Such a set is **not** a process namespace. The possible set model
+supports membership, union, intersection, and difference (`A \ B`), without
+requiring a universal complement. Dynamic expressions can evaluate against
+later memberships; initial implementations may reject cyclic dependencies.
+Set queries must not expose unauthorized identities or grant object access
+merely from knowledge of an OID or membership. Identity comparisons include
+volume identity when crossing volumes.
+
+An object's optional stored name (at most one, not globally unique) is
+separate from its identity, set membership, and runtime namespace roles.
+Finding a name inside a set may yield multiple authorized identities. Rich
+query expressions, tags, and application query languages belong in userspace;
+a separate syscall for each set operation is unnecessary. A persistent
+set-relation engine is not yet implemented.
+
+The legacy GE R1 hashtag implementation has been removed from the kernel
+and MicroPython; `OQUERY` syscall 106 is reserved without a handler. No old
+R1 metadata migration is required: experimental volumes may be explicitly
+reamed and their objects reimported.
 
 ## Device messages and ObjectFIFO
 
