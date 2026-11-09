@@ -192,8 +192,8 @@ closefdgrp(Ref *r)
  * parser removes complete event lines before matching test markers.
  */
 static Lock lifelk;
-static long pgrplive, octxlive, pgrpseq;
-static ulong lifeseq;
+static long pgrplive, octxlive, fpulive, pgrpseq;
+static ulong lifeseq, delegateid;
 
 static void
 lifeprint(char kind, int delta, ulong seq, ulong id, long pgrp, long octx)
@@ -250,6 +250,61 @@ lifeoctx(int delta)
 	seq = ++lifeseq;
 	unlock(&lifelk);
 	lifeprint('o', delta, seq, 0, p, o);
+}
+
+/*
+ * Delegated caps=2 Space capabilities and the two resources they own: the
+ * opened native Ospace and the pinned grant-origin reference.  The host
+ * parser rejects an unmatched alloc/free for any of the three kinds, so a
+ * leaked internal reference that VobjInfo.holds cannot see still fails.
+ */
+ulong
+lifedelegateid(void)
+{
+	ulong id;
+
+	lock(&lifelk);
+	id = ++delegateid;
+	unlock(&lifelk);
+	return id;
+}
+
+void
+lifedelegate(int kind, ulong id, int delta)
+{
+	long p, o;
+	ulong seq;
+
+	lock(&lifelk);
+	p = pgrplive;
+	o = octxlive;
+	seq = ++lifeseq;
+	unlock(&lifelk);
+	lifeprint(kind, delta, seq, id, p, o);
+}
+
+/* Net live FPalloc buffers.  Reported only when a never-scheduled Proc had
+ * an FP context, so repeated prepublication failures can be compared. */
+void
+lifefpu(int delta)
+{
+	lock(&lifelk);
+	fpulive += delta;
+	if(fpulive < 0)
+		fpulive = 0;
+	unlock(&lifelk);
+}
+
+void
+lifefpudiscard(int fpsave, int kfpsave)
+{
+	long n;
+
+	lock(&lifelk);
+	n = fpulive;
+	unlock(&lifelk);
+	print("T30FPU discard fpsave=%d kfpsave=%d live=%ld\n",
+		fpsave != 0, kfpsave != 0, n);
 }
 #endif
 

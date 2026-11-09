@@ -12,6 +12,7 @@
 #include "fns.h"
 #include "../../kernel/core/error.h"
 #include "../../kernel/core/sd.h"
+#include "../../kernel/core/lifediag.h"
 #include "ocontext.h"
 #include "../../kernel/core/vobjint.h"
 
@@ -340,13 +341,38 @@ okernelvol(char *spec)
 void
 ohandput(Ohand *oh)
 {
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	int delegate;
+#endif
+
 	if(oh == nil)
 		return;
 	if(decref(&oh->ref) != 0)
 		return;
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	/* Only oscopycapdelegate() creates caps=2 capabilities; their own
+	 * Ospace and origin pin are separate live resources. */
+	delegate = oh->caps == 2;
+#endif
 	if(oh->provider != nil) octxput(oh->provider);
-	if(oh->sp != nil) onativeclose(oh->sp);
-	ohandput(oh->origin);
+	if(oh->sp != nil){
+		onativeclose(oh->sp);
+#ifdef PLAN2001_LIFECYCLE_DIAG
+		if(delegate)
+			lifedelegate('s', oh->diagid, -1);
+#endif
+	}
+	if(oh->origin != nil){
+		ohandput(oh->origin);
+#ifdef PLAN2001_LIFECYCLE_DIAG
+		if(delegate)
+			lifedelegate('p', oh->diagid, -1);
+#endif
+	}
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	if(delegate)
+		lifedelegate('d', oh->diagid, -1);
+#endif
 	free(oh);
 }
 
@@ -609,6 +635,14 @@ oscopycapdelegate(Ohand *src, int rights)
 	 * follow the originating Ohand. */
 	n->origin = src->origin ? src->origin : src;
 	incref(&n->origin->ref);
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	/* Publish the three live resources only after every fallible step.
+	 * ohandput() emits the matching frees exactly once at final close. */
+	n->diagid = lifedelegateid();
+	lifedelegate('s', n->diagid, 1);
+	lifedelegate('p', n->diagid, 1);
+	lifedelegate('d', n->diagid, 1);
+#endif
 	poperror();
 	qunlock(ohgate(src));
 	return n;

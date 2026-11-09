@@ -1598,6 +1598,11 @@ procdiscard(Proc *p)
 		p->edf = nil;
 	}
 
+	/* The child may have an FP context copied by procfork() even though it
+	 * was never scheduled, so the Moribund cleanup in fpuprocsave() will
+	 * never run for it. */
+	fpuprocdiscard(p);
+
 	/* Mirror the scheduler's Moribund recycle without running the Proc. */
 	lock(&procalloc.lk);
 	p->state = Dead;

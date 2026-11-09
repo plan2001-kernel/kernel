@@ -52,10 +52,14 @@ def run():
             return
         raise AssertionError('expected rejection: ' + name)
 
-    def nochild(name):
+    def nochild(name, call=None):
         try:
-            space.wait()
-        except OSError:
+            (call if call is not None else space.wait)()
+        except OSError as e:
+            msg = str(e.args[0]) if e.args else ''
+            if msg != 'no living children':
+                raise AssertionError('%s: unexpected OSError %r'
+                                     % (name, msg))
             ok(True, name)
             return
         raise AssertionError(name)
@@ -76,6 +80,18 @@ def run():
     p.obj_bind(h, 'fault_keep', p.VREAD | p.VMETA | p.VDELEGATE)
     p.obj_close(h)
     mark('base')
+
+    # The no-child contract is specifically Enochild, not any OSError.
+    def unrelated_failure():
+        raise OSError('no such object')
+
+    try:
+        nochild('no-child checker accepted an unrelated OSError',
+                unrelated_failure)
+    except AssertionError:
+        ok(True, 'no-child check rejects an unrelated OSError')
+    else:
+        raise AssertionError('no-child checker accepted an unrelated OSError')
 
     # --- Non-RFPROC RFNAMEG and RFCNAMEG: fail after the new Pgrp exists --
     def switch_rollback(flag, name):
@@ -184,6 +200,12 @@ def run():
     failed_forkex(b'inherit-space-vhand',
                   ((sh, 8192 | p.VMETA, 1),), 'delegated Vhand failure')
     mark('inherit-vhand')
+    # The same ownership boundary must return to baseline on every repeat.
+    for i in range(3):
+        failed_forkex(b'inherit-space-vhand',
+                      ((sh, 8192 | p.VMETA, 1),),
+                      'delegated Vhand failure repeat %d' % (i + 1))
+        mark('inherit-vhand-repeat-%d' % (i + 1))
 
     # The fault token is consumed; the same RFORKEX now succeeds.
     pid, _ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
@@ -210,6 +232,34 @@ def run():
        p.obj_info(sh)[10] == shrights,
        'failed SPAWN Handle plan releases every partial inherited reference')
     mark('spawn-inherit')
+
+    # --- Post-procfork failure releases the copied FP save chain -----------
+    # A runtime float operation gives the parent a live FP context, so
+    # procfork()/fpuprocfork() allocates a child FPsave before the fault.
+    # time_ns() keeps the seed out of the compiler's constant folder.
+    fpseed = (p.time_ns() & 1) + 0.5
+    fpvalue = fpseed * 2.0
+    ok(fpvalue == 2.0 * fpseed,
+       'parent FP state initialized before the FPU fork case')
+    for i in range(4):
+        p.envset('PLAN2001_FAULT', b'fork-child-fpu-abort')
+        denied(lambda: p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),)),
+               'injected post-procfork failure %d' % (i + 1))
+        nochild('post-procfork failure %d leaves no waitable child'
+                % (i + 1))
+        mark('fork-fpu-abort-%d' % (i + 1))
+    ok(fpseed * 2.0 == fpvalue,
+       'parent FP context survives repeated discarded children')
+    pid, _ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
+    if pid == 0:
+        p.exits('')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'a valid RFORKEX after post-procfork failures publishes one child '
+       'status=%r' % (status,))
+    nochild('valid RFORKEX after post-procfork failures leaves no extra '
+            'wait record')
+    mark('fork-fpu-ok')
 
     p.obj_close(geh)
     p.obj_bind(0, 'fault_keep', 0, p.OBJ_BIND_REMOVE)

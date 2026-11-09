@@ -5,6 +5,7 @@
 #include "fns.h"
 #include "ureg.h"
 #include "io.h"
+#include "../core/lifediag.h"
 
 enum {
 	CR4Osfxsr  = 1 << 9,
@@ -257,12 +258,14 @@ fpalloc(FPalloc *link)
 		splx(x);
 	}
 	a->link = link;
+	lifefpu(1);
 	return a;
 }
 
 static void
 fpfree(FPalloc *a)
 {
+	lifefpu(-1);
 	free(a);
 }
 
@@ -276,6 +279,39 @@ fpuprocsetup(Proc *p)
 		p->pfpu.fpsave = a->link;
 		fpfree(a);
 	}
+}
+
+/*
+ * Release a Proc's FP context when the Proc was constructed but never
+ * scheduled or published.  This is the never-scheduled inverse of the
+ * Moribund branch in fpuprocsave(): free both save chains and reset the
+ * state without saving the current CPU's FPU into an unrelated Proc.
+ */
+void
+fpuprocdiscard(Proc *p)
+{
+	FPalloc *a;
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	int had;
+
+	had = p->pfpu.fpsave != nil || p->pfpu.kfpsave != nil;
+#endif
+
+	p->pfpu.fpstate = FPinit;
+	p->pfpu.kfpstate = FPinit;
+	while((a = p->pfpu.fpsave) != nil){
+		p->pfpu.fpsave = a->link;
+		fpfree(a);
+	}
+	while((a = p->pfpu.kfpsave) != nil){
+		p->pfpu.kfpsave = a->link;
+		fpfree(a);
+	}
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	if(had)
+		lifefpudiscard(p->pfpu.fpsave != nil,
+			p->pfpu.kfpsave != nil);
+#endif
 }
 
 void

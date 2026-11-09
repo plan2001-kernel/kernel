@@ -12,8 +12,16 @@
 void lifepgrp(void *pgrp, int delta);
 void lifecontrol(void *pgrp, int delta);
 void lifeoctx(int delta);
+ulong lifedelegateid(void);
+void lifedelegate(int kind, ulong id, int delta);
+void lifefpu(int delta);
+void lifefpudiscard(int fpsave, int kfpsave);
 #else
 #define lifepgrp(pgrp, delta)
 #define lifecontrol(pgrp, delta)
 #define lifeoctx(delta)
+#define lifedelegateid() 0
+#define lifedelegate(kind, id, delta)
+#define lifefpu(delta)
+#define lifefpudiscard(fpsave, kfpsave)
 #endif

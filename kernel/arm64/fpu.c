@@ -6,6 +6,7 @@
 
 #include "ureg.h"
 #include "../arm64/sysreg.h"
+#include "../core/lifediag.h"
 
 /* libc */
 extern ulong getfcr(void);
@@ -61,12 +62,14 @@ fpalloc(FPalloc *link)
 		splx(x);
 	}
 	a->link = link;
+	lifefpu(1);
 	return a;
 }
 
 static void
 fpfree(FPalloc *a)
 {
+	lifefpu(-1);
 	free(a);
 }
 
@@ -159,6 +162,36 @@ fpuprocsetup(Proc *p)
 		p->fpsave = a->link;
 		fpfree(a);
 	}
+}
+
+/*
+ * Release the FP context of a Proc that was never scheduled or published.
+ * Unlike the Moribund branch in fpuprocsave() this never touches the
+ * current CPU's live FPU registers.
+ */
+void
+fpuprocdiscard(Proc *p)
+{
+	FPalloc *a;
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	int had;
+
+	had = p->fpsave != nil || p->kfpsave != nil;
+#endif
+
+	p->fpstate = p->kfpstate = FPinit;
+	while((a = p->fpsave) != nil) {
+		p->fpsave = a->link;
+		fpfree(a);
+	}
+	while((a = p->kfpsave) != nil) {
+		p->kfpsave = a->link;
+		fpfree(a);
+	}
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	if(had)
+		lifefpudiscard(p->fpsave != nil, p->kfpsave != nil);
+#endif
 }
 
 void

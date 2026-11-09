@@ -840,19 +840,31 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			 * delegated caps=2 Space copy instead, so the child can
 			 * OEXECUTE under the rights it was actually granted.
 			 *
-			 * DOH and O change ownership through this block: the
-			 * error path releases whichever objects are still owned
-			 * here, exactly once, before the child Vhand exists.
+			 * Ownership invariant through this block:
+			 *  - before the handoff DOH exclusively owns the new
+			 *    Ohand and O, when it exists, has priv == nil;
+			 *  - after the handoff O->priv == DOH and DOH == nil, so
+			 *    O is the only owner and vobjput(O) closes the Ospace
+			 *    and drops the origin pin;
+			 *  - H is a local child Vhand owned by this function until
+			 *    it is installed in the child table T.  Once installed,
+			 *    procdiscard()/vobjprocexit() owns its cleanup.
+			 * The error path releases O when it exists, DOH unless
+			 * ownership was transferred to O, and H when it has already
+			 * been allocated.
 			 */
 			doh = nil;
 			o = nil;
+			h = nil;
 			doh = oscopycapdelegate((Ohand*)src->priv,
 				((Ohand*)src->priv)->rights);
 			if(waserror()){
-				if(o != nil){
-					o->priv = nil;
+				if(h != nil)
+					vhandput(h);
+				if(o != nil)
 					vobjput(o);
-				}
+				/* Before the handoff DOH is still this frame's; after
+				 * it DOH is nil and O released it above. */
 				oshandput(doh);
 				nexterror();
 			}
@@ -876,15 +888,28 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 			if(injectfault("inherit-space-vhand"))
 				error("vobj: injected delegated Vhand failure");
+			/* Negative fixture: reproduce the old handoff bug by
+			 * detaching the provider before the Vobj is released.
+			 * The deliberate leak must fail the T30 ownership log. */
+			if(injectfault("inherit-space-leak-ohand")){
+				o->priv = nil;
+				error("vobj: injected delegated Ohand leak");
+			}
 #endif
-			poperror();
+			/* Keep cleanup armed until the new Vhand is installed. */
 			h = vhandalloc(o, nil, vi->e[i].rights);
-			vobjput(o);
-		}else
+			vi->e[i].gen = gen;
+			t->s[vi->e[i].slot].h = h;
+			t->s[vi->e[i].slot].gen = gen;
+			h = nil;
+			poperror();
+			vobjput(o);		/* the installed Vhand owns O */
+		}else{
 			h = vhandalloc(src, nil, vi->e[i].rights);
-		vi->e[i].gen = gen;
-		t->s[vi->e[i].slot].h = h;
-		t->s[vi->e[i].slot].gen = gen;
+			vi->e[i].gen = gen;
+			t->s[vi->e[i].slot].h = h;
+			t->s[vi->e[i].slot].gen = gen;
+		}
 	}
 }
 

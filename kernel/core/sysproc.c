@@ -272,6 +272,12 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if(vi != nil)
 		vobjinheritcommit(p, vi);
 	procfork(p);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Latest safe fork failure point: procfork() may have allocated the
+	 * child's FP save chain, but no parent/child state is published. */
+	if(injectfault("fork-child-fpu-abort"))
+		error("fork: injected post-procfork failure");
+#endif
 
 	poperror();	/* prepublication error region */
 
