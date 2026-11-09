@@ -27,7 +27,7 @@ qob_new_o_image() {
   MPEXEC="$QOB_MPY" "$T23_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
     "$T23_ROOT/tools/host/t23/device-authority-checks.py" >"$logdir/mkovol.log" 2>&1
 }
-qob_main --no-build --tcg --timeout 240 --obootexec 0x4f45584543000003 \
+qob_main --no-build --accel kvm:tcg --timeout 240 --obootexec 0x4f45584543000003 \
   --output-dir "$T23_OUT" --expect '^T23-FINISH [0-9]+ PASS' "$@"
 python3 - "$T23_OUT/boot-boot.log" <<'PY'
 import re,sys

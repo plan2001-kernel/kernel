@@ -13,7 +13,7 @@ qob_new_o_image() {
   MPEXEC="$QOB_MPY" "$T16_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
     "$T16_ROOT/tools/host/t16/memory-checks.py" >"$logdir/mkovol.log" 2>&1
 }
-qob_main --no-build --tcg --timeout 180 --obootexec 0x4f45584543000003 \
+qob_main --no-build --accel kvm:tcg --timeout 180 --obootexec 0x4f45584543000003 \
   --output-dir "$T16_OUT" --expect '^T16-PASS retired O Space, binding and namespace calls denied' "$@"
 # Reboot the same writable GPT disk to verify committed GE objects and graph.
 if ! qob_boot_once "$T16_OUT/disk.img" second 'PLAN2001-O: REPL READY' repl ''   '^T16-PASS retired O Space, binding and namespace calls denied'; then

@@ -32,7 +32,7 @@ T15_PEER_PID=$!
 trap 'kill "$T15_PEER_PID" 2>/dev/null || true' EXIT
 sleep .1
 kill -0 "$T15_PEER_PID"
-( qob_main --no-build --tcg --cpus 2 --ncpu 2 --obootcpu 0 --timeout 180 \
+( qob_main --no-build --accel kvm:tcg --cpus 2 --ncpu 2 --obootcpu 0 --timeout 180 \
   --udp6-peer 31501:31502 --obootexec 0x4f45584543000003 --output-dir "$T15_OUT" --expect '^T15-RESULT [0-9]+ PASS' "$@" )
 python3 - "$T15_OUT" <<'PY'
 import json,re,sys
