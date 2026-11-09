@@ -689,16 +689,11 @@ obootstrap(Proc *p)
 	return p != nil && p == bootowner && p->pid == bootpid;
 }
 
-/* RFNOMNT is represented by a fully denied device mask after Dev removal. */
+/* RFNOMNT seals the Pgrp against namespace extension. */
 static void
 onscanextend(void)
 {
- int i,denied=1;
- if(up->pgrp==nil) error(Eperm);
- rlock(&up->pgrp->ns);
- for(i=0;i<sizeof up->pgrp->devmask;i++) if(up->pgrp->devmask[i]!=255) denied=0;
- runlock(&up->pgrp->ns);
- if(denied) error(Eperm);
+ if(up->pgrp==nil || !pgrpnamespaceextendok(up->pgrp)) error(Eperm);
 }
 /* Low-level grant admission for the NamespaceControl provider.  The
  * provider owns the sealed view and attachment lifecycle in sysvobj.c. */

@@ -56,6 +56,35 @@ PLAIN = ("import plan9 as p\n"
          "assert len(p.obj_list())==0\n"
          "assert space.visible()==[]\n")
 
+# A SPAWN SHARE joins the existing group, so it must observe the parent's
+# namespace seal instead of receiving a private bypass.
+SHARE_SEAL = ("import plan9 as p\n"
+              "import space\n"
+              "h=p.obj_open_binding('seal_share',"
+              " p.VREAD|p.VMETA|p.VDELEGATE)\n"
+              "if p.obj_read(h,8)!=b'T30-BASE': p.exits('share-read')\n"
+              "try: p.obj_bind(h,'seal_share_child',p.VREAD)\n"
+              "except OSError: pass\n"
+              "else: p.exits('share-bypass')\n"
+              "try: space.view(('seal_share',))\n"
+              "except OSError: pass\n"
+              "else: p.exits('share-view')\n"
+              "p.exits('')\n")
+
+# A default SPAWN still creates a fresh unsealed group with only the
+# explicitly delegated Handle; it is not a child of the sealed group.
+FRESH_SEAL = ("import plan9 as p\n"
+              "import space\n"
+              "if space.visible(): p.exits('fresh-visible')\n"
+              "g=0\n"
+              "for h in p.obj_list():\n"
+              " if p.obj_info(h)[8]==p.VKIND_GE: g=h\n"
+              "if not g: p.exits('fresh-nohandle')\n"
+              "p.obj_bind(g,'fresh_role',p.VREAD|p.VMETA|p.VDELEGATE)\n"
+              "if p.obj_read(p.obj_open_binding('fresh_role'),9)!"
+              "=b'T30-LATER': p.exits('fresh-read')\n"
+              "p.exits('')\n")
+
 
 class Counter:
     def __init__(self):
@@ -601,16 +630,245 @@ def run():
     unbind('mutprobe')
     mark('control')
 
-    # --- RFNOMNT stays a last-step extension denial, unchanged -------------
-    pid = p.rfork(p.RFNOMNT)
-    ok(pid == 0, 'RFNOMNT without RFPROC updates the caller Pgrp')
+    # --- RFNOMNT seals one live Pgrp, not the whole process tree ----------
+    # All early seal scenarios run inside an RFNAMEG copy so the boot owner
+    # remains mutable for the final contract checks below.
+    clear_roles()
+    ok(len(space.visible()) == 0, 'cleared role view for the seal scenarios')
+    bind_role(base_oid, 'seal_seed')
+    seal_gh = geh(later_oid)
+    pid, ch = p.rforkex(p.RFPROC | p.RFNAMEG,
+                        ((seal_gh, p.VREAD | p.VMETA | p.VDELEGATE, 1),))
+    if pid == 0:
+        cg = find_slot(1, p.VKIND_GE)
+        if not cg:
+            p.exits('seal-nohandle')
+        try:
+            # Unsealed by default: role addition and view attachment work.
+            p.obj_bind(cg, 'seal_added',
+                       p.VREAD | p.VMETA | p.VDELEGATE)
+            if p.obj_read(p.obj_open_binding('seal_added'),
+                          len(LATER)) != LATER:
+                p.exits('seal-unsealed-read')
+            p.obj_bind(0, 'seal_added', 0, p.OBJ_BIND_REMOVE)
+            p.obj_bind(cg, 'seal_view',
+                       p.VREAD | p.VMETA | p.VDELEGATE)
+            control = p.obj_open_namespace_current()
+            keepview = space.view(('seal_view',))
+            denyview = space.view(('seal_seed',))
+            token = p.obj_invoke(control, p.OBJ_OP_NAMESPACE_ATTACH,
+                                 keepview, space.MREPL)
+            if token <= 0:
+                p.exits('seal-unsealed-view')
+
+            # A view copied before the seal stays unsealed after it.
+            er, ew = p.pipenew()
+            gr, gw = p.pipenew()
+            pid_e, che = p.rforkex(
+                p.RFPROC | p.RFNAMEG,
+                ((cg, p.VREAD | p.VMETA | p.VDELEGATE, 1),
+                 (ew, p.VWRITE | p.VMETA | p.VDELEGATE, 2),
+                 (gr, p.VREAD | p.VMETA | p.VDELEGATE, 3)))
+            if pid_e == 0:
+                eg = find_slot(1, p.VKIND_GE)
+                ewr = find_slot(2, p.VKIND_PIPE)
+                egc = find_slot(3, p.VKIND_PIPE)
+                if not (eg and ewr and egc):
+                    p.exits('seal-precopy-handles')
+                try:
+                    p.pipewrite(ewr, b'R')
+                    p.piperead(egc, 1)
+                    p.obj_bind(eg, 'seal_precopy',
+                               p.VREAD | p.VMETA | p.VDELEGATE)
+                except OSError:
+                    p.exits('seal-precopy-denied')
+                p.exits('')
+            p.pipeclose(ew)
+            p.pipeclose(gr)
+            if p.piperead(er, 1) != b'R':
+                p.exits('seal-precopy-ready')
+            p.pipeclose(er)
+
+            # A plain RFPROC child shares this group and can seal it.
+            pid_b = p.rfork(p.RFPROC)
+            if pid_b == 0:
+                p.exits('' if p.rfork(p.RFNOMNT) == 0 else 'seal-shared-b')
+            waited, status = p.wait()
+            if not (waited == pid_b and status == ''):
+                p.exits('seal-shared-wait:' + status)
+
+            # The seal is now visible to the original owner, including the
+            # previously copied group member that has not yet continued.
+            denied(lambda: p.obj_bind(cg, 'seal_added',
+                                      p.VREAD | p.VMETA | p.VDELEGATE),
+                   'seal denies a new role')
+            denied(lambda: p.obj_bind(cg, 'seal_seed',
+                                      p.VREAD | p.VMETA | p.VDELEGATE),
+                   'seal denies replacing a role')
+            denied(lambda: space.view(('seal_seed',)),
+                   'seal denies NamespaceView creation')
+            denied(lambda: p.obj_invoke(control,
+                                        p.OBJ_OP_NAMESPACE_ATTACH,
+                                        denyview, space.MREPL),
+                   'seal denies NamespaceView attachment')
+            if p.obj_invoke(control, p.OBJ_OP_NAMESPACE_DETACH, token) != 0:
+                p.exits('seal-detach')
+            if not visible(base_oid):
+                p.exits('seal-visible')
+            h = p.obj_open_binding('seal_seed')
+            if p.obj_read(h, len(BASE)) != BASE:
+                p.exits('seal-open-existing')
+            p.obj_close(h)
+
+            # The pre-seal copy can still extend: the seal is per group.
+            p.pipewrite(gw, b'G')
+            p.pipeclose(gw)
+            waited, status = p.wait()
+            if not (waited == pid_e and status == ''):
+                p.exits('seal-precopy-wait:' + status)
+
+            # RFNAMEG copies the seal but not the mutable OContext.
+            pid_c, chc = p.rforkex(
+                p.RFPROC | p.RFNAMEG,
+                ((cg, p.VREAD | p.VMETA | p.VDELEGATE, 1),))
+            if pid_c == 0:
+                cc = find_slot(1, p.VKIND_GE)
+                if not cc:
+                    p.exits('seal-copy-nohandle')
+                try:
+                    denied(lambda: p.obj_bind(
+                               cc, 'seal_copyadd',
+                               p.VREAD | p.VMETA | p.VDELEGATE),
+                           'copy of a sealed group denies extension')
+                    p.obj_open_binding('seal_seed')
+                    p.obj_bind(0, 'seal_seed', 0, p.OBJ_BIND_REMOVE)
+                    try:
+                        p.obj_open_binding('seal_seed')
+                    except OSError:
+                        pass
+                    else:
+                        p.exits('seal-copy-unbind')
+                except OSError:
+                    p.exits('seal-copy-denied')
+                p.exits('')
+            waited, status = p.wait()
+            if not (waited == pid_c and status == ''):
+                p.exits('seal-copy-wait:' + status)
+            if not openable('seal_seed'):
+                p.exits('seal-copy-isolation')
+
+            # RFCNAMEG keeps the inherited seal with an empty role view.
+            pid_d, chd = p.rforkex(
+                p.RFPROC | p.RFCNAMEG,
+                ((cg, p.VREAD | p.VMETA | p.VDELEGATE, 1),))
+            if pid_d == 0:
+                dc = find_slot(1, p.VKIND_GE)
+                if not dc:
+                    p.exits('seal-empty-nohandle')
+                if space.visible() != [] or openable('seal_seed'):
+                    p.exits('seal-empty-view')
+                try:
+                    denied(lambda: p.obj_bind(
+                               dc, 'seal_emptyadd',
+                               p.VREAD | p.VMETA | p.VDELEGATE),
+                           'RFCNAMEG cannot reset the seal')
+                except AssertionError:
+                    p.exits('seal-empty-bind')
+                p.exits('')
+            waited, status = p.wait()
+            if not (waited == pid_d and status == ''):
+                p.exits('seal-empty-wait:' + status)
+
+            # Removal works under seal and leaves an opened Handle valid.
+            h = p.obj_open_binding('seal_seed')
+            p.obj_bind(0, 'seal_seed', 0, p.OBJ_BIND_REMOVE)
+            try:
+                p.obj_open_binding('seal_seed')
+            except OSError:
+                pass
+            else:
+                p.exits('seal-remove')
+            if p.obj_read(h, len(BASE)) != BASE:
+                p.exits('seal-opened-handle')
+            p.obj_close(h)
+            p.obj_close(denyview)
+            p.obj_close(keepview)
+            p.obj_close(control)
+        except OSError:
+            p.exits('seal-os:' + p.errstr())
+        except AssertionError as e:
+            p.exits('seal-assert:' + str(e))
+        p.exits('')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'namespace seal is group-scoped, monotonic and copy-preserving '
+       'status=%r' % (status,))
+    ok(openable('seal_seed'),
+       'the sealed child group and its copies leave the parent view mutable')
+    p.obj_close(seal_gh)
+    mark('seal')
+
+    # --- The retained RFNOMNT contract on the boot owner -------------------
+    clear_roles()
+    ok(len(space.visible()) == 0, 'cleared role view for the boot-level seal')
+    bind_role(base_oid, 'seal_keep')
+    bind_role(base_oid, 'seal_share')
+    bind_role(base_oid, 'seal_view')
     gh = geh(later_oid)
-    denied(lambda: p.obj_bind(gh, 'nomnt',
+    control = p.obj_open_namespace_current()
+    keepview = space.view(('seal_view',))
+    denyview = space.view(('seal_keep',))
+    token = p.obj_invoke(control, p.OBJ_OP_NAMESPACE_ATTACH,
+                         keepview, space.MREPL)
+    ok(token > 0, 'an unsealed Pgrp attaches a NamespaceView')
+    pid = p.rfork(p.RFNOMNT)
+    ok(pid == 0, 'RFNOMNT without RFPROC seals the caller Pgrp')
+    denied(lambda: p.obj_bind(gh, 'seal_new',
                               p.VREAD | p.VMETA | p.VDELEGATE),
-           'RFNOMNT denies namespace extension')
+           'RFNOMNT denies new role bindings')
+    denied(lambda: p.obj_bind(gh, 'seal_keep',
+                              p.VREAD | p.VMETA | p.VDELEGATE),
+           'RFNOMNT denies replacing an existing role')
+    denied(lambda: space.view(('seal_keep',)),
+           'RFNOMNT denies NamespaceView creation')
+    denied(lambda: p.obj_invoke(control, p.OBJ_OP_NAMESPACE_ATTACH,
+                                denyview, space.MREPL),
+           'RFNOMNT denies NamespaceView attachment')
+    ok(p.obj_invoke(control, p.OBJ_OP_NAMESPACE_DETACH, token) == 0,
+       'RFNOMNT still permits detaching an existing NamespaceView')
+    ok(visible(base_oid),
+       'RFNOMNT still permits namespace visibility enumeration')
+    ok(openable('seal_keep') and openable('seal_share'),
+       'RFNOMNT still permits opening an unchanged existing role')
     ok(p.obj_read(gh, len(LATER)) == LATER,
-       'RFNOMNT denial leaves the already opened Handle valid')
-    p.obj_close(gh)
+       'RFNOMNT denial leaves an already opened Handle valid')
+    opened = p.obj_open_binding('seal_keep')
+    unbind('seal_keep')
+    ok(not openable('seal_keep'),
+       'RFNOMNT permits removing an existing role')
+    ok(p.obj_read(opened, len(BASE)) == BASE,
+       'role removal under seal does not revoke an opened Handle')
+    p.obj_close(opened)
+    p.obj_close(denyview)
+    p.obj_close(keepview)
+    p.obj_close(control)
+
+    # SPAWN default and SHARE retain their distinct group policies.
+    pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', SHARE_SEAL),
+                      view=2, roles=('seal_share',))
+    waited, status = space.wait()
+    ok(waited == pid and status == '',
+       'SPAWN SHARE joins and observes the sealed group status=%r' % (status,))
+    fresh_gh = geh(later_oid)
+    pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', FRESH_SEAL),
+                      vhandles=((fresh_gh, p.VREAD | p.VMETA | p.VDELEGATE),))
+    waited, status = space.wait()
+    ok(waited == pid and status == '',
+       'default SPAWN keeps a fresh unsealed group with only delegated '
+       'authority status=%r' % (status,))
+    p.obj_close(fresh_gh)
+    unbind('seal_share')
+    mark('seal-spawn')
 
     p.obj_close(sh)
     mark('end')

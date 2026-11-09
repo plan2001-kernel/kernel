@@ -3527,7 +3527,7 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
  Vobj *bound=nil;
  Ohand *cap=nil;
  char name[Vnamemax];
- int m=mode & ObjBindModeMask,or=0;
+ int m=mode & ObjBindModeMask;
  if(mode & ~(ObjBindModeMask|ObjBindRemove)) error(Ebadarg);
  vrolename(name,role,rolelen);
  if(up->pgrp==nil) error(Eperm);
@@ -3541,12 +3541,8 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
  if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
  if(h->sub) error(Eperm);
  if(h->obj->kind==VkindNamespaceControl) error(Eperm);
- /* Preserve RFNOMNT/devmask extension restriction. */
  /* RFNOMNT forbids namespace extension, not removal of an existing role. */
- rlock(&up->pgrp->ns);
- for(int i=0;i<sizeof up->pgrp->devmask;i++) or |= up->pgrp->devmask[i]^255;
- runlock(&up->pgrp->ns);
- if(or==0) error(Eperm);
+ if(!pgrpnamespaceextendok(up->pgrp)) error(Eperm);
  if(rights==0) rights=h->rights;
  if(rights & ~(uvlong)h->rights) error(Eperm);
  if(h->obj->kind==VkindGe){

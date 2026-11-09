@@ -60,8 +60,6 @@ long		decref(Ref*);
 int		decrypt(void*, void*, int);
 void		delay(int);
 Proc*		dequeueproc(Schedq*, Proc*);
-void		devmask(Pgrp*, int, char*);
-int		devmasked(Pgrp*, int);
 char*		hostdomainget(void);
 char*		hostownerget(void);
 int		donotify(Ureg*);
@@ -202,6 +200,8 @@ Cmdbuf*		parsecmd(char *a, int n);
 ulong		perfticks(void);
 _Noreturn void	pexit(char*, int);
 void		pgrpcpy(Pgrp*, Pgrp*, int);
+void		pgrpsealnamespace(Pgrp*);
+int		pgrpnamespaceextendok(Pgrp*);
 ulong		pidalloc(Proc*);
 #define		waserror()		setlabel(&up->errlab[up->nerrlab++])
 #define		poperror()		up->nerrlab--

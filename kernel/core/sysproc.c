@@ -34,12 +34,6 @@ abortion(void)
 static ulong
 kernrforkcore(ulong flag, Vinherit *vi)
 {
-	/*
-	 * Code using RFNOMNT expects to block all but
-	 * the following devices.
-	 */
-	static char nomntdevs[] = "|decp";
-
 	ulong pid;
 	uvlong forkpages;
 	int n, i;
@@ -128,7 +122,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		poperror();
 
 		if(flag & RFNOMNT)
-			devmask(up->pgrp, 1, nomntdevs);
+			pgrpsealnamespace(up->pgrp);
 
 		if(flag & RFNOTEG){
 			qlock(&up->debug);
@@ -266,7 +260,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	poperror();	/* abortion */
 
 	if(flag & RFNOMNT)
-		devmask(p->pgrp, 1, nomntdevs);
+		pgrpsealnamespace(p->pgrp);
 
 	if((flag&RFNOWAIT) == 0){
 		p->parent = up;

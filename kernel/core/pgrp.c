@@ -91,8 +91,10 @@ closepgrp(Pgrp *p)
 }
 
 /*
- * A Pgrp owns a native object view and the inherited device mask.
+ * A Pgrp owns a native object view and its namespace-extension state.
  * There is no mount list. RFNAMEG copies bindings; RFCNAMEG starts empty.
+ * The restriction state is copied with the view, so an empty clone does not
+ * silently regain extension authority.
  * The caller owns a live source reference and an unpublished destination.
  * Published Pgrp.ocontext pointers never change; OContext locks protect maps.
  * Allocate first so failure leaves both groups and their references intact.
@@ -105,40 +107,38 @@ pgrpcpy(Pgrp *to, Pgrp *from, int copyview)
 	assert(to != from && to->ref.ref == 1);
 	c = copyview ? octxcopy(from->ocontext) : octxcopy(nil);
 	rlock(&from->ns);
-	memmove(to->devmask, from->devmask, sizeof to->devmask);
+	to->flags = from->flags;
 	runlock(&from->ns);
 	old = to->ocontext;
 	to->ocontext = c;
 	octxput(old);
 }
 
-int
-devmasked(Pgrp *pgrp, int i)
+/*
+ * RFNOMNT is a monotonic restriction of one live Pgrp: a sealed group cannot
+ * gain new role bindings or attach additional namespace views. It does not
+ * delete existing bindings, revoke opened Handles, or block removal,
+ * visibility or detach. Every process sharing the group observes the seal.
+ */
+void
+pgrpsealnamespace(Pgrp *pgrp)
 {
-	if(i < 0 || i >= sizeof pgrp->devmask * 8)
-		return 1;
-	return (pgrp->devmask[i>>3] & 1<<(i&7)) != 0;
+	assert(pgrp != nil);
+	wlock(&pgrp->ns);
+	pgrp->flags |= PgrpNsSealed;
+	wunlock(&pgrp->ns);
 }
 
-void
-devmask(Pgrp *pgrp, int invert, char *devs)
+int
+pgrpnamespaceextendok(Pgrp *pgrp)
 {
-	int i;
+	int ok;
 
-	/*
-	 * The canonical O-only build registers no Dev, so no requested
-	 * device character can name one.  The inherited devno() lookups in
-	 * this loop therefore all failed and its local mask stayed zero.
-	 * Preserve the two observable effects exactly: invert == 0 leaves
-	 * the inherited mask untouched, invert == 1 ORs an all-ones mask
-	 * (the RFNOMNT case).  Keep the same Pgrp lock and ownership.
-	 */
-	(void)devs;
-	wlock(&pgrp->ns);
-	if(invert)
-		for(i = 0; i < sizeof pgrp->devmask; i++)
-			pgrp->devmask[i] = 0xFF;
-	wunlock(&pgrp->ns);
+	assert(pgrp != nil);
+	rlock(&pgrp->ns);
+	ok = (pgrp->flags & PgrpNsSealed) == 0;
+	runlock(&pgrp->ns);
+	return ok;
 }
 
 /*
