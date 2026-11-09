@@ -14,7 +14,6 @@
 #include "../runtime/abi/obj.h"
 #include "../runtime/abi/sys.h"
 #include <uartapi.h>
-#include <usbctl.h>
 #endif
 
 // p9space.c: a rest before a call blocks (a Space's commit point 3)
@@ -681,11 +680,6 @@ static mp_obj_t p9_objpipepeer(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objpipepeer_obj,p9_objpipepeer);
 
-static mp_obj_t p9_objuartopen(mp_obj_t port,mp_obj_t mode){
- return check(obj_uart_open(mp_obj_get_int(port),mp_obj_get_int(mode)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_objuartopen_obj,p9_objuartopen);
-
 static mp_obj_t p9_objuartctl(size_t n,const mp_obj_t *a){
  Uartcfg c;
  memset(&c,0,sizeof c);
@@ -707,90 +701,10 @@ static mp_obj_t p9_objuartstatus(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objuartstatus_obj,1,2,p9_objuartstatus);
 
-static mp_obj_t p9_objkbdopen(void){return check(obj_kbd_open());}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_objkbdopen_obj,p9_objkbdopen);
-
 static mp_obj_t p9_objkbdleds(mp_obj_t h,mp_obj_t leds){
  return check(obj_kbd_leds(mp_obj_get_int(h),(unsigned int)mp_obj_get_int(leds)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objkbdleds_obj,p9_objkbdleds);
-
-static mp_obj_t usbentrytuple(const ObjUsbEntry *e){
- mp_obj_t a[10];int i;char name[129];
- for(i=0;i<128&&e->name[i];i++)name[i]=e->name[i];
- name[i]=0;
- a[0]=mp_obj_new_int(e->idx);a[1]=mp_obj_new_int(e->devno);
- a[2]=mp_obj_new_int(e->epno);a[3]=mp_obj_new_int(e->ttype);
- a[4]=mp_obj_new_int(e->mode);a[5]=mp_obj_new_int(e->speed);
- a[6]=mp_obj_new_int(e->state);a[7]=mp_obj_new_int(e->inuse);
- a[8]=mp_obj_new_int(e->maxpkt);a[9]=mp_obj_new_str(name,i);
- return mp_obj_new_tuple(10,a);
-}
-
-static mp_obj_t p9_objusbopen(size_t n,const mp_obj_t *a){
- unsigned long long rights=n>0?(unsigned long long)mp_obj_get_int(a[0]):0;
- return check(obj_usb_open(rights));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objusbopen_obj,0,1,p9_objusbopen);
-
-static mp_obj_t p9_objusblist(size_t n,const mp_obj_t *a){
- int h=mp_obj_get_int(a[0]);
- long max=n>1?mp_obj_get_int(a[1]):OBJ_USB_LISTMAX;
- long total,r,i;ObjUsbEntry *e;mp_obj_t *recs,t[2];
- if(max<0)mp_raise_ValueError(MP_ERROR_TEXT("USB list limit"));
- if(max>OBJ_USB_LISTMAX)max=OBJ_USB_LISTMAX;
- total=obj_usb_list(h,NULL,0);
- if(total<0)raise_err();
- if(max>total)max=total;
- e=m_new(ObjUsbEntry,max?max:1);
- r=max?obj_usb_list(h,e,max):0;
- if(r<0){m_del(ObjUsbEntry,e,max?max:1);raise_err();}
- recs=m_new(mp_obj_t,r?r:1);
- for(i=0;i<r;i++)recs[i]=usbentrytuple(&e[i]);
- m_del(ObjUsbEntry,e,max?max:1);
- t[1]=mp_obj_new_tuple(r,recs);
- m_del(mp_obj_t,recs,r?r:1);
- t[0]=mp_obj_new_int(total);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objusblist_obj,1,2,p9_objusblist);
-
-/* Low-level byte-capacity form: it passes outlen through unchanged instead
- * of clamping the record count in userland, so the kernel's direct
- * OBJINVOKE(ObjOpUsbList) length rules are observable. */
-static mp_obj_t p9_objusblistbytes(size_t n,const mp_obj_t *a){
- int h=mp_obj_get_int(a[0]);
- long nbytes=mp_obj_get_int(a[1]),total,r,i;
- unsigned char *buf;ObjUsbEntry *e;ObjCall c;mp_obj_t *recs,t[2];
- if(n<2)mp_raise_TypeError(MP_ERROR_TEXT("obj_usb_list_bytes needs 2 args"));
- if(nbytes<0||nbytes>1048576)mp_raise_ValueError(MP_ERROR_TEXT("USB list byte capacity"));
- total=obj_usb_list(h,NULL,0);
- if(total<0)raise_err();
- if(nbytes==0){t[0]=mp_obj_new_int(total);t[1]=mp_obj_new_tuple(0,NULL);return mp_obj_new_tuple(2,t);}
- buf=m_new(unsigned char,nbytes);
- memset(&c,0,sizeof c);
- c.version=OBJ_ABI_VERSION;c.op=ObjOpUsbList;
- c.out=buf;c.outlen=(unsigned long long)nbytes;
- r=obj_invoke(h,&c,sizeof c);
- if(r<0){m_del(unsigned char,buf,nbytes);raise_err();}
- if(r>nbytes/(long)sizeof(ObjUsbEntry))r=nbytes/sizeof(ObjUsbEntry);
- e=(ObjUsbEntry*)buf;
- recs=m_new(mp_obj_t,r?r:1);
- for(i=0;i<r;i++)recs[i]=usbentrytuple(&e[i]);
- m_del(unsigned char,buf,nbytes);
- t[1]=mp_obj_new_tuple(r,recs);
- m_del(mp_obj_t,recs,r?r:1);
- t[0]=mp_obj_new_int(total);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objusblistbytes_obj,2,2,p9_objusblistbytes);
-
-static mp_obj_t p9_objusbepopen(size_t n,const mp_obj_t *a){
- if(n!=5)mp_raise_TypeError(MP_ERROR_TEXT("obj_usb_epopen needs 5 args"));
- return check(obj_usb_epopen(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
-  mp_obj_get_int(a[2]),mp_obj_get_int(a[3]),mp_obj_get_int(a[4])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objusbepopen_obj,5,5,p9_objusbepopen);
 
 /* Native common message-device ABI.  Payloads retain their device format. */
 static mp_obj_t p9_devicesopen(size_t n, const mp_obj_t *a){
@@ -801,7 +715,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devicesopen_obj,0,1,p9_devicesopen
 static mp_obj_t p9_devicelist(size_t n,const mp_obj_t *a){
  int h=mp_obj_get_int(a[0]);
  long cap=n>1?mp_obj_get_int(a[1]):OBJ_DEVICE_LISTMAX;
- long r,i;ObjDeviceEntry *e;mp_obj_t *rows,t[8],result;
+ long r,i;ObjDeviceEntry *e;mp_obj_t *rows,t[9],result;
  if(cap<0||cap>OBJ_DEVICE_LISTMAX)mp_raise_ValueError(MP_ERROR_TEXT("device list capacity"));
  if(cap==0)return check(obj_device_list(h,NULL,0));
  e=m_new(ObjDeviceEntry,cap);
@@ -812,8 +726,9 @@ static mp_obj_t p9_devicelist(size_t n,const mp_obj_t *a){
   t[0]=mp_obj_new_int(e[i].version);t[1]=mp_obj_new_int(e[i].family);
   t[2]=mp_obj_new_int(e[i].selector0);t[3]=mp_obj_new_int(e[i].selector1);
   t[4]=mp_obj_new_int(e[i].maxsend);t[5]=mp_obj_new_int(e[i].maxrecv);
-  t[6]=mp_obj_new_int(e[i].flags);t[7]=mp_obj_new_int(e[i].reserved);
-  rows[i]=mp_obj_new_tuple(8,t);
+  t[6]=mp_obj_new_int(e[i].flags);t[7]=mp_obj_new_int(e[i].kind);
+  t[8]=mp_obj_new_int(e[i].reserved);
+  rows[i]=mp_obj_new_tuple(9,t);
  }
  result=mp_obj_new_tuple(r,rows);
  m_del(mp_obj_t,rows,r?r:1);m_del(ObjDeviceEntry,e,cap);
@@ -822,10 +737,17 @@ static mp_obj_t p9_devicelist(size_t n,const mp_obj_t *a){
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devicelist_obj,1,2,p9_devicelist);
 
 static mp_obj_t p9_deviceopen(size_t n,const mp_obj_t *a){
+ unsigned long long rights=n>4?(unsigned long long)mp_obj_get_int(a[4]):0;
+ mp_buffer_info_t b;
+ if(n>5){
+  mp_get_buffer_raise(a[5],&b,MP_BUFFER_READ);
+  return check(obj_device_open(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
+   mp_obj_get_int(a[2]),mp_obj_get_int(a[3]),rights,b.buf,b.len));
+ }
  return check(obj_device_open(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
-  mp_obj_get_int(a[2]),mp_obj_get_int(a[3]),n>4?(unsigned long long)mp_obj_get_int(a[4]):0));
+  mp_obj_get_int(a[2]),mp_obj_get_int(a[3]),rights,nil,0));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_deviceopen_obj,4,5,p9_deviceopen);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_deviceopen_obj,4,6,p9_deviceopen);
 
 static mp_obj_t p9_devicesend(mp_obj_t h,mp_obj_t data){
  mp_buffer_info_t b;mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
@@ -843,10 +765,19 @@ static mp_obj_t p9_devicerecv(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicerecv_obj,p9_devicerecv);
 
-static mp_obj_t p9_devicectl(mp_obj_t h,mp_obj_t op){
- return check(obj_device_ctl(mp_obj_get_int(h),mp_obj_get_int(op)));
+static mp_obj_t p9_devicectl(size_t n,const mp_obj_t *a){
+ mp_buffer_info_t b;
+ if(n>2){
+  mp_get_buffer_raise(a[2],&b,MP_BUFFER_WRITE);
+  if(b.len>OBJ_DEVICE_MAXPAYLOAD)
+   mp_raise_ValueError(MP_ERROR_TEXT("device control buffer limit"));
+  return check(obj_device_ctl(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
+   b.buf,b.len));
+ }
+ return check(obj_device_ctl(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
+  nil,0));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_devicectl_obj,p9_devicectl);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devicectl_obj,2,3,p9_devicectl);
 
 static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
  ObjEtherStatus i;mp_obj_t a[15];
@@ -863,80 +794,8 @@ static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_deviceetherinfo_obj,p9_deviceetherinfo);
 
-static mp_obj_t p9_objusbctl(mp_obj_t handle, mp_obj_t operation, mp_obj_t data){
- mp_buffer_info_t b;
- mp_get_buffer_raise(data,&b,MP_BUFFER_WRITE);
- if(b.len>4096)mp_raise_ValueError(MP_ERROR_TEXT("USB control buffer limit"));
- return check(obj_usb_ctl(mp_obj_get_int(handle),mp_obj_get_int(operation),b.buf,b.len));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(p9_objusbctl_obj,p9_objusbctl);
-
-/* Historical native names are userland adapters over OBJOPEN/INVOKE/CLOSE;
- * they make no retired syscall. */
 extern long sysraw(long, unsigned long long, unsigned long long,
  unsigned long long, unsigned long long, unsigned long long);
-static mp_obj_t p9_uartcount(void){return check(obj_uart_count());}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_uartcount_obj,p9_uartcount);
-static mp_obj_t p9_uartopen(mp_obj_t port,mp_obj_t mode){
- return check(obj_uart_open(mp_obj_get_int(port),mp_obj_get_int(mode)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_uartopen_obj,p9_uartopen);
-static mp_obj_t p9_uartread(mp_obj_t h,mp_obj_t count){
- long n=mp_obj_get_int(count),r;vstr_t v;
- if(n<0||n>OBJ_STREAM_MAXIO)mp_raise_ValueError(MP_ERROR_TEXT("UART read limit"));
- vstr_init_len(&v,n);r=obj_read(mp_obj_get_int(h),v.buf,(unsigned long long)n,0);
- if(r<0){vstr_clear(&v);raise_err();}
- v.len=r;return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_uartread_obj,p9_uartread);
-static mp_obj_t p9_uartwrite(mp_obj_t h,mp_obj_t data){
- mp_buffer_info_t b;mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
- return check(obj_write(mp_obj_get_int(h),b.buf,(unsigned long long)b.len,0));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_uartwrite_obj,p9_uartwrite);
-static mp_obj_t p9_uartioctl(size_t n,const mp_obj_t *a){
- Uartcfg c;
- memset(&c,0,sizeof c);
- c.set=Uartbaud|Uartbits|Uartstop|Uartparity;
- c.baud=mp_obj_get_int(a[1]);c.bits=mp_obj_get_int(a[2]);
- c.stop=mp_obj_get_int(a[3]);
- c.parity=n>4?mp_obj_get_int(a[4]):Uartparitynone;
- return check(obj_uart_ctl(mp_obj_get_int(a[0]),&c));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_uartioctl_obj,4,5,p9_uartioctl);
-static mp_obj_t p9_uartstatus(size_t n,const mp_obj_t *a){
- long sz=n>1?mp_obj_get_int(a[1]):4096,r;vstr_t v;
- if(sz<0||sz>OBJ_UART_STATMAX)mp_raise_ValueError(MP_ERROR_TEXT("UART status size"));
- vstr_init_len(&v,sz);r=obj_uart_status(mp_obj_get_int(a[0]),v.buf,(unsigned long long)sz);
- if(r<0){vstr_clear(&v);raise_err();}
- v.len=r;return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_uartstatus_obj,1,2,p9_uartstatus);
-static mp_obj_t p9_uartclose(mp_obj_t h){check(obj_close(mp_obj_get_int(h)));return mp_const_none;}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_uartclose_obj,p9_uartclose);
-static mp_obj_t p9_kbdopen(void){return check(obj_kbd_open());}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_kbdopen_obj,p9_kbdopen);
-static mp_obj_t p9_kbdread(mp_obj_t h,mp_obj_t count){
- long n=mp_obj_get_int(count),r;vstr_t v;
- if(n<0||n>OBJ_KBD_MAXREAD)mp_raise_ValueError(MP_ERROR_TEXT("KBD read limit"));
- vstr_init_len(&v,n);r=obj_read(mp_obj_get_int(h),v.buf,(unsigned long long)n,0);
- if(r<0){vstr_clear(&v);raise_err();}
- v.len=r;return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_kbdread_obj,p9_kbdread);
-static mp_obj_t p9_kbdclose(mp_obj_t h){check(obj_close(mp_obj_get_int(h)));return mp_const_none;}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_kbdclose_obj,p9_kbdclose);
-/* Compatibility convenience: acquire an authorized KBD Handle, set the LEDs
- * and release it.  There is no handle-less global LED control. */
-static mp_obj_t p9_kbdleds(mp_obj_t leds){
- long h=obj_kbd_open(),r;
- if(h<0)raise_err();
- r=obj_kbd_leds(h,(unsigned int)mp_obj_get_int(leds));
- obj_close(h);
- check(r);
- return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_kbdleds_obj,p9_kbdleds);
 
 /* Direct memory services operate on user segments and byte buffers. */
 static mp_obj_t p9_segattach(mp_obj_t name, mp_obj_t size){
@@ -1027,10 +886,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_open_binding), MP_ROM_PTR(&p9_objopenbinding_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_pipe_create), MP_ROM_PTR(&p9_objpipecreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_pipe_peer), MP_ROM_PTR(&p9_objpipepeer_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_uart_open), MP_ROM_PTR(&p9_objuartopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_ctl), MP_ROM_PTR(&p9_objuartctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_status), MP_ROM_PTR(&p9_objuartstatus_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_kbd_open), MP_ROM_PTR(&p9_objkbdopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_kbd_leds), MP_ROM_PTR(&p9_objkbdleds_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_info), MP_ROM_PTR(&p9_deviceetherinfo_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_devices_open), MP_ROM_PTR(&p9_devicesopen_obj) },
@@ -1039,22 +896,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_send), MP_ROM_PTR(&p9_devicesend_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_recv), MP_ROM_PTR(&p9_devicerecv_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ctl), MP_ROM_PTR(&p9_devicectl_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_usb_open), MP_ROM_PTR(&p9_objusbopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_usb_list), MP_ROM_PTR(&p9_objusblist_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_usb_list_bytes), MP_ROM_PTR(&p9_objusblistbytes_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_usb_epopen), MP_ROM_PTR(&p9_objusbepopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_usb_ctl), MP_ROM_PTR(&p9_objusbctl_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_count), MP_ROM_PTR(&p9_uartcount_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_open), MP_ROM_PTR(&p9_uartopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_read), MP_ROM_PTR(&p9_uartread_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_write), MP_ROM_PTR(&p9_uartwrite_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_ioctl), MP_ROM_PTR(&p9_uartioctl_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_status), MP_ROM_PTR(&p9_uartstatus_obj) },
-    { MP_ROM_QSTR(MP_QSTR_uart_close), MP_ROM_PTR(&p9_uartclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_kbd_open), MP_ROM_PTR(&p9_kbdopen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_kbd_read), MP_ROM_PTR(&p9_kbdread_obj) },
-    { MP_ROM_QSTR(MP_QSTR_kbd_close), MP_ROM_PTR(&p9_kbdclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_kbd_leds), MP_ROM_PTR(&p9_kbdleds_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_space), MP_ROM_PTR(&p9_objopenspace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
@@ -1085,6 +926,13 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_SPACE), MP_ROM_INT(ObjOpenGeSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_NAMESPACE_CURRENT), MP_ROM_INT(ObjOpenNamespaceCurrent) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_USB_CONTROL), MP_ROM_INT(ObjDeviceUsbControl) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_ETHERNET), MP_ROM_INT(ObjDeviceEthernet) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_UART), MP_ROM_INT(ObjDeviceUart) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_KBD), MP_ROM_INT(ObjDeviceKbd) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_USB_ENDPOINT), MP_ROM_INT(ObjDeviceUsbEndpoint) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_OPT_VERSION), MP_ROM_INT(OBJ_DEVICE_OPT_VERSION) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_KBD_EXCLUSIVE), MP_ROM_INT(OBJ_DEVICE_KBD_EXCLUSIVE) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_NAMESPACE_CONTROL), MP_ROM_INT(VkindNamespaceControl) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_CREATE), MP_ROM_INT(ObjOpNamespaceCreate) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_NAMESPACE_ATTACH), MP_ROM_INT(ObjOpNamespaceAttach) },
@@ -1094,18 +942,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_NDFLT), MP_ROM_INT(NDFLT) },
     { MP_ROM_QSTR(MP_QSTR_NSAVE), MP_ROM_INT(NSAVE) },
     { MP_ROM_QSTR(MP_QSTR_NRSTR), MP_ROM_INT(NRSTR) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_UART), MP_ROM_INT(ObjOpenUart) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_KBD), MP_ROM_INT(ObjOpenKbd) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_USB), MP_ROM_INT(ObjOpenUsb) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_USB_LIST), MP_ROM_INT(ObjOpUsbList) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_USB_EP_OPEN), MP_ROM_INT(ObjOpUsbEpOpen) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_LISTMAX), MP_ROM_INT(OBJ_USB_LISTMAX) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_ENTRY_SIZE), MP_ROM_INT(OBJ_USB_ENTRY_SIZE) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_DATA), MP_ROM_INT(OBJ_USB_EP_DATA) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_MODE_READ), MP_ROM_INT(OBJ_USB_MODE_READ) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_MODE_WRITE), MP_ROM_INT(OBJ_USB_MODE_WRITE) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_MODE_RDWR), MP_ROM_INT(OBJ_USB_MODE_RDWR) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_CTL), MP_ROM_INT(ObjOpUartCtl) },
@@ -1154,7 +992,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VKIND_PIPE), MP_ROM_INT(VkindPipe) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_KBD), MP_ROM_INT(VkindKbd) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_USB), MP_ROM_INT(VkindUsb) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_USB_EP), MP_ROM_INT(VkindUsbEp) },
     { MP_ROM_QSTR(MP_QSTR_VIO_READ), MP_ROM_INT(VioRead) },
     { MP_ROM_QSTR(MP_QSTR_VIO_WRITE), MP_ROM_INT(VioWrite) },

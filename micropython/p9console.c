@@ -286,9 +286,15 @@ native_read(void)
 int
 p9_console_init_native(void)
 {
+	ObjDeviceOpenOptions opt;
+
 	if(nativein)
 		return 0;
-	kbdh = obj_kbd_open();
+	memset(&opt, 0, sizeof opt);
+	opt.version = OBJ_DEVICE_OPT_VERSION;
+	opt.flags = OBJ_DEVICE_KBD_EXCLUSIVE;
+	kbdh = obj_catalog_device_open(ObjDeviceKbd, 0, 0, 0, &opt,
+		sizeof opt);
 	if(kbdh < 0)
 		return -1;
 	nativein = 1;

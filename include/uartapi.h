@@ -18,9 +18,11 @@ struct Uartcfg {
 /*
  * UART access is reached only through the five-operation OBJ ABI:
  * OBJINVOKE(ObjOpDeviceList) reports ObjDeviceUart discovery records with the
- * port index in selector0, OBJOPEN(ObjOpenUart) opens one,
+ * port index in selector0; OBJOPEN(ObjOpenDevice) opens one through an
+ * authorized catalog Handle with a versioned mode option;
  * OBJINVOKE(UartCtl/UartStatus) controls it, and OBJCLOSE releases it.  The
- * historical UART* numbers are reserved and dispatch to nothing.
+ * historical UART* numbers and ObjOpenUart are reserved and dispatch to
+ * nothing.
  */
 
 #endif

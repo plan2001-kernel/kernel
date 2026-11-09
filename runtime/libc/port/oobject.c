@@ -258,60 +258,6 @@ obj_pipe_peer(int handle)
 	return obj_invoke(handle, &c, sizeof c);
 }
 
-/* Discovery helper: count ObjDeviceUart records in the authorized common
- * device catalog.  There is no handle-less INVOKE operation and no UART
- * object invented just to report a count. */
-long
-obj_uart_count(void)
-{
-	ObjDeviceEntry *e;
-	int cat, n, i, count;
-
-	cat = (int)obj_devices_open(0);
-	if(cat < 0)
-		return -1;
-	n = (int)obj_device_list(cat, nil, 0);
-	if(n < 0 || n > OBJ_DEVICE_LISTMAX){
-		obj_close(cat);
-		return n < 0 ? n : -1;
-	}
-	if(n == 0){
-		obj_close(cat);
-		return 0;
-	}
-	e = malloc(n * sizeof *e);
-	if(e == nil){
-		obj_close(cat);
-		return -1;
-	}
-	n = (int)obj_device_list(cat, e, (unsigned int)n);
-	if(n < 0){
-		free(e);
-		obj_close(cat);
-		return -1;
-	}
-	count = 0;
-	for(i = 0; i < n; i++)
-		if(e[i].family == ObjDeviceUart)
-			count++;
-	free(e);
-	obj_close(cat);
-	return count;
-}
-
-long
-obj_uart_open(int port, int mode)
-{
-	ObjOpenUartReq req;
-
-	if(mode != OREAD && mode != OWRITE && mode != ORDWR)
-		return -1;
-	memset(&req, 0, sizeof req);
-	req.port = port;
-	req.mode = mode;
-	return obj_open(ObjOpenUart, &req, sizeof req, 0, nil);
-}
-
 long
 obj_uart_ctl(int handle, void *cfg)
 {
@@ -339,12 +285,6 @@ obj_uart_status(int handle, void *buf, unsigned long long len)
 }
 
 long
-obj_kbd_open(void)
-{
-	return obj_open(ObjOpenKbd, nil, 0, 0, nil);
-}
-
-long
 obj_kbd_leds(int handle, unsigned int leds)
 {
 	ObjCall c;
@@ -352,61 +292,6 @@ obj_kbd_leds(int handle, unsigned int leds)
 	callinit(&c, ObjOpKbdLeds);
 	c.arg0 = leds;
 	return obj_invoke(handle, &c, sizeof c);
-}
-
-/* USB service.  The count is a record count; ents==nil or count==0 performs
- * the legacy USBLIST total-count query.  obj_usb_epopen needs a service
- * Handle carrying Vcreate; the returned endpoint Handle has rights derived
- * from kind and mode.  Neither call provides a data or control transfer. */
-long
-obj_usb_open(unsigned long long rights)
-{
-	return obj_open(ObjOpenUsb, nil, 0, rights, nil);
-}
-
-long
-obj_usb_list(int handle, void *ents, unsigned long long count)
-{
-	ObjCall c;
-
-	if(count > OBJ_USB_LISTMAX)
-		count = OBJ_USB_LISTMAX;
-	callinit(&c, ObjOpUsbList);
-	c.out = ents;
-	c.outlen = ents == nil ? 0 : count * sizeof(ObjUsbEntry);
-	return obj_invoke(handle, &c, sizeof c);
-}
-
-long
-obj_usb_epopen(int handle, int devno, int epno, int kind, int mode)
-{
-	ObjCall c;
-	ObjUsbEpReq r;
-
-	r.devno = devno;
-	r.epno = epno;
-	r.kind = kind;
-	r.mode = mode;
-	r.flags = 0;
-	r.reserved = 0;
-	callinit(&c, ObjOpUsbEpOpen);
-	c.in = &r;
-	c.inlen = sizeof r;
-	return obj_invoke(handle, &c, sizeof c);
-}
-
-/* USB enumeration/administration shares the existing DeviceCtl operation;
- * its bounded buffer is IN/OUT, and the Handle must carry Vcontrol. */
-long
-obj_usb_ctl(int handle, unsigned int operation, void *data, unsigned long long len)
-{
-    ObjCall c;
-
-    callinit(&c, ObjOpDeviceCtl);
-    c.arg0 = operation;
-    c.out = data;
-    c.outlen = len;
-    return obj_invoke(handle, &c, sizeof c);
 }
 
 long
@@ -458,17 +343,44 @@ obj_device_list(int catalog, ObjDeviceEntry *entries, unsigned int count)
 
 long
 obj_device_open(int catalog, unsigned int family, int selector0, int selector1,
-	unsigned long long rights)
+		unsigned long long rights, void *options, unsigned long long optlen)
 {
 	ObjOpenDeviceReq r;
 
+	if(optlen > OBJ_DEVICE_OPTMAX || (optlen != 0 && options == nil)){
+		werrstr("bad arg in system call");
+		return -1;
+	}
 	memset(&r, 0, sizeof r);
 	r.version = OBJ_DEVICE_ABI_VERSION;
 	r.family = family;
 	r.catalog = catalog;
 	r.selector0 = selector0;
 	r.selector1 = selector1;
+	r.optlen = (unsigned int)optlen;
+	if(optlen != 0)
+		memmove(r.options, options, optlen);
 	return obj_open(ObjOpenDevice, &r, sizeof r, rights, nil);
+}
+
+long
+obj_catalog_device_open(unsigned int family, int selector0, int selector1,
+		unsigned long long rights, void *options, unsigned long long optlen)
+{
+	char err[ERRMAX];
+	long cat, h;
+
+	cat = obj_devices_open(Vmeta|Vdelegate|Vcreate);
+	if(cat < 0)
+		return -1;
+	h = obj_device_open((int)cat, family, selector0, selector1, rights,
+		options, optlen);
+	if(h < 0)
+		rerrstr(err, sizeof err);
+	obj_close((int)cat);
+	if(h < 0)
+		werrstr("%s", err);
+	return h;
 }
 
 long
@@ -494,22 +406,21 @@ obj_device_recv(int device, ObjDeviceResult *completion)
 }
 
 long
-obj_device_ctl(int device, unsigned int operation)
+obj_device_ctl(int device, unsigned int operation, void *data,
+		unsigned long long len)
 {
 	ObjCall c;
 
 	callinit(&c, ObjOpDeviceCtl);
 	c.arg0 = operation;
+	c.out = data;
+	c.outlen = len;
 	return obj_invoke(device, &c, sizeof c);
 }
 
 long
 obj_device_ether_status(int device, ObjEtherStatus *status)
 {
-    ObjCall c;
-    callinit(&c, ObjOpDeviceCtl);
-    c.arg0 = ObjDeviceEtherStatus;
-    c.out = status;
-    c.outlen = sizeof *status;
-    return obj_invoke(device, &c, sizeof c);
+    return obj_device_ctl(device, ObjDeviceEtherStatus, status,
+        sizeof *status);
 }
