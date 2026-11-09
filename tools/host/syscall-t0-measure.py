@@ -521,7 +521,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", action="store_true",
                     help="build the measurement artifacts and execute the QEMU tests")
-    ap.add_argument("--out", default="docs/SYSCALL-T0-MEASUREMENT.json")
+    ap.add_argument("--out", default="build/syscall-t0/measurement.json",
+                    help="JSON report path (build/, .agent-work/, or outside the checkout)")
     ap.add_argument("--summary", action="store_true")
     args = ap.parse_args()
 
@@ -633,7 +634,12 @@ def main() -> int:
             "normal_persist": "NOT RUN (analyze-only)",
             "normal_rebuild": "NOT RUN (analyze-only)",
         }
-    out = ROOT / args.out
+    out = (ROOT / args.out).resolve()
+    # Per-run measurement reports are local artifacts, never tracked docs.
+    allowed_local = ((ROOT / "build").resolve(), (ROOT / ".agent-work").resolve())
+    if out.is_relative_to(ROOT) and not any(
+            out.is_relative_to(directory) for directory in allowed_local):
+        ap.error("--out must be under build/, .agent-work/, or outside the checkout")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2) + "\n")
     print(f"wrote {out}")

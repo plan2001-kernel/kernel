@@ -59,10 +59,11 @@ and MicroPython startup. Its existing build and test paths remain applicable.
 **ARM64/AArch64:** Active early-boot port. The repository contains an ARM64
 ELF kernel, UEFI loader, shared BootInfo v1 validation, exception/EL1 entry,
 early mappings, PL011 console, GICv2/GICv3 timer interrupts, and an early
-physical-page allocator. Its QEMU `virt` boot was exercised with both GICv2 and
-GICv3 on 2026-11-08. ARM64 does **not** yet implement the full AMD64 scheduler,
-virtual memory, GE/O, syscalls, userspace, or device/networking stack. Physical
-ARM64 hardware was not validated by that QEMU test.
+physical-page allocator. The `tools/qemu-arm64-boot.sh` check exercises early
+boot with QEMU `virt` and GICv2 or GICv3; it does not establish full-system
+capability or physical-hardware compatibility. ARM64 does **not** yet implement
+the full AMD64 scheduler, virtual memory, GE/O, syscalls, userspace, or
+device/networking stack.
 
 This describes implementation maturity, **not** an AMD64-only policy. Shared
 boot changes must consider both architectures; architecture-specific changes

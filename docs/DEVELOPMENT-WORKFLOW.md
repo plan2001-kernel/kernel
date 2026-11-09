@@ -2,9 +2,8 @@
 
 Canonical repository: https://github.com/plan2001-kernel/kernel
 
-Development may use Codex Cloud, Android Termux/OpenCode, or another suitable
-environment. No particular workstation, external agent queue, MCP service,
-or source-publication host is required.
+Development is independent of any particular workstation, editor, AI agent,
+MCP service, or external build environment.
 
 1. Read the current source, `AGENTS.md`, and only the technical document
    relevant to the task.
