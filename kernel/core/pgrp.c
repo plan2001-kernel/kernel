@@ -178,12 +178,13 @@ closefdgrp(Ref *r)
  */
 static Lock lifelk;
 static long pgrplive, octxlive, pgrpseq;
+static ulong lifeseq;
 
 static void
-lifeprint(char kind, int delta, ulong id, long pgrp, long octx)
+lifeprint(char kind, int delta, ulong seq, ulong id, long pgrp, long octx)
 {
-	print("T30LIFE %c%c id=%lud pgrp=%ld octx=%ld\n",
-		kind, delta > 0 ? '+' : '-', id, pgrp, octx);
+	print("T30LIFE %c%c seq=%lud id=%lud pgrp=%ld octx=%ld\n",
+		kind, delta > 0 ? '+' : '-', seq, id, pgrp, octx);
 }
 
 void
@@ -191,7 +192,7 @@ lifepgrp(void *v, int delta)
 {
 	Pgrp *pgrp = v;
 	long p, o;
-	ulong id;
+	ulong id, seq;
 
 	lock(&lifelk);
 	if(delta > 0)
@@ -200,8 +201,9 @@ lifepgrp(void *v, int delta)
 	id = pgrp->diagid;
 	p = pgrplive;
 	o = octxlive;
+	seq = ++lifeseq;
 	unlock(&lifelk);
-	lifeprint('g', delta, id, p, o);
+	lifeprint('g', delta, seq, id, p, o);
 }
 
 void
@@ -209,27 +211,30 @@ lifecontrol(void *v, int delta)
 {
 	Pgrp *pgrp = v;
 	long p, o;
-	ulong id;
+	ulong id, seq;
 
 	lock(&lifelk);
 	id = pgrp->diagid;
 	p = pgrplive;
 	o = octxlive;
+	seq = ++lifeseq;
 	unlock(&lifelk);
-	lifeprint('c', delta, id, p, o);
+	lifeprint('c', delta, seq, id, p, o);
 }
 
 void
 lifeoctx(int delta)
 {
 	long p, o;
+	ulong seq;
 
 	lock(&lifelk);
 	octxlive += delta;
 	p = pgrplive;
 	o = octxlive;
+	seq = ++lifeseq;
 	unlock(&lifelk);
-	lifeprint('o', delta, 0, p, o);
+	lifeprint('o', delta, seq, 0, p, o);
 }
 #endif
 

@@ -1,92 +1,79 @@
 #!/usr/bin/env bash
 # Build-time diagnostic run for issue #30: live Pgrp/OContext accounting.
 #
-# The kernel build adds non-ABI T30LIFE counter lines.  Every T30-LIFE marker
-# from process-lifecycle-checks.py must report the same live totals as the
-# first marker; a nonzero delta after a scenario is a leaked temporary group
-# or context.  The canonical kernel is rebuilt on exit.
+# The kernel build adds non-ABI T30LIFE counter and sequence lines.  The
+# parser verifies every marker against the baseline and checks per-Pgrp live
+# IDs, allocation/release balance and sequence monotonicity.  The canonical
+# non-diagnostic kernel is always rebuilt on exit; a failed restoration is a
+# script failure even when the diagnostic test itself passed.
+#
+# Test-only hooks:
+#   T30D_RESTORE_CMD          override the canonical rebuild command
+#   T30D_SELFTEST=1           skip build/run/parse and exit with
+#                             T30D_SELFTEST_STATUS to exercise the EXIT trap
+#   T30D_SELFTEST_SKIP_VALIDATE=1  skip artifact validation for those tests
 set -euo pipefail
 T30D_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 T30D_OUT=${T30D_OUT:-$T30D_ROOT/build/t30/diag}
 mkdir -p "$T30D_OUT"
 T30D_OUT=$(realpath "$T30D_OUT")
+T30D_RESTORE_CMD=${T30D_RESTORE_CMD:-"$T30D_ROOT/tools/build-gcc.sh --kernel"}
+T30D_CLEAN_BUILD_LOG=$T30D_OUT/canonical-build.log
+
+# Confirm the effective canonical build, not merely the rebuild exit code.
+validate_canonical()
+{
+	local cmd=$T30D_ROOT/build/gcc/log/pgrp.cmd
+	local elf=$T30D_ROOT/build/gcc/9pc64.elf
+
+	if [ ! -f "$cmd" ] || [ ! -f "$elf" ]; then
+		echo "T30: canonical build artifacts are missing" >&2
+		return 1
+	fi
+	if grep -q 'PLAN2001_LIFECYCLE_DIAG' "$cmd"; then
+		echo "T30: canonical pgrp.cmd still contains the diagnostic define" >&2
+		return 1
+	fi
+	if nm "$elf" 2>/dev/null | grep -qw 'lifepgrp'; then
+		echo "T30: canonical kernel ELF still exports lifepgrp" >&2
+		return 1
+	fi
+	return 0
+}
 
 restore()
 {
-  env -u PLAN2001_LIFECYCLE_DIAG "$T30D_ROOT/tools/build-gcc.sh" --kernel \
-    >"$T30D_OUT/canonical-build.log" 2>&1 || true
+	local status=$?
+	local restore_status=0
+
+	trap - EXIT
+	if ! env -u PLAN2001_LIFECYCLE_DIAG bash -c "$T30D_RESTORE_CMD" \
+			>"$T30D_CLEAN_BUILD_LOG" 2>&1; then
+		restore_status=1
+	elif [ "${T30D_SELFTEST_SKIP_VALIDATE:-0}" != 1 ] &&
+			! validate_canonical; then
+		restore_status=1
+	fi
+	if [ "$restore_status" -ne 0 ]; then
+		echo "T30: ERROR: canonical non-diagnostic kernel restoration FAILED" >&2
+		echo "T30: see $T30D_CLEAN_BUILD_LOG" >&2
+		if [ "$status" -eq 0 ]; then
+			exit 1
+		fi
+		echo "T30: diagnostic run also failed with status $status" >&2
+	fi
+	exit "$status"
 }
 trap restore EXIT
 
+if [ "${T30D_SELFTEST:-0}" = 1 ]; then
+	exit "${T30D_SELFTEST_STATUS:-0}"
+fi
+
 PLAN2001_LIFECYCLE_DIAG=1 "$T30D_ROOT/tools/build-gcc.sh" --kernel \
-  >"$T30D_OUT/diag-build.log" 2>&1
+	>"$T30D_OUT/diag-build.log" 2>&1
 
 T30_OUT="$T30D_OUT/run" "$T30D_ROOT/tools/host/t30/run-process-lifecycle-checks.sh" "$@"
 
-python3 - "$T30D_OUT/run/boot-boot.log" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-text = Path(sys.argv[1]).read_text()
-event = re.compile(r'T30LIFE ([goc])([+-]) id=(\d+) pgrp=(-?\d+) octx=(-?\d+)\n')
-clean = []
-rawpos = []
-events = []
-palloc = pfree = oalloc = ofree = 0
-negative = False
-last = 0
-for m in event.finditer(text):
-    clean.append(text[last:m.start()])
-    rawpos.extend(range(last, m.start()))
-    kind, sign, ident, pgrp, octx = m.groups()
-    pgrp, octx = int(pgrp), int(octx)
-    events.append((m.start(), (pgrp, octx)))
-    if pgrp < 0 or octx < 0:
-        negative = True
-    if kind == 'g':
-        palloc += sign == '+'
-        pfree += sign == '-'
-    elif kind == 'o':
-        oalloc += sign == '+'
-        ofree += sign == '-'
-    last = m.end()
-clean.append(text[last:])
-rawpos.extend(range(last, len(text)))
-clean = ''.join(clean)
-
-
-def snapshot(clean_end):
-    raw = rawpos[clean_end - 1] if clean_end > 0 else -1
-    counts = None
-    for at, live in events:
-        if at < raw:
-            counts = live
-        else:
-            break
-    return counts
-
-
-markers = []
-for m in re.finditer(r'^T30-LIFE (\S+)$', clean, re.M):
-    markers.append((m.group(1), snapshot(m.end())))
-
-assert markers, 'no T30-LIFE markers'
-assert markers[0][0] == 'base', 'first marker is not base: %r' % (markers[0],)
-assert markers[-1][0] == 'end', 'last marker is not end: %r' % (markers[-1],)
-base = markers[0][1]
-assert base is not None, 'base marker has no lifecycle event'
-for name, counts in markers:
-    assert counts is not None, 'marker %s has no lifecycle event' % name
-    assert counts == base, \
-        'live Pgrp/OContext delta at %s: %r != baseline %r' % (name, counts, base)
-assert not negative, 'negative live Pgrp/OContext count'
-assert palloc + oalloc > 0, 'no lifecycle events observed'
-assert palloc - pfree == base[0], \
-    'Pgrp allocation/release imbalance: +%d/-%d baseline %d' % (palloc, pfree, base[0])
-assert oalloc - ofree == base[1], \
-    'OContext allocation/release imbalance: +%d/-%d baseline %d' % (oalloc, ofree, base[1])
-print('Verified %d T30-LIFE markers at baseline pgrp=%d octx=%d '
-      '(pgrp +%d/-%d, octx +%d/-%d)' %
-      (len(markers), base[0], base[1], palloc, pfree, oalloc, ofree))
-PY
+python3 "$T30D_ROOT/tools/host/t30/lifecycle_log.py" \
+	"$T30D_OUT/run/boot-boot.log"
