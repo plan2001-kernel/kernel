@@ -749,13 +749,22 @@ vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 		error(Ebadarg);
 	memset(vi, 0, sizeof *vi);
 	memset(used, 0, sizeof used);
+	/*
+	 * One function-wide cleanup path.  H holds at most the Handle currently
+	 * being validated; ownership moves to VI (and H is cleared) only after
+	 * every check passes.  On any error the current Handle is released once
+	 * and every previously pinned entry is released by vi release, which
+	 * also zeroes the plan so a caller's own error path cannot double-free.
+	 */
+	h = nil;
+	if(waserror()){
+		if(h != nil)
+			vhandput(h);
+		vobjinheritrelease(vi);
+		nexterror();
+	}
 	for(i = 0; i < n; i++){
 		h = vlookup(list[i].handle, Vdelegate);
-		if(waserror()){
-			vhandput(h);
-			vobjinheritrelease(vi);
-			nexterror();
-		}
 		if(h->sub != nil)
 			error("object: subscriptions cannot be inherited");
 		rights = list[i].rights == 0 ? (uvlong)h->rights : list[i].rights;
@@ -782,8 +791,9 @@ vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 		vi->e[i].slot = slot;
 		vi->e[i].gen = 0;
 		vi->n = i + 1;
-		poperror();
+		h = nil;		/* VI owns the reference from here */
 	}
+	poperror();
 	return vi->n;
 }
 
@@ -817,16 +827,37 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 	}
 }
 
-/* Child Handle assigned to a named parent Handle's plan entry, or 0. */
+/* Child Handle assigned to plan entry INDEX, or 0 when INDEX is out of range.
+ * The mapping is per entry, not per source, so a source listed more than once
+ * yields a distinct child Handle for each destination. */
 int
-vobjinheritchildhandle(Vinherit *vi, int srchandle)
+vobjinheritchildhandle(Vinherit *vi, int index)
 {
-	int i;
+	if(vi == nil || index < 0 || index >= vi->n)
+		return 0;
+	return (int)((vi->e[index].gen << 8) | (vi->e[index].slot + 1));
+}
 
-	for(i = 0; vi != nil && i < vi->n; i++)
-		if(vi->e[i].srchandle == srchandle)
-			return (int)((vi->e[i].gen << 8) | (vi->e[i].slot + 1));
-	return 0;
+/* Resolve a named parent Handle to its unique plan destination.  Returns the
+ * child Handle, 0 when the source is absent, or -1 when it appears more than
+ * once (ambiguous).  OSPAWN's stdoutpipe uses this and rejects both absent and
+ * ambiguous sources instead of silently choosing the first match. */
+int
+vobjinheritsrchandle(Vinherit *vi, int srchandle)
+{
+	int i, found;
+
+	found = -1;
+	for(i = 0; vi != nil && i < vi->n; i++){
+		if(vi->e[i].srchandle != srchandle)
+			continue;
+		if(found >= 0)
+			return -1;
+		found = i;
+	}
+	if(found < 0)
+		return 0;
+	return (int)((vi->e[found].gen << 8) | (vi->e[found].slot + 1));
 }
 
 void

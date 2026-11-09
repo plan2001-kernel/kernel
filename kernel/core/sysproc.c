@@ -317,16 +317,19 @@ kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 			error(Ebadarg);
 		return kernrforkcore(flag, nil);
 	}
-	vobjinheritprepare(&vi, list, n);
+	memset(&vi, 0, sizeof vi);
 	if(waserror()){
 		vobjinheritrelease(&vi);
 		nexterror();
 	}
+	vobjinheritprepare(&vi, list, n);
 	pid = kernrforkcore(flag, &vi);
+	/* One result per input entry, in input order.  Do not search by source:
+	 * the same parent Handle may legitimately appear several times. */
 	if(childhandles != nil)
 		for(i = 0; i < vi.n; i++)
-			childhandles[i] = (uvlong)vobjinheritchildhandle(&vi,
-				vi.e[i].srchandle);
+			childhandles[i] =
+				(uvlong)vobjinheritchildhandle(&vi, i);
 	vobjinheritrelease(&vi);
 	poperror();
 	return pid;
@@ -1257,8 +1260,11 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			int ch;
 
 			if(inh->stdoutpipe > 0x7fffffffULL) error(Ebadarg);
-			ch = vobjinheritchildhandle(&vi, (int)inh->stdoutpipe);
-			if(ch == 0) error(Ebadarg);
+			/* stdoutpipe names one parent Pipe.  It must resolve to
+			 * exactly one plan entry: absent (0) and ambiguous (-1)
+			 * are both rejected rather than picking the first. */
+			ch = vobjinheritsrchandle(&vi, (int)inh->stdoutpipe);
+			if(ch <= 0) error(Ebadarg);
 			pipeoutputset(p, ch);
 		}
 		for(i = 0; i < inh->nenv; i++){

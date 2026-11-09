@@ -49,7 +49,7 @@ def run():
                 return h
         return 0
 
-    def find_slot(slot):
+    def find_slot(slot, kind=p.VKIND_PIPE):
         for h in p.obj_list():
             if (h & 0xff) != slot:
                 continue
@@ -57,7 +57,7 @@ def run():
                 i = p.obj_info(h)
             except OSError:
                 continue
-            if i[8] == p.VKIND_PIPE:
+            if i[8] == kind:
                 return h
         return 0
 
@@ -111,6 +111,43 @@ def run():
        (ch[0] >> 8) != (ch[1] >> 8),
        'RFORKEX reports explicit destination-slot mapping')
 
+    # --- RFORKEX: one source, two destinations, independent rights --------
+    dup = b'T21-DUP'
+    src = p.obj_create(dup)
+    pid, ch = p.rforkex(p.RFPROC,
+                        ((src, p.VREAD | p.VMETA | p.VDELEGATE, 1),
+                         (src, p.VREAD | p.VMETA | p.VSEND |
+                               p.VDELEGATE, 2)))
+    if pid == 0:
+        h1 = find_slot(1, p.VKIND_BYTES)
+        h2 = find_slot(2, p.VKIND_BYTES)
+        good = (h1 and h2 and h1 != h2 and (h1 >> 8) != (h2 >> 8) and
+                p.obj_read(h1, len(dup)) == dup and
+                p.obj_read(h2, len(dup)) == dup and
+                p.obj_info(h1)[10] ==
+                    (p.VREAD | p.VMETA | p.VDELEGATE) and
+                p.obj_info(h2)[10] ==
+                    (p.VREAD | p.VMETA | p.VSEND | p.VDELEGATE))
+        if good:
+            try:
+                p.obj_open_handle(h1, p.VREAD | p.VMETA | p.VSEND)
+            except OSError:
+                pass
+            else:
+                good = False
+        if good:
+            wide = p.obj_open_handle(h2, p.VREAD | p.VMETA | p.VSEND)
+            p.obj_close(wide)
+        p.exits('' if good else 't21-dup')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'RFORKEX duplicate source yields independent child Handles')
+    ok(len(ch) == 2 and ch[0] != ch[1] and
+       (ch[0] & 0xff) == 1 and (ch[1] & 0xff) == 2 and
+       (ch[0] >> 8) != (ch[1] >> 8),
+       'RFORKEX mapping follows each entry for a duplicate source')
+    p.obj_close(src)
+
     # --- Ordinary RFORK copies no object Handle ---------------------------
     pid = p.rfork(p.RFPROC)
     if pid == 0:
@@ -152,6 +189,39 @@ def run():
            'inheritance without RFPROC')
     ok(p.obj_info(b1)[4] == holds and p.obj_read(b1, len(m1)) == m1,
        'rejected RFORKEX plans leave the parent unchanged')
+
+    # --- RFORKEX: a later invalid entry releases earlier pinned refs ------
+    base1 = p.obj_info(b1)[4]
+    base2 = p.obj_info(b2)[4]
+
+    def holds_intact():
+        return (p.obj_info(b1)[4] == base1 and
+                p.obj_info(b2)[4] == base2)
+
+    denied(lambda: p.rforkex(p.RFPROC,
+                             ((b1, p.VREAD | p.VMETA, 1),
+                              (0, p.VREAD | p.VMETA, 2))),
+           'multi-entry later invalid Handle')
+    ok(holds_intact(),
+       'multi-entry invalid Handle releases pinned entries')
+    denied(lambda: p.rforkex(p.RFPROC,
+                             ((b1, p.VREAD | p.VMETA, 1),
+                              (no_delegate, p.VREAD | p.VMETA, 2))),
+           'multi-entry later Handle without Vdelegate')
+    ok(holds_intact(),
+       'multi-entry missing Vdelegate releases pinned entries')
+    denied(lambda: p.rforkex(p.RFPROC,
+                             ((b1, p.VREAD | p.VMETA, 1),
+                              (b2, 0xffff, 2))),
+           'multi-entry later excessive rights')
+    ok(holds_intact(),
+       'multi-entry excessive rights releases pinned entries')
+    denied(lambda: p.rforkex(p.RFPROC,
+                             ((b1, p.VREAD | p.VMETA, 1),
+                              (b2, p.VREAD | p.VMETA, 1))),
+           'multi-entry later duplicate destination slot')
+    ok(holds_intact(),
+       'multi-entry duplicate destination releases pinned entries')
     p.obj_close(no_delegate)
 
     # --- RFORKEX: bidirectional Pipe communication ------------------------
@@ -277,6 +347,18 @@ def run():
            'OSPAWN role failure after Handle commit')
     ok(p.obj_info(w)[4] == base,
        'post-commit OSPAWN failure rolls back inherited references')
+    p.pipeclose(a)
+    p.pipeclose(w)
+
+    # --- OSPAWN: ambiguous stdoutpipe source is rejected ------------------
+    a, w = p.pipenew()
+    base = p.obj_info(w)[4]
+    denied(lambda: space.spawn(OID, handle=sh,
+                               argv=('micropython', '-c', 'pass'),
+                               pipes=((w, 2), (w, 2)), stdout=w),
+           'OSPAWN ambiguous stdoutpipe mapping')
+    ok(p.obj_info(w)[4] == base,
+       'ambiguous OSPAWN stdout rejection releases child references')
     p.pipeclose(a)
     p.pipeclose(w)
 

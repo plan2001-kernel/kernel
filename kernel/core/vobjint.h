@@ -102,6 +102,7 @@ struct Vinherit {
 int	vobjinheritprepare(Vinherit*, Vinhand*, int);
 void	vobjinheritcommit(Proc*, Vinherit*);
 int	vobjinheritchildhandle(Vinherit*, int);
+int	vobjinheritsrchandle(Vinherit*, int);
 void	vobjinheritrelease(Vinherit*);
 
 /* Process-lifecycle providers.  The OBJINVOKE operations validate the
