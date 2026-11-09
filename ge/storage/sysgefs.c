@@ -556,6 +556,63 @@ oscopycap(Ohand *src, uvlong oid)
 	return n;
 }
 
+/*
+ * Explicitly delegated Space capability for a child process.  Unlike the
+ * bootstrap Ohand obtained by osopenspace(), this copy is not tied to the
+ * boot owner: oauthorize() accepts a caps=2 Space capability across a
+ * process boundary.  The caller passes the already-validated O-rights
+ * attenuation; the copy owns its own opened Ospace and gate.
+ */
+Ohand*
+oscopycapdelegate(Ohand *src, int rights)
+{
+	Ohand *n;
+
+	if(src == nil)
+		error(Eperm);
+	if(rights == 0 || (rights & ~src->rights) != 0)
+		error(Eperm);
+	qlock(ohgate(src));
+	if(waserror()){
+		qunlock(ohgate(src));
+		nexterror();
+	}
+	oauthorize(src, src->oid, 0);
+	if(ovol == nil)
+		error("O: no volume");
+	n = smalloc(sizeof *n);
+	n->ref.ref = 1;
+	n->rights = rights;
+	n->sid = src->sid;
+	n->oid = 0;
+	n->bootstrap = 0;
+	n->caps = 2;
+	memmove(n->space, src->space, sizeof n->space);
+	n->space[sizeof n->space - 1] = 0;
+	if(waserror()){
+		free(n);
+		nexterror();
+	}
+	n->sp = onativeopen(ovol, n->space);
+	poperror();
+	if(n->sp == nil){
+		free(n);
+		error("O: capability open failed");
+	}
+	if(onativesid(n->sp) != src->sid){
+		onativeclose(n->sp);
+		free(n);
+		error(Eperm);
+	}
+	if(src->origin != nil){
+		n->origin = src->origin;
+		incref(&n->origin->ref);
+	}
+	poperror();
+	qunlock(ohgate(src));
+	return n;
+}
+
 void
 oscheckhand(Ohand *h)
 {

@@ -1534,11 +1534,45 @@ static mp_obj_t space_hget(mp_obj_t h, mp_obj_t oid) {
     return mp_obj_new_bytes_from_vstr(&v);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(space_hget_obj,space_hget);
-static mp_obj_t space_hexecute(mp_obj_t h, mp_obj_t oid) {
-    hcheck(oexecute(mp_obj_get_int(h),obyteoid(oid),nil,0));
+/* hexecute(handle, oid[, argv]): replace this process image in place.
+ * argv is an optional iterable of str, bounded like space.spawn.  The
+ * kernel copies the strings before the old image is replaced. */
+static mp_obj_t space_hexecute(size_t n_args, const mp_obj_t *args) {
+    char *argv[33];
+    const char *s;
+    mp_obj_t it, item;
+    size_t total;
+    int argc;
+
+    argc = 0;
+    total = 0;
+    if (n_args >= 3 && args[2] != mp_const_none) {
+        it = mp_getiter(args[2], NULL);
+        while ((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            if (argc >= 32) {
+                mp_raise_msg(&mp_type_ValueError,
+                    MP_ERROR_TEXT("hexecute: at most 32 argv entries"));
+            }
+            if (!mp_obj_is_str(item)) {
+                mp_raise_TypeError(
+                    MP_ERROR_TEXT("hexecute: argv must contain str"));
+            }
+            s = mp_obj_str_get_str(item);
+            total += strlen(s) + 1;
+            if (total > 16 * 1024) {
+                mp_raise_msg(&mp_type_ValueError,
+                    MP_ERROR_TEXT("hexecute: argv is too long"));
+            }
+            argv[argc++] = (char *)s;
+        }
+    }
+    argv[argc] = NULL;
+    hcheck(oexecute(mp_obj_get_int(args[0]), obyteoid(args[1]),
+                    argc ? argv : nil, argc));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(space_hexecute_obj,space_hexecute);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_hexecute_obj, 2, 3,
+                                           space_hexecute);
 
 /* Native sealed provider and union operations. */
 static long namespace_call(ObjCall *call) {

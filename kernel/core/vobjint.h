@@ -193,6 +193,7 @@ void	oswritehand(Ohand*, uvlong oid, void *buf, long n);
 long	oscreatehand(Ohand*, void *buf, long n, uvlong *oid);
 long	oscommithand(Ohand*, uvlong *ver);
 Ohand*	oscopycap(Ohand*, uvlong oid);
+Ohand*	oscopycapdelegate(Ohand*, int rights);
 uvlong	ossid(Ohand*);
 void	osvolumeid(Ohand*, uchar *out);
 int	oshandrights(Ohand*);

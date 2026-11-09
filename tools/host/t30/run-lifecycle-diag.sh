@@ -77,3 +77,9 @@ T30_OUT="$T30D_OUT/run" "$T30D_ROOT/tools/host/t30/run-process-lifecycle-checks.
 
 python3 "$T30D_ROOT/tools/host/t30/lifecycle_log.py" \
 	"$T30D_OUT/run/boot-boot.log"
+
+T30F_OUT="$T30D_OUT/fault" \
+	"$T30D_ROOT/tools/host/t30/run-fault-injection-checks.sh" "$@"
+
+python3 "$T30D_ROOT/tools/host/t30/lifecycle_log.py" \
+	"$T30D_OUT/fault/boot-boot.log"

@@ -10,11 +10,28 @@
 #include	"sys.h"	/* repository-relative for Linux GCC */
 #include	"../../runtime/abi/vobj.h"
 #include	"vobjint.h"
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+#include	"env/envapi.h"
+#endif
 
 #include	<a.out.h>
 
 /* ge/storage/sysgefs.c: bounded published-object read for spawn/exec. */
 extern long osgetobject(int, uvlong, uchar**, long, uvlong*);
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+/*
+ * Opt-in test hook for the lifecycle diagnostic kernel only.  A matching
+ * PLAN2001_FAULT environment value names one safe rollback point and is
+ * consumed here.  This function and its call sites are absent from the
+ * canonical kernel.
+ */
+static int
+injectfault(char *point)
+{
+	return envfaulttake("PLAN2001_FAULT", point);
+}
+#endif
 
 static void
 abortion(void)
@@ -109,6 +126,13 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			if(flag & RFENVG)
 				envcpy(up->egrp, oeg);
 		}
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+		/* Safe rollback point: every new resource is allocated, but the
+		 * caller's pointers have not been replaced yet. */
+		if(injectfault("fork-current-rollback"))
+			error("fork: injected rollback failure");
+#endif
 
 		if(ofg != up->fdgrp)
 			closefdgrp(ofg);
@@ -1364,6 +1388,14 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->parent = up;
 	up->nchild++;
 	unlock(&up->exl);
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Safe late-abort point: the child is fully built and linked, but the
+	 * caller has not received it.  The normal child-abort path must return
+	 * every reference and leave exactly one reapable wait record. */
+	if(injectfault("spawn-child-late-abort"))
+		error("ospawn: injected late child abort");
+#endif
 
 	print("o: SPAWN pid=%lud oid=%#llux cpu=%d\n", pid, oid, cpu);
 	poperror();

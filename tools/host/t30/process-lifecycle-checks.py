@@ -630,6 +630,233 @@ def run():
     unbind('mutprobe')
     mark('control')
 
+    # --- OEXECUTE in place: same PID/Pgrp, roles, and Handle close --------
+    # The post-exec image is the same MicroPython ELF with a fresh -c
+    # program.  It reports through an ObjectFIFO namespace role because the
+    # current exec policy closes the process-local Handle table.
+    clear_roles()
+    ok(len(space.visible()) == 0, 'cleared role view for the exec scenarios')
+
+    def bind_handle(h, role, rights):
+        p.obj_bind(h, role, rights)
+        if role not in roles:
+            roles.append(role)
+
+    bind_role(base_oid, 'exec_keep')
+    report_fifo = p.obj_fifocreate(256)
+    report_sub = p.obj_subscribe(report_fifo, p.VRECV | p.VMETA, 256)
+    bind_handle(report_fifo, 'exec_report',
+                p.VSEND | p.VMETA | p.VDELEGATE)
+    shared_exec = (
+        "import plan9 as p\n"
+        "out=[]\n"
+        "def flush():\n"
+        " try:\n"
+        "  h=p.obj_open_binding('exec_report')\n"
+        "  m=p.obj_create(b'|'.join(out))\n"
+        "  p.obj_publish(h,m)\n"
+        " except Exception as e:\n"
+        "  p.exits('flush:'+str(e))\n"
+        " p.obj_close(m)\n"
+        " p.obj_close(h)\n"
+        "try:\n"
+        " try:\n"
+        "  p.obj_read({0},1)\n"
+        " except OSError:\n"
+        "  out.append(b'STALE=C')\n"
+        " else:\n"
+        "  out.append(b'STALE=O')\n"
+        " try:\n"
+        "  h=p.obj_open_binding('exec_keep')\n"
+        "  out.append(b'KEEP='+p.obj_read(h,{1}))\n"
+        "  p.obj_close(h)\n"
+        " except OSError:\n"
+        "  out.append(b'KEEP=error')\n"
+        " out.append(b'PID='+str(p.getpid()).encode())\n"
+        " try:\n"
+        "  h=p.obj_open_binding('exec_report')\n"
+        "  p.obj_bind(h,'exec_marker',p.VSEND|p.VMETA|p.VDELEGATE)\n"
+        "  out.append(b'MARKER=ok')\n"
+        "  p.obj_close(h)\n"
+        " except OSError:\n"
+        "  out.append(b'MARKER=error')\n"
+        "except Exception as e:\n"
+        " out.append(b'EXC='+str(e).encode())\n"
+        "flush()\n"
+        "p.exits('')\n")
+    pid, ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
+    if pid == 0:
+        handles = p.obj_list()
+        if len(handles) != 1:
+            p.exits('exec-handles:' + str(handles))
+        cs = handles[0]
+        try:
+            space.hexecute(cs, OID,
+                           ('micropython', '-c',
+                            shared_exec.format(cs, len(BASE))))
+        except OSError:
+            p.exits('exec-exec:' + p.errstr())
+        p.exits('exec-child-returned')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'OEXECUTE replaces the image in place with the same PID/Pgrp '
+       'status=%r' % (status,))
+    m, env = p.obj_receive(report_sub, 1000, 64)
+    rec = p.obj_read(m, 64)
+    p.obj_close(m)
+    ok((b'PID=' + str(pid).encode()) in rec and b'STALE=C' in rec and
+       b'KEEP=' + BASE in rec and b'MARKER=ok' in rec,
+       'post-exec PID is unchanged, old Handle numbers are stale and the '
+       'authorized role still reads: %r' % (rec,))
+    ok(openable('exec_marker'),
+       'a role bound by the post-exec image lands in the same shared Pgrp')
+    unbind('exec_marker')
+    denied(lambda: p.wait(), 'successful OEXECUTE leaves no extra wait record')
+    p.obj_close(report_sub)
+    p.obj_close(report_fifo)
+    mark('exec-shared')
+
+    # --- OEXECUTE keeps a sealed Pgrp sealed across image replacement -----
+    clear_roles()
+    ok(len(space.visible()) == 0, 'cleared role view for the sealed exec')
+    seal_exec_oid = make_ge(b'T30-EXECSEAL')
+    bind_role(seal_exec_oid, 'exec_seal')
+    report2_fifo = p.obj_fifocreate(256)
+    report2_sub = p.obj_subscribe(report2_fifo, p.VRECV | p.VMETA, 256)
+    bind_handle(report2_fifo, 'exec_report2',
+                p.VSEND | p.VMETA | p.VDELEGATE)
+    sealed_exec = (
+        "import plan9 as p\n"
+        "import space\n"
+        "out=[]\n"
+        "def flush():\n"
+        " try:\n"
+        "  r=p.obj_open_binding('exec_report2')\n"
+        "  m=p.obj_create(b'|'.join(out))\n"
+        "  p.obj_publish(r,m)\n"
+        " except Exception as e:\n"
+        "  p.exits('flush:'+str(e))\n"
+        " p.obj_close(m)\n"
+        " p.obj_close(r)\n"
+        "try:\n"
+        " try:\n"
+        "  p.obj_read({0},1)\n"
+        " except OSError:\n"
+        "  out.append(b'STALE=C')\n"
+        " else:\n"
+        "  out.append(b'STALE=O')\n"
+        " try:\n"
+        "  h=p.obj_open_binding('exec_seal')\n"
+        "  rh=p.obj_read(h,{1})\n"
+        "  out.append(b'HELD=1' if rh==b'T30-EXECSEAL' else b'HELD=0')\n"
+        "  try:\n"
+        "   p.obj_bind(h,'exec_new',p.VREAD|p.VMETA|p.VDELEGATE)\n"
+        "   out.append(b'SEAL=bypass')\n"
+        "  except OSError:\n"
+        "   out.append(b'SEAL=D')\n"
+        "  try:\n"
+        "   space.view(('exec_seal',))\n"
+        "   out.append(b'VIEW=bypass')\n"
+        "  except OSError:\n"
+        "   out.append(b'VIEW=D')\n"
+        "  p.obj_bind(0,'exec_seal',0,p.OBJ_BIND_REMOVE)\n"
+        "  try:\n"
+        "   p.obj_open_binding('exec_seal')\n"
+        "   out.append(b'REOPEN=open')\n"
+        "  except OSError:\n"
+        "   out.append(b'REOPEN=C')\n"
+        "  out.append(b'AFTER=1' if p.obj_read(h,{1})==b'T30-EXECSEAL'"
+        " else b'AFTER=0')\n"
+        "  p.obj_close(h)\n"
+        " except OSError:\n"
+        "  out.append(b'OPEN=error')\n"
+        "except Exception as e:\n"
+        " out.append(b'EXC='+str(e).encode())\n"
+        "flush()\n"
+        "p.exits('')\n")
+    pid, ch = p.rforkex(p.RFPROC | p.RFNAMEG,
+                        ((sh, 8192 | p.VMETA, 1),))
+    if pid == 0:
+        try:
+            handles = p.obj_list()
+            if len(handles) != 1:
+                p.exits('seal-exec-handles:' + str(handles))
+            cs = handles[0]
+            if not (openable('exec_seal') and openable('exec_report2')):
+                p.exits('seal-exec-pre-role')
+            if p.rfork(p.RFNOMNT) != 0:
+                p.exits('seal-exec-seal')
+            space.hexecute(cs, OID,
+                           ('micropython', '-c',
+                            sealed_exec.format(cs, len(b'T30-EXECSEAL'))))
+        except OSError:
+            p.exits('seal-exec-child:' + p.errstr())
+        p.exits('seal-exec-child-returned')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'OEXECUTE of a sealed Pgrp exits cleanly status=%r' % (status,))
+    m, env = p.obj_receive(report2_sub, 1000, 64)
+    rec = p.obj_read(m, 64)
+    p.obj_close(m)
+    ok(all(token in rec for token in
+           (b'STALE=C', b'SEAL=D', b'VIEW=D',
+            b'REOPEN=C', b'HELD=1', b'AFTER=1')),
+       'the seal survives exec: extension and views stay denied while '
+       'open/remove/detach remain permitted: %r' % (rec,))
+    ok(openable('exec_seal'),
+       'the sealed copy removed its own role without affecting the parent')
+    p.obj_close(report2_sub)
+    p.obj_close(report2_fifo)
+    mark('exec-sealed')
+
+    # --- Failed OEXECUTE before commit leaves the caller usable -----------
+    clear_roles()
+    ok(len(space.visible()) == 0, 'cleared role view for the failed exec')
+    bind_role(base_oid, 'exec_fail_keep')
+    bad_oid = make_ge(b'not an executable image')
+    pid, ch = p.rforkex(p.RFPROC | p.RFNAMEG,
+                        ((sh, 8192 | p.VMETA, 1),))
+    if pid == 0:
+        try:
+            handles = p.obj_list()
+            if len(handles) != 1:
+                p.exits('exec-fail-handles:' + str(handles))
+            cs = handles[0]
+            denied(lambda: space.hexecute(cs, 0x4f45584543000001,
+                                          ('micropython', '-c', 'pass')),
+                   'missing exec image')
+            denied(lambda: space.hexecute(cs, bad_oid,
+                                          ('micropython', '-c', 'pass')),
+                   'malformed exec image')
+            denied(lambda: space.hexecute(0, OID),
+                   'invalid exec Space Handle')
+            for i in range(16):
+                try:
+                    space.hexecute(cs, bad_oid, ('micropython', '-c', 'pass'))
+                except OSError:
+                    pass
+                else:
+                    p.exits('exec-fail-returned')
+            h = p.obj_open_binding('exec_fail_keep')
+            good = p.obj_read(h, len(BASE)) == BASE
+            p.obj_bind(h, 'exec_fail_new',
+                       p.VREAD | p.VMETA | p.VDELEGATE)
+            p.obj_close(h)
+            good = good and openable('exec_fail_new')
+            p.exits('' if good else 'exec-fail-state')
+        except OSError:
+            p.exits('exec-fail-os:' + p.errstr())
+        p.exits('exec-fail-fell')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'invalid OEXECUTE before commit leaves the caller and its roles usable '
+       'status=%r' % (status,))
+    ok(openable('exec_fail_keep') and not openable('exec_fail_new'),
+       'the failed exec Pgrp copy stays isolated from the parent')
+    denied(lambda: p.wait(), 'failed OEXECUTE leaves no child or wait record')
+    unbind('exec_fail_keep')
+    mark('exec-failed')
+
     # --- RFNOMNT seals one live Pgrp, not the whole process tree ----------
     # All early seal scenarios run inside an RFNAMEG copy so the boot owner
     # remains mutable for the final contract checks below.

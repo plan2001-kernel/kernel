@@ -323,6 +323,8 @@ static int
 vinstall(Vhtab*, Vhand*);
 static Vhand*
 vlookup(int, int);
+static void
+vgecaplimit(Ohand*, int);
 
 void
 vobjput(Vobj *o)
@@ -802,6 +804,8 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 {
 	Vhtab *t;
 	Vhand *h;
+	Vobj *src, *o;
+	Ohand *doh;
 	ulong gen;
 	int i;
 
@@ -817,7 +821,33 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 		gen = vnewgen();
 		if(gen == 0)
 			error("vobj: handle generation exhausted");
-		h = vhandalloc(vi->e[i].src->obj, nil, vi->e[i].rights);
+		src = vi->e[i].src->obj;
+		if(src->kind == VkindSpace){
+			/*
+			 * A bootstrap Space Ohand belongs to the boot owner.
+			 * An explicitly inherited Vexecute capability gets a
+			 * delegated caps=2 Space copy instead, so the child can
+			 * OEXECUTE under the rights it was actually granted.
+			 */
+			doh = oscopycapdelegate((Ohand*)src->priv,
+				((Ohand*)src->priv)->rights);
+			if(waserror()){
+				oshandput(doh);
+				nexterror();
+			}
+			vgecaplimit(doh, vi->e[i].rights);
+			o = vobjalloc(VkindSpace, src->space, 0);
+			if(o == nil)
+				error(Enomem);
+			o->provider = VopenSpace;
+			o->priv = doh;
+			o->space = ossid(doh);
+			o->oid = 0;
+			poperror();
+			h = vhandalloc(o, nil, vi->e[i].rights);
+			vobjput(o);
+		}else
+			h = vhandalloc(src, nil, vi->e[i].rights);
 		vi->e[i].gen = gen;
 		t->s[vi->e[i].slot].h = h;
 		t->s[vi->e[i].slot].gen = gen;
