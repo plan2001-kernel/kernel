@@ -15,7 +15,7 @@ qob_new_o_image() {
   MPEXEC="$QOB_MPY" "$T21_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
     "$T21_ROOT/tools/host/t21/process-checks.py" >"$logdir/mkovol.log" 2>&1
 }
-qob_main --no-build --tcg --timeout 240 --obootexec 0x4f45584543000003 \
+qob_main --no-build --accel kvm:tcg --timeout 240 --obootexec 0x4f45584543000003 \
   --output-dir "$T21_OUT" --expect '^T21-FINISH [0-9]+ PASS' "$@"
 python3 - "$T21_OUT/boot-boot.log" <<'PY'
 import re,sys
