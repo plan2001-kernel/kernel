@@ -69,7 +69,7 @@ persisted GE/O namespace object. A `Pgrp` owns a volatile `OContext` of
 authorized role/Handle bindings. Processes may share one `Pgrp`, copy its view
 with `RFNAMEG` or start a new empty view with `RFCNAMEG`. A newly created
 `Pgrp` owns a new `OContext`; its final reference releases that context.
-`OSPAWN` starts a fresh group whose delegated views/roles are explicitly
+`SPAWN(146)` starts a fresh group whose delegated views/roles are explicitly
 selected. These are runtime semantics implemented in the AMD64 full-system
 path, not a guarantee of ARM64 feature parity.
 
