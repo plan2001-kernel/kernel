@@ -42,6 +42,37 @@ GE/O revocation follows the existing shared origin: sibling copies of the
 same origin are affected, while independently opened grants to the same OID
 remain valid. Persistent object identity and bytes remain intact.
 
+## Process creation and capability inheritance
+
+Process creation and object-Handle inheritance are one explicit, atomic
+operation. `RFORKEX(143)` is ordinary `RFORK(19)` plus a bounded, versioned
+list of parent Handles and their rights attenuation; `RFORK(19)` itself never
+copies an object Handle. OSPAWN's existing `Oinherit`/`Oinheritv` options are
+translated into the same internal validation and commit path, so the two
+process-creation entry points cannot diverge.
+
+The complete Handle plan is validated against the parent before a child is
+published: each source Handle must be live, carry `Vdelegate`, not be a
+subscription, and the requested rights must be an equal or attenuated subset.
+Destination-slot conflicts are rejected. The parent's Handle table and
+reference counts are never mutated by the attempt. The child starts with an
+empty Handle table and receives only the declared entries; child Handles get
+fresh child-local generations, and RFORKEX returns the assigned numbers
+explicitly when the caller supplies an output array. The result is one child
+Handle per input entry, in input order; the same parent Handle may be listed
+more than once and then produces independent child Handles with independently
+attenuated rights. An ordinary `RFORK` or an unlisted Handle never crosses.
+
+OSPAWN's `stdoutpipe` names one parent Pipe. It must resolve to exactly one
+declared plan entry; an absent source or a source listed more than once is
+ambiguous and is rejected explicitly rather than silently selecting the first
+match.
+
+`OBJINVOKE` is not a configuration side channel for a later process creation:
+there is no one-shot inheritance mark. A provider-specific argument such as a
+UART mode or USB kind/mode is validation input to its opened Handle, not
+ambient authority and not a hidden process-creation option.
+
 ## Persistent namespace and set semantics (architectural target)
 
 The persistent relational namespace is a GE/O object with its own scoped OID.

@@ -124,7 +124,6 @@ struct Vhand {
 	Vobj	*obj;
 	Vsub	*sub;
 	int	rights;
-	int	inherit;	/* one-shot RFORK Pipe rights, 0 = none */
 };
 
 /* One endpoint of a native Pipe pair.  pipecorepair() accounts two endpoint
@@ -442,7 +441,6 @@ vhandinit(Vhand *h, Vobj *o, Vsub *s, int rights)
 	if(s != nil)
 		incref(&s->ref);
 	h->rights = rights;
-	h->inherit = 0;
 }
 
 static Vhand*
@@ -733,38 +731,145 @@ vobjprocexec(Proc *p)
 	vobjprocexit(p);
 }
 
-/* Explicit OSPAWN delegation: install a child handle for a parent Handle.
- * rights==0 copies the parent's rights; otherwise it must be a subset. */
+/*
+ * Shared process-creation Handle delegation.  RFORKEX and OSPAWN both build a
+ * bounded Vinhand request list; this validates the complete plan against the
+ * parent before any child is created and pins every source Vhand so neither
+ * its rights nor its object lifetime can change between validation and commit.
+ * The parent's handle table is never mutated.
+ */
 int
-vobjspawninherit(Proc *p, int handle, uvlong rights)
+vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 {
-	Vhand *src;
+	int i, slot, used[Vhandmax];
+	uvlong rights;
 	Vhand *h;
-	Vhtab *t;
-	int r;
 
-	if(p == nil)
+	if(vi == nil || n < 0 || n > Vhandmax || (n > 0 && list == nil))
 		error(Ebadarg);
-	src = vlookup(handle, Vdelegate);
-	if(src->sub != nil){vhandput(src);error("object: subscriptions cannot cross OSPAWN");}
-	if(rights == 0)
-		rights = src->rights;
-	if((rights & ~(uvlong)src->rights) != 0){
-		vhandput(src);
-		error(Eperm);
+	memset(vi, 0, sizeof *vi);
+	memset(used, 0, sizeof used);
+	/*
+	 * One function-wide cleanup path.  H holds at most the Handle currently
+	 * being validated; ownership moves to VI (and H is cleared) only after
+	 * every check passes.  On any error the current Handle is released once
+	 * and every previously pinned entry is released by vi release, which
+	 * also zeroes the plan so a caller's own error path cannot double-free.
+	 */
+	h = nil;
+	if(waserror()){
+		if(h != nil)
+			vhandput(h);
+		vobjinheritrelease(vi);
+		nexterror();
 	}
-	if((t = vtabfor(p, 1)) == nil){
-		vhandput(src);
-		error(Enomem);
+	for(i = 0; i < n; i++){
+		h = vlookup(list[i].handle, Vdelegate);
+		if(h->sub != nil)
+			error("object: subscriptions cannot be inherited");
+		rights = list[i].rights == 0 ? (uvlong)h->rights : list[i].rights;
+		if((rights & ~(uvlong)h->rights) != 0 ||
+		   (rights & ~(uvlong)Vall) != 0)
+			error(Eperm);
+		if(list[i].dstslot != 0){
+			slot = list[i].dstslot - 1;
+			if(slot < 0 || slot >= Vhandmax)
+				error(Ebadarg);
+		}else{
+			for(slot = 0; slot < Vhandmax; slot++)
+				if(!used[slot])
+					break;
+			if(slot == Vhandmax)
+				error("vobj: too many inherited handles");
+		}
+		if(used[slot])
+			error(Ebadarg);
+		used[slot] = 1;
+		vi->e[i].src = h;
+		vi->e[i].srchandle = list[i].handle;
+		vi->e[i].rights = (int)rights;
+		vi->e[i].slot = slot;
+		vi->e[i].gen = 0;
+		vi->n = i + 1;
+		h = nil;		/* VI owns the reference from here */
 	}
-	h = vhandalloc(src->obj, src->sub, (int)rights);
-	vhandput(src);
-	r = vinstall(t, h);
-	if(r < 0){
-		vhandput(h);
-		error("vobj: too many handles");
+	poperror();
+	return vi->n;
+}
+
+/* Install the validated plan into a child whose Handle table is empty.
+ * Fresh child-local generations are assigned so a parent Handle number never
+ * becomes valid in the child merely by coinciding with a destination slot. */
+void
+vobjinheritcommit(Proc *child, Vinherit *vi)
+{
+	Vhtab *t;
+	Vhand *h;
+	ulong gen;
+	int i;
+
+	if(child == nil)
+		error(Ebadarg);
+	if(vi == nil || vi->n == 0)
+		return;
+	if(child->vobjhandles != nil)
+		error(Ebadarg);
+	t = smalloc(sizeof *t);
+	child->vobjhandles = t;
+	for(i = 0; i < vi->n; i++){
+		gen = vnewgen();
+		if(gen == 0)
+			error("vobj: handle generation exhausted");
+		h = vhandalloc(vi->e[i].src->obj, nil, vi->e[i].rights);
+		vi->e[i].gen = gen;
+		t->s[vi->e[i].slot].h = h;
+		t->s[vi->e[i].slot].gen = gen;
 	}
-	return r;
+}
+
+/* Child Handle assigned to plan entry INDEX, or 0 when INDEX is out of range.
+ * The mapping is per entry, not per source, so a source listed more than once
+ * yields a distinct child Handle for each destination. */
+int
+vobjinheritchildhandle(Vinherit *vi, int index)
+{
+	if(vi == nil || index < 0 || index >= vi->n)
+		return 0;
+	return (int)((vi->e[index].gen << 8) | (vi->e[index].slot + 1));
+}
+
+/* Resolve a named parent Handle to its unique plan destination.  Returns the
+ * child Handle, 0 when the source is absent, or -1 when it appears more than
+ * once (ambiguous).  OSPAWN's stdoutpipe uses this and rejects both absent and
+ * ambiguous sources instead of silently choosing the first match. */
+int
+vobjinheritsrchandle(Vinherit *vi, int srchandle)
+{
+	int i, found;
+
+	found = -1;
+	for(i = 0; vi != nil && i < vi->n; i++){
+		if(vi->e[i].srchandle != srchandle)
+			continue;
+		if(found >= 0)
+			return -1;
+		found = i;
+	}
+	if(found < 0)
+		return 0;
+	return (int)((vi->e[found].gen << 8) | (vi->e[found].slot + 1));
+}
+
+void
+vobjinheritrelease(Vinherit *vi)
+{
+	int i;
+
+	if(vi == nil)
+		return;
+	for(i = 0; i < vi->n; i++)
+		vhandput(vi->e[i].src);
+	memset(vi, 0, sizeof *vi);
 }
 
 int
@@ -1659,125 +1764,6 @@ pipestream(Vpipe *vp, int op, void *buf, long n)
 	free(kb);
 	poperror();
 	return r;
-}
-
-/* Legacy PIPEINHERIT right bits: 1 read, 2 write, 3 both.  They attenuate a
- * one-shot RFPROC selection; they are not V-rights values. */
-int
-vobjpipeinherit(int handle, int rights)
-{
-	Vhand *h;
-	int map;
-
-	if(rights < 0 || (rights & ~3))
-		error(Ebadarg);
-	map = ((rights & 1) ? Vread : 0) | ((rights & 2) ? Vwrite : 0);
-	h = vlookup(handle, 0);
-	if(h->obj->kind != VkindPipe || h->sub != nil){
-		vhandput(h);
-		error(Eperm);
-	}
-	if((map & ~h->rights) != 0){
-		vhandput(h);
-		error(Eperm);
-	}
-	h->inherit = map;
-	vhandput(h);
-	return 0;
-}
-
-/* RFORK RFPROC: copy only explicitly marked Pipe endpoints into the child's
- * Vhand table, preserving the original slot and generation so the selected
- * Handle remains the same process-local number.  The mark is one-shot. */
-void
-vobjpipeprocfork(Proc *child)
-{
-	Vhtab *from, *to;
-	Vhand *h, *nh, *held[Vhandmax];
-	int i, n, rights[Vhandmax], slot[Vhandmax];
-	ulong gen[Vhandmax];
-
-	if(child == nil)
-		error(Ebadarg);
-	if((from = up->vobjhandles) == nil)
-		return;
-	to = smalloc(sizeof *to);
-	child->vobjhandles = to;
-	/*
-	 * vhandalloc() uses smalloc(), which may sleep in resrcwait() and
-	 * must not run while from->lk is held.  Pin the eligible source
-	 * Vhands and snapshot their marks under the lock, allocate and
-	 * publish the copies without it, then consume the one-shot marks.
-	 */
-	n = 0;
-	lock(&from->lk);
-	for(i = 0; i < Vhandmax; i++){
-		h = from->s[i].h;
-		if(h == nil || h->obj->kind != VkindPipe || h->inherit == 0)
-			continue;
-		incref(&h->ref);
-		held[n] = h;
-		slot[n] = i;
-		gen[n] = from->s[i].gen;
-		rights[n] = h->inherit;
-		n++;
-	}
-	unlock(&from->lk);
-	for(i = 0; i < n; i++){
-		nh = vhandalloc(held[i]->obj, nil, rights[i]);
-		lock(&to->lk);
-		to->s[slot[i]].h = nh;
-		to->s[slot[i]].gen = gen[i];
-		unlock(&to->lk);
-	}
-	lock(&from->lk);
-	for(i = 0; i < n; i++){
-		h = from->s[slot[i]].h;
-		if(h == held[i])
-			h->inherit = 0;
-	}
-	unlock(&from->lk);
-	for(i = 0; i < n; i++)
-		vhandput(held[i]);
-}
-
-/* OSPAWN's explicit Pipe list.  Unlike RFORK it uses this call's list and
- * never consumes a pending PIPEINHERIT mark. */
-void
-vobjpipespawn(Proc *child, int (*entries)[2], int n)
-{
-	Vhtab *to;
-	Vhand *h;
-	int k, i, rights, map;
-	ulong gen;
-
-	if(n <= 0)
-		return;
-	if(child == nil)
-		error(Ebadarg);
-	if(child->vobjhandles == nil)
-		child->vobjhandles = smalloc(sizeof(Vhtab));
-	to = child->vobjhandles;
-	for(k = 0; k < n; k++){
-		rights = entries[k][1];
-		if(rights <= 0 || (rights & ~3))
-			error(Ebadarg);
-		map = ((rights & 1) ? Vread : 0) | ((rights & 2) ? Vwrite : 0);
-		h = vlookup(entries[k][0], 0);
-		if(h->obj->kind != VkindPipe || (map & ~h->rights) != 0){
-			vhandput(h);
-			error(Ebadarg);
-		}
-		i = (entries[k][0] & 0xff) - 1;
-		gen = (ulong)entries[k][0] >> 8;
-		if(i < 0 || i >= Vhandmax || to->s[i].h != nil){
-			vhandput(h);
-			error(Ebadarg);
-		}
-		to->s[i].gen = gen;
-		to->s[i].h = vhandalloc(h->obj, nil, map);
-		vhandput(h);
-	}
 }
 
 void

@@ -12,6 +12,7 @@
 #ifndef NO_QSTR
 #include "../runtime/abi/vobj.h"
 #include "../runtime/abi/obj.h"
+#include "../runtime/abi/sys.h"
 #include <uartapi.h>
 #include <usbctl.h>
 #endif
@@ -72,6 +73,78 @@ static mp_obj_t p9_rfork(mp_obj_t flags) {
     return check(rfork(mp_obj_get_int(flags)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_rfork_obj, p9_rfork);
+
+/*
+ * rforkex(flags, handles=(), version=None, count=None) -> (pid, child handles)
+ *
+ * Each handles entry is (handle, rights) or (handle, rights, dstslot); a bare
+ * handle means "copy its rights to the lowest free child slot".  The optional
+ * version/count arguments exist only so a test can present a malformed
+ * options record; normal callers omit them.  In the child PID is 0 and the
+ * mapping tuple is empty (the parent learns the assigned numbers).
+ */
+static mp_obj_t p9_rforkex(size_t n, const mp_obj_t *a) {
+    struct Rforkex req;
+    unsigned long long map[RFORKEX_MAXHANDLES];
+    mp_obj_t it, item;
+    size_t have, want, i;
+    long r;
+
+    if(n < 1 || n > 4)
+        mp_raise_TypeError(MP_ERROR_TEXT("rforkex: 1 to 4 arguments"));
+    memset(&req, 0, sizeof req);
+    memset(map, 0, sizeof map);
+    req.version = RFORKEX_VERSION;
+    have = 0;
+    if(n > 1 && a[1] != mp_const_none) {
+        it = mp_getiter(a[1], NULL);
+        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            unsigned long long handle;
+            unsigned long long rights = 0;
+            unsigned long long dstslot = 0;
+
+            if(mp_obj_is_int(item)) {
+                handle = (unsigned long long)mp_obj_get_int(item);
+            } else {
+                size_t plen; mp_obj_t *pair;
+                mp_obj_get_array(item, &plen, &pair);
+                if(plen != 2 && plen != 3)
+                    mp_raise_ValueError(MP_ERROR_TEXT("rforkex: expected handle or (handle, rights[, dstslot])"));
+                handle = (unsigned long long)mp_obj_get_int(pair[0]);
+                rights = (unsigned long long)mp_obj_get_int(pair[1]);
+                if(plen == 3)
+                    dstslot = (unsigned long long)mp_obj_get_int(pair[2]);
+            }
+            if(have < RFORKEX_MAXHANDLES) {
+                req.h[have].handle = handle;
+                req.h[have].rights = rights;
+                req.h[have].dstslot = dstslot;
+            }
+            have++;
+        }
+    }
+    if(n > 2 && a[2] != mp_const_none)
+        req.version = (unsigned int)mp_obj_get_int(a[2]);
+    req.count = (unsigned int)have;
+    if(n > 3 && a[3] != mp_const_none)
+        req.count = (unsigned int)mp_obj_get_int(a[3]);
+    r = rforkex((unsigned long)mp_obj_get_int(a[0]), &req, map);
+    if(r < 0)
+        raise_err();
+    if(r == 0)
+        return mp_obj_new_tuple(2, (mp_obj_t[]){ mp_obj_new_int(0),
+            mp_obj_new_tuple(0, NULL) });
+    {
+        mp_obj_t child[RFORKEX_MAXHANDLES];
+        want = have < RFORKEX_MAXHANDLES ? have : RFORKEX_MAXHANDLES;
+        for(i = 0; i < want; i++)
+            child[i] = mp_obj_new_int_from_ull(map[i]);
+        mp_obj_t t[2] = { mp_obj_new_int(r),
+            mp_obj_new_tuple(want, child) };
+        return mp_obj_new_tuple(2, t);
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_rforkex_obj, 1, 4, p9_rforkex);
 
 /* Existing ENVGET syscall, bounded native bytes (no pathname getenv). */
 static mp_obj_t p9_envget(mp_obj_t name) {
@@ -179,11 +252,9 @@ static mp_obj_t p9_pipeclose(mp_obj_t h) {
     check(obj_close(mp_obj_get_int(h)));return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_pipeclose_obj,p9_pipeclose);
-static mp_obj_t p9_pipeinherit(mp_obj_t h,mp_obj_t rights) {
-    check(obj_pipe_inherit(mp_obj_get_int(h),(unsigned int)mp_obj_get_int(rights)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_pipeinherit_obj,p9_pipeinherit);
+/* Process creation declares Handle inheritance in the creation call itself
+ * (RFORKEX or the explicit OSPAWN options); there is no pipeinherit side
+ * channel that could arm a later fork. */
 /* The TCP6/UDP6 object interface and its Python adapters were removed.  The
  * supported network boundary is raw device frames/ObjectFIFO with userspace
  * protocol handling. */
@@ -923,10 +994,10 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_piperead), MP_ROM_PTR(&p9_piperead_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipeclose), MP_ROM_PTR(&p9_pipeclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pipeinherit), MP_ROM_PTR(&p9_pipeinherit_obj) },
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
     { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&p9_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rforkex), MP_ROM_PTR(&p9_rforkex_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },
     { MP_ROM_QSTR(MP_QSTR_sleep), MP_ROM_PTR(&p9_sleep_obj) },
     { MP_ROM_QSTR(MP_QSTR_time_ns), MP_ROM_PTR(&p9_time_ns_obj) },
@@ -1037,7 +1108,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_MODE_RDWR), MP_ROM_INT(OBJ_USB_MODE_RDWR) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_INHERIT), MP_ROM_INT(ObjOpPipeInherit) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_CTL), MP_ROM_INT(ObjOpUartCtl) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_STATUS), MP_ROM_INT(ObjOpUartStatus) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_KBD_LEDS), MP_ROM_INT(ObjOpKbdLeds) },
