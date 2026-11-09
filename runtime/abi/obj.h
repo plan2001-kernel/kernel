@@ -21,6 +21,8 @@
 
 #define OBJ_ABI_VERSION 1
 
+struct Ospawn;
+
 /* obj_open providers.  Numbers 1, 2, 3, 8, 10, 11, 12 and 14 are reserved
  * historical identifiers for the retired TCP6/UDP6 object interface, the old
  * ObjOpenGe alias, ObjOpenUart, ObjOpenKbd, ObjOpenUsb and the synthetic
@@ -60,29 +62,31 @@ enum {
 	ObjBindRemove		= 0x100,
 };
 
-/* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 20, 21, 22, 23, 24 and 35
- * are reserved historical identifiers for the retired TCP6/UDP6 object
- * interface, the handle-less process listing and UART count, ObjOpUsbList,
- * ObjOpUsbEpOpen, the one-shot Pipe RFORK selection, and the synthetic
- * ProcessSelf wait.  They have no dispatch handler.  Process handle
- * introspection is the direct bounded OBJLIST syscall and child wait is the
- * direct typed OBJWAIT syscall. */
+/* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23,
+ * 24, 33, 35 and 40 are reserved historical identifiers for the retired
+ * TCP6/UDP6 object interface, handle-less process listing/count, USB service
+ * list/endpoint open, the one-shot Pipe selection, the ProcessSelf wait, the
+ * former OSPAWN route and the UART/KBD/device-control operations that are now
+ * IOCTL(145).  They have no dispatch handler.
+ *
+ * Process Handle-table introspection is SYSCTL(144) SysctlHandleList; child
+ * wait is the direct typed PROCWAIT(142) call; spawn is the direct SPAWN(146)
+ * call; device control is IOCTL(145). */
 enum {
-	ObjOpInfo	= 1,
+	ObjOpInfo	= 1,	/* generic identity/type/size/rights metadata */
 	ObjOpRead	= 2,
 	ObjOpWrite	= 3,
-	ObjOpStat	= 4,
-	ObjOpSend	= 5,
-	ObjOpRecv	= 6,
+	ObjOpStat	= 4,	/* FIFO/subscription statistics only */
+	ObjOpSend	= 5,	/* FIFO publish */
+	ObjOpRecv	= 6,	/* FIFO receive one completed message */
 	ObjOpSubscribe	= 7,
 	ObjOpGrant	= 9,	/* RETIRED: OBJOPEN(ObjOpenHandle) */
-	ObjOpRevoke	= 10,
+	ObjOpRevoke	= 10,	/* GE/O capability revocation only */
 	ObjOpCreatePersist = 12,	/* RETIRED: OBJCREATE(ObjKindGe) */
-	ObjOpCommit	= 13,	/* Space/GE handle: commit pending writes */
+	ObjOpCommit	= 13,	/* Space transaction commit (via Space/GE handle) */
 	ObjOpPipePeer	= 16,	/* Pipe end 0: install and return the peer Handle */
-	ObjOpUartCtl	= 17,	/* UART handle: apply one bounded Uartcfg */
-	ObjOpUartStatus	= 18,	/* UART handle: read native status bytes */
-	ObjOpKbdLeds	= 19,	/* KBD handle: Vcontrol LED update */
+	/* 17, 18 and 19 are reserved: UART configuration/status and KBD LED
+	 * control moved to IOCTL(145). */
 	/* 20 and 21 are reserved: retired USB service list and endpoint open.
 	 * USB metadata and endpoint acquisition use ObjOpDeviceList and
 	 * ObjOpenDevice like every other supported device family. */
@@ -95,26 +99,32 @@ enum {
 	ObjOpErrstrExchange = 29,	/* RETIRED: direct ERRSTR(41) */
 	ObjOpNotifyRegister = 30,	/* RETIRED: direct NOTIFY(28) is used */
 	ObjOpNoted	= 31,	/* RETIRED: direct NOTED(29) is used */
-	ObjOpRfork	= 32,	/* RETIRED: direct RFORK(19) is used */
-	ObjOpOspawn	= 33,	/* Space handle + OID: spawn a static ELF child */
+	ObjOpRfork	= 32,	/* RETIRED: direct RFORKEX(143) is used */
+	ObjOpOspawn	= 33,	/* RETIRED: direct SPAWN(146) is used */
 	ObjOpOterminate	= 34,	/* RETIRED: direct OTERMINATE(93) is used */
 	ObjOpDeviceList = 37,	/* catalog: bounded discovery records */
 	ObjOpDeviceSend = 38,	/* device: one complete provider message */
-	ObjOpDeviceRecv = 39,	/* device: completed immutable bytes Handle */
-	ObjOpDeviceCtl = 40,	/* device: authorized provider-specific control */
+	ObjOpDeviceRecv = 39,	/* device: one USB completion Handle */
+	/* 40 is reserved: device control moved to IOCTL(145). */
 	ObjOpExit	= 36,	/* RETIRED: direct EXITS(8) is used */
 	ObjOpNamespaceCreate = 41,	/* selected roles -> sealed view Handle */
 	ObjOpNamespaceAttach = 42,	/* view Handle + mode -> attachment token */
 	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
 	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
+	ObjOpDeviceRx	= 45,	/* device: acquire the receive FIFO channel */
+	ObjOpFifoShutdown = 46,	/* FIFO handle: close the channel */
 };
 
-/* Classification after the OBJINVOKE pragmatization:
+/* Classification after the SYSCTL/IOCTL/object/scalar split:
  *  - Object-bound (real Handle + identity/rights/lifetime): GE/O read/write/
- *    commit, Space+OID PutOid/Ospawn, ObjectFIFO, namespace views, Pipe, UART,
- *    KBD, USB control sessions/endpoints and common device sessions.
- *  - Direct syscalls: process handle listing (OBJLIST) and child wait
- *    (OBJWAIT), because neither concerns a target object capability.
+ *    commit, Space+OID PutOid, ObjectFIFO, namespace views, Pipe, and common
+ *    device payload sessions (UART bytes, Ethernet frames, USB transfers).
+ *  - SYSCTL(144): system snapshot, own-process Handle list, environment,
+ *    privileged volume activation and own-process CPU/memory introspection.
+ *  - IOCTL(145): UART configuration/status, KBD LED control and supported
+ *    provider-specific device control.
+ *  - Direct primitives: SPAWN/EXITS/OTERMINATE/PROCWAIT, RFORKEX, memory,
+ *    time, synchronization, NOTIFY/NOTED and ERRSTR.
  *  - Discovery and opening: every supported physical family is an
  *    ObjOpDeviceList record opened through ObjOpenDevice with an authorized
  *    catalog Handle.  Selectors are hints, never authority.
@@ -171,9 +181,11 @@ typedef struct ObjDeviceOpenOptions {
 } ObjDeviceOpenOptions;
 
 /* Ethernet: complete L2 octets, including MACs/EtherType, excluding FCS.
- * SEND returns accepted bytes, not wire/DMA completion. RECV obtains the
- * existing ObjectFIFO capability; subscribe/receive use the ordinary OBJ
- * operations. No USB setup or synchronous USB completion is implied. */
+ * SEND returns accepted/enqueued bytes, not wire/DMA completion. RX
+ * (ObjOpDeviceRx) obtains the existing ObjectFIFO capability; subscribe/
+ * receive then use the ordinary OBJ operations.  Receiving the FIFO channel
+ * is distinct from retrieving one completed USB message.  No USB setup or
+ * synchronous USB completion is implied. */
 typedef struct ObjEtherRxMeta {
     unsigned int version;
     unsigned int controller;
@@ -227,10 +239,13 @@ typedef struct ObjOpenDeviceReq {
     unsigned char options[OBJ_DEVICE_OPTMAX];
 } ObjOpenDeviceReq;
 
-/* RECV installs one Vread|Vmeta|Vdelegate bytes Handle as result, and copies
- * this completion into out.  A failed install leaves the completion pending.
- * SEND completes synchronously and returns a positive session-local sequence.
- * Exactly one unreceived completion is permitted; another SEND is Einuse.
+/* USB control RECV (ObjOpDeviceRecv) installs one Vread|Vmeta|Vdelegate
+ * bytes Handle as result, and copies this completion into out.  A failed
+ * install leaves the completion pending.  A USB SEND completes
+ * synchronously and returns a positive session-local sequence; an Ethernet
+ * SEND returns accepted bytes.  ObjCall.aux carries the ObjDeviceSend*
+ * discriminator so the two meanings are never silently interchangeable.
+ * Exactly one unreceived USB completion is permitted; another SEND is Einuse.
  * USB input is the original 8-byte setup followed by exactly wLength OUT
  * bytes (none for IN).  IN response may be shorter than wLength.  OUT's
  * completion is an empty immutable bytes object.  Errors use kernel errstr;
@@ -333,13 +348,12 @@ typedef struct ObjOpenGeSpaceReq {
  * RFORKEX(143) call, whose options record declares the crossing Handles and
  * their rights in the same atomic operation as child creation. */
 
-/* obj_invoke(ObjOpKbdLeds): set the shared keyboard LED state through an
+/* IOCTL IoctlKbdLeds: set the shared keyboard LED state through an
  * authorized KBD Handle carrying Vcontrol.  Authorization is the Handle
  * capability, not a repeated identity check: a legitimately delegated
  * Vcontrol Handle remains usable by a non-privileged child.  Handle 0 is
- * rejected, so LED state is never a global-handle privilege bypass.
- * in/out and their lengths must be zero; arg0 carries the LED bits.  The
- * result is 0. */
+ * rejected, so LED state is never a global-handle privilege bypass.  The
+ * request carries the LED bits in arg0 and no data buffer. */
 
 /*
  * One typed, versioned INVOKE request/response.
@@ -367,44 +381,36 @@ typedef struct ObjCall {
 	unsigned int		reserved;
 } ObjCall;
 
-/* RFORK(19) and OTERMINATE(93) are direct historical syscalls.  RFORK keeps
- * the RFPROC child/PID return and the group-only form; OTERMINATE keeps the
- * direct-child, parentpid, kp and exiting checks.  Child wait is the direct
- * typed OBJWAIT syscall; none of these has an OBJINVOKE variant. */
-#define OBJ_WAITMSG_MAX 128
+/* RFORKEX(143), SPAWN(146), OTERMINATE(93), EXITS(8) and PROCWAIT(142) are
+ * direct primitives.  RFORKEX keeps the RFPROC child/PID return and the
+ * group-only form; OTERMINATE keeps the direct-child, parentpid, kp and
+ * exiting checks.  Child wait is the direct typed PROCWAIT call; none of
+ * these has an OBJINVOKE variant. */
+#define PROCWAIT_MSG_MAX 128
 
-typedef struct ObjWait {
+typedef struct ProcWait {
 	long long		pid;
 	unsigned long long	time[3];	/* user, sys, real (ms) */
 	unsigned int		msglen;		/* bytes in msg, no NUL */
 	unsigned int		reserved;
-	char			msg[OBJ_WAITMSG_MAX];
-} ObjWait;
+	char			msg[PROCWAIT_MSG_MAX];
+} ProcWait;
 
-/* obj_invoke(ObjOpOspawn): create one static x86-64 ELF child from an
- * explicit GE/O Space capability and OID.  The provider Handle must be a
- * VkindSpace Handle carrying Vexecute; the same Ohand Oexecute gate and
- * per-Space authorization used by OSPAWN remain in force.  The request is
- * copied from user memory, and argv/options are validated exactly as the
- * former OSPAWN(92) validated them, including the Ospawn and optional
+/* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
+ * struct Ospawn *options) creates one static x86-64 ELF child from an
+ * explicit GE/O Space capability and OID.  The Handle must be a VkindSpace
+ * Handle carrying Vexecute; the same Ohand Oexecute gate and per-Space
+ * authorization as OEXECUTE remain in force.  argv/options are validated by
+ * the shared spawn core, including the Ospawn and optional
  * Oinherit/Oinheritv blocks.  The child receives the same registers, stack,
  * argv, CPU affinity, memory budget, namespace/view, Pipe, environment and
  * Vhand inheritance semantics.  The result is the child PID. */
-typedef struct ObjOspawnReq {
-	unsigned long long	oid;
-	char			**argv;
-	long			argc;
-	unsigned int		flags;		/* must be zero */
-	unsigned int		reserved;
-	struct Ospawn		*options;	/* optional, layout unchanged */
-} ObjOspawnReq;
 
 #define OBJ_EXITMSG_MAX 128
 
-/* Process-lifecycle adapters.  Wait is the direct typed OBJWAIT syscall;
- * OSPAWN remains an explicit Space+OID object operation; rfork, oterminate
- * and exits use their direct historical syscalls. */
-long obj_wait(ObjWait *w);
+/* Process-lifecycle adapters.  Wait is the direct typed PROCWAIT call;
+ * spawn is the direct SPAWN call; rfork, oterminate and exits are direct. */
+long proc_wait(ProcWait *w);
 long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options);
 
@@ -428,6 +434,9 @@ long obj_put_oid(int space, unsigned long long oid, void *buf,
 		unsigned long long len);
 long obj_commit(int handle, unsigned long long *version);
 
+/* READ/WRITE accept only timeout 0, which preserves the provider's existing
+ * blocking behavior.  A finite timeout is rejected explicitly because no
+ * current provider implements one; it is never silently ignored. */
 long obj_read(int handle, void *buf, unsigned long long len,
 		unsigned long long timeout);
 /* A persistent GE READ also returns the O version it read in *version.
@@ -445,13 +454,20 @@ long obj_publish(int fifo, int object, void *env, unsigned long long envlen);
 long obj_receive(int subscription, void *env, unsigned long long envcap,
 		unsigned long long timeout, unsigned long long *got);
 long obj_grant(int handle, unsigned long long rights);
+/* GE/O capability revocation only.  Closing a FIFO channel is a distinct
+ * operation (obj_fifo_shutdown); it is not capability revocation. */
 long obj_revoke(int handle);
-/* Direct bounded process introspection (OBJLIST), not an INVOKE operation.
- * It reports only the caller's own handle table; it never names another
- * process or copies a capability. */
+long obj_fifo_shutdown(int handle);
+/* Own-process Handle-table introspection over SYSCTL, not an INVOKE
+ * operation.  It reports only the caller's own table and copies at most
+ * count records.  It returns the total live count, so an undersized buffer
+ * is safe; *copied (when non-NULL) receives the number actually copied. */
 long obj_list(void *records, unsigned long long count);
+long obj_list_count(void *records, unsigned long long count,
+		unsigned long long *copied);
 
-/* Native byte-stream providers over the same five-call ABI. */
+/* Native byte-stream providers over the same five-call ABI.  Device control
+ * (UART configuration/status, KBD LEDs) is IOCTL(145), not OBJINVOKE. */
 long obj_pipe_create(ObjId *out);
 long obj_pipe_peer(int handle);
 long obj_uart_ctl(int handle, void *cfg);
@@ -472,9 +488,31 @@ long obj_device_open(int catalog, unsigned int family, int selector0,
 long obj_catalog_device_open(unsigned int family, int selector0,
 		int selector1, unsigned long long rights, void *options,
 		unsigned long long optlen);
+
+/* Device SEND result kinds.  An Ethernet SEND reports accepted/enqueued L2
+ * bytes; a USB control SEND reports a session-local completion sequence.
+ * They are never silently interchangeable. */
+enum {
+	ObjDeviceSendAcceptedBytes	= 1,
+	ObjDeviceSendSequence		= 2,
+};
+
 long obj_device_send(int device, void *message, unsigned long long length);
+long obj_device_send_kind(int device, void *message, unsigned long long length,
+		unsigned int *kind);
+/* USB control completion retrieval: one completed immutable bytes Handle. */
 long obj_device_recv(int device, ObjDeviceResult *completion);
-long obj_device_ctl(int device, unsigned int operation, void *data,
+/* Ethernet receive-channel acquisition: one ObjectFIFO capability Handle.
+ * This is not a completed-message receive. */
+long obj_device_rx(int device);
+/* Typed device control over IOCTL(145). */
+long obj_device_ioctl(int device, unsigned int operation, void *data,
+		unsigned long long len, unsigned long long arg0);
+long obj_device_usb_global_ctl(int catalog, unsigned int request, void *data,
 		unsigned long long len);
+long obj_device_usb_ep_ctl(int endpoint, unsigned int request, void *data,
+		unsigned long long len);
+long obj_device_usb_clear_halt(int device);
+long obj_device_ether_detach(int device);
 
 #endif /* PLAN2001_ABI_OBJ_H */

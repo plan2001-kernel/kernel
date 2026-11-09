@@ -246,7 +246,7 @@ d=next(h for h,i in info if i[8]==14)
 go=next(h for h,i in info if i[8]==6 and i[10]&1)
 out=next(h for h,i in info if i[8]==6 and i[10]&256)
 p.obj_write(out,b'READY')
-assert p.obj_read(go,1,5000)==b'G'
+assert p.obj_read(go,1,0)==b'G'
 count=0
 for attempt in range(256):
     try:
@@ -273,7 +273,7 @@ p.obj_write(out,b'DONE 12')
         vhandles=((peripheral,14),(go_read,9),(wr,264)))
     p.obj_close(go_read)
     p.obj_close(wr)
-    ok(p.obj_read(rd,5,10000)==b'READY', 'independent child ready on shared session')
+    ok(p.obj_read(rd,5,0)==b'READY', 'independent child ready on shared session')
     p.obj_write(go_write,b'G')
     p.obj_close(go_write)
     count = 0
@@ -292,7 +292,7 @@ p.obj_write(out,b'DONE 12')
             break
         p.sleep(2)
     ok(count==12, 'parent completes concurrent peripheral transfers')
-    ok(p.obj_read(rd,7,10000)==b'DONE 12', 'child completes concurrent peripheral transfers')
+    ok(p.obj_read(rd,7,0)==b'DONE 12', 'child completes concurrent peripheral transfers')
     reaped, status = p.wait()
     ok(reaped==pid and status=='', 'exact successful child PID and exit status')
     p.obj_close(rd)
@@ -313,11 +313,11 @@ p.obj_write(out,b'SENT')
         vhandles=((peripheral,14),(go_read,9),(wr,264)))
     p.obj_close(go_read)
     p.obj_close(wr)
-    assert p.obj_read(rd,5,10000)==b'READY'
+    assert p.obj_read(rd,5,0)==b'READY'
     p.obj_close(peripheral)
     p.obj_write(go_write,b'G')
     p.obj_close(go_write)
-    assert p.obj_read(rd,4,10000)==b'SENT'
+    assert p.obj_read(rd,4,0)==b'SENT'
     reaped, status = p.wait()
     ok(reaped==pid and status=='', 'last-owner process exits with pending completion')
     p.obj_close(rd)

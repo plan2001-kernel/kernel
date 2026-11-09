@@ -13,7 +13,7 @@
 
 #include	<a.out.h>
 
-/* ge/storage/sysgefs.c: bounded published-object read for OSPAWN. */
+/* ge/storage/sysgefs.c: bounded published-object read for spawn/exec. */
 extern long osgetobject(int, uvlong, uchar**, long, uvlong*);
 
 static void
@@ -23,7 +23,7 @@ abortion(void)
 }
 
 /*
- * Shared RFORK core.  The direct RFORK(19) and RFORKEX(143) entries use this
+ * Shared fork core.  RFORKEX(143) and its empty-plan wrapper use this
  * function, so forkchild, resource copying, rollback and parent/child
  * linkage cannot diverge.  The caller has already validated the Handle or
  * the raw syscall boundary; this function validates only the flag word and
@@ -258,7 +258,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	}
 
 	/* Only the validated explicit plan crosses this fork.  An ordinary
-	 * RFORK has no plan, so the child keeps its empty handle table. */
+	 * An empty plan means the child keeps its empty handle table. */
 	if(vi != nil)
 		vobjinheritcommit(p, vi);
 	procfork(p);
@@ -291,15 +291,8 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	return pid;
 }
 
-/* Ordinary RFORK: no object Handle ever crosses. */
-ulong
-kernrfork(ulong flag)
-{
-	return kernrforkcore(flag, nil);
-}
-
 /*
- * RFORKEX: ordinary RFORK flags plus one bounded, explicit Handle plan.  The
+ * RFORKEX: ordinary fork flags plus one bounded, explicit Handle plan.  The
  * complete plan is validated and pinned before a child exists; the child is
  * published only after every resource copy succeeds.  On failure the parent's
  * Handle table and reference counts are unchanged.  Assigned child Handles
@@ -956,18 +949,18 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
 }
 
 /*
- * OSPAWN: create a real child from a published static x86-64 ELF.
+ * Shared spawn: create a real child from a published static x86-64 ELF.
  * The caller's Space handle is used only to read the image. The child
  * gets fresh segments and Egrp plus only the explicitly selected O view,
  * Pipe handles, environment and UDP6 permit. CPU placement is applied
  * before ready(). OTERMINATE may only interrupt a direct child.
  */
 /*
- * Shared OSPAWN core.  The explicit GE/O Space capability is supplied by
- * the caller: the retired OSPAWN(92) number resolved a native process-local
- * handle first, while OBJINVOKE(ObjOpOspawn) passes the pinned Ohand from a
- * VkindSpace Handle.  Everything else (ELF validation, argv, Ospawn/
- * Oinherit layout, budgets, CPU pinning and child setup) is unchanged.
+ * Shared spawn core.  The explicit GE/O Space capability is supplied by the
+ * caller: SPAWN(146) and OEXECUTE both resolve the pinned Ohand from a
+ * VkindSpace Handle before reaching this core.  Everything else (ELF
+ * validation, argv, Ospawn/Oinherit layout, budgets, CPU pinning and child
+ * setup) is unchanged.
  */
 long
 kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
@@ -1115,7 +1108,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		for(i = 0; i < (int)inhv->nhandles; i++)
 			if(inhv->h[i].rights & ~(uvlong)Vall) error(Ebadarg);
 	}
-	/* Translate both OSPAWN delegation lists into the one shared plan.
+	/* Translate both spawn delegation lists into the one shared plan.
 	 * vhandles are explicit Handle/rights pairs; the legacy Pipe list is an
 	 * explicit Handle/read-write pair with the same attenuation rules. */
 	if(inhv != nil){
@@ -1378,7 +1371,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	up->nchild++;
 	unlock(&up->exl);
 
-	print("o: OSPAWN pid=%lud oid=%#llux cpu=%d\n", pid, oid, cpu);
+	print("o: SPAWN pid=%lud oid=%#llux cpu=%d\n", pid, oid, cpu);
 	poperror();
 
 	ready(p);
@@ -1484,17 +1477,12 @@ sysnoted(sysva_list list)
 	return NOTED_RET;
 }
 
-uintptr
-sysrfork(sysva_list list)
-{
-	return kernrfork((ulong)sysva_arg(list, long));
-}
-
 /*
- * RFORKEX(143): direct atomic fork with explicit, validated object-Handle
- * delegation.  Only the declared entries cross; the caller learns each
- * assigned child Handle from the optional childhandles array.  The parent's
- * table is never modified.
+ * RFORKEX(143): the one canonical direct fork boundary, with explicit and
+ * validated object-Handle delegation.  Only the declared entries cross; the
+ * caller learns each assigned child Handle from the optional childhandles
+ * array.  The parent's table is never modified.  A NULL options pointer is
+ * the empty plan (count 0); it is not an error.
  */
 uintptr
 sysrforkex(sysva_list list)
@@ -1510,17 +1498,19 @@ sysrforkex(sysva_list list)
 	flag = (ulong)sysva_arg(list, uvlong);
 	uopt = sysva_arg(list, struct Rforkex*);
 	uch = sysva_arg(list, uvlong*);
-	if(uopt == nil)
-		error(Ebadarg);
-	validaddr((uintptr)uopt, 2*sizeof(unsigned int), 0);
 	memset(&opt, 0, sizeof opt);
-	memmove(&opt, uopt, 2*sizeof(unsigned int));
-	if(opt.version != RFORKEX_VERSION || opt.count > RFORKEX_MAXHANDLES)
-		error(Ebadarg);
-	if(opt.count > 0){
-		validaddr((uintptr)&uopt->h[0],
-			opt.count*sizeof opt.h[0], 0);
-		memmove(opt.h, &uopt->h[0], opt.count*sizeof opt.h[0]);
+	if(uopt != nil){
+		validaddr((uintptr)uopt, 2*sizeof(unsigned int), 0);
+		memmove(&opt, uopt, 2*sizeof(unsigned int));
+		if(opt.version != RFORKEX_VERSION ||
+		   opt.count > RFORKEX_MAXHANDLES)
+			error(Ebadarg);
+		if(opt.count > 0){
+			validaddr((uintptr)&uopt->h[0],
+				opt.count*sizeof opt.h[0], 0);
+			memmove(opt.h, &uopt->h[0],
+				opt.count*sizeof opt.h[0]);
+		}
 	}
 	if(uch != nil && opt.count > 0)
 		validaddr((uintptr)uch, opt.count*sizeof *uch, 1);
@@ -1535,6 +1525,37 @@ sysrforkex(sysva_list list)
 	}
 	pid = kernrforkex(flag, list_, (int)opt.count, uch);
 	return pid;
+}
+
+/*
+ * SPAWN(146): direct child creation from an explicit authorized Space
+ * Handle and OID.  It shares the exact spawn core (and therefore the
+ * Oexecute gate) with OEXECUTE and the retired OSPAWN options layout.
+ */
+uintptr
+sysspawn(sysva_list list)
+{
+	Ohand *soh;
+	char **argv;
+	struct Ospawn *opt;
+	uvlong oid;
+	long pid;
+	int space, argc;
+
+	space = (int)sysva_arg(list, int);
+	oid = sysva_arg(list, uvlong);
+	argv = sysva_arg(list, char**);
+	argc = (int)sysva_arg(list, int);
+	opt = sysva_arg(list, struct Ospawn*);
+	soh = vobjholdohand(space, VkindSpace, Vexecute);
+	if(waserror()){
+		oshandput(soh);
+		nexterror();
+	}
+	pid = kernospawn(soh, oid, argv, argc, opt);
+	poperror();
+	oshandput(soh);
+	return (uintptr)pid;
 }
 
 uintptr
@@ -2214,8 +2235,9 @@ sys_nsec(sysva_list list)
  * Traps are kept in a bounded kernel buffer and dumped only at explicit
  * checkpoints.  The regular serial stream therefore keeps its normal prompt
  * framing while the measurement still carries every trap's sequence, PID,
- * program class, number, dispatch state and user PC.  SYSSNAPSHOT (107) is
- * the measurement checkpoint call and is deliberately not counted.
+ * program class, number, dispatch state and user PC.  The checkpoint call is
+ * SYSCTL SysctlSnapshot and is deliberately not treated as a separate
+ * measurement event.
  */
 enum {
 	TraceMax	= 32768,
@@ -2302,7 +2324,7 @@ syscalltraceret(Sargs *args, ulong scallnr, int kind)
 		off = 48;
 	else
 		switch(scallnr){
-		case OVOLOPEN:	off = 24; break;
+		case SYSCTL:	off = 40; break;
 		case OBJOPEN:	off = 48; break;
 		case OSPACEGET:
 		case OSPACEPUT:
@@ -2332,8 +2354,6 @@ syscalltrace(Sargs *args, ulong scallnr, uintptr pc)
 		syscalltracedump("boot-loader");
 		tracebootdumped = 1;
 	}
-	if(scallnr == SYSSNAPSHOT)
-		return;
 	state = 2;
 	if(scallnr < nsyscall){
 		if(systab[scallnr] != nil)

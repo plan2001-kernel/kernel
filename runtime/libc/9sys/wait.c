@@ -3,7 +3,7 @@
 #include "../../abi/obj.h"
 
 /*
- * WAIT/AWAIT use the direct typed OBJWAIT syscall now.  The kernel returns
+ * WAIT/AWAIT use the direct typed PROCWAIT syscall now.  The kernel returns
  * one bounded record (pid, user/sys/real time and the exact status text);
  * these adapters keep the historical libc APIs.  await() formats the same
  * five fields as before, while wait() allocates the historical Waitmsg with
@@ -13,11 +13,11 @@
 int
 await(char *buf, int n)
 {
-	ObjWait w;
+	ProcWait w;
 
 	if(buf == nil || n <= 0)
 		return -1;
-	if(obj_wait(&w) < 0)
+	if(proc_wait(&w) < 0)
 		return -1;
 	return snprint(buf, n, "%d %lud %lud %lud %q",
 		(int)w.pid,
@@ -28,11 +28,11 @@ await(char *buf, int n)
 Waitmsg*
 wait(void)
 {
-	ObjWait w;
+	ProcWait w;
 	Waitmsg *m;
 	int l;
 
-	if(obj_wait(&w) < 0)
+	if(proc_wait(&w) < 0)
 		return nil;
 	l = w.msglen + 1;
 	m = malloc(sizeof(Waitmsg) + l);

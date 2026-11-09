@@ -34,7 +34,7 @@ structure of authorized object-role bindings, **not** a persistent GE/O object
 and not an OID. Following Plan 9's process-group lifecycle semantics, a child
 may share its parent's `Pgrp` by default, get a copy with `RFNAMEG`, or start
 with an empty view with `RFCNAMEG`. A newly created `Pgrp` has its own
-`OContext`. `OSPAWN` creates a fresh group and can populate it from explicitly
+`OContext`. `SPAWN` creates a fresh group and can populate it from explicitly
 selected delegated roles/views. Namespace ownership is not necessarily
 one-to-one with processes: shared groups remain alive while referenced, and
 the last owning reference releases their runtime view.

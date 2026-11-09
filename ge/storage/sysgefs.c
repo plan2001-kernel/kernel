@@ -1,6 +1,6 @@
 /*
  * NATIVE GE/O KERNEL INTERFACE: the kernel-side native O syscalls
- * (sysovolopen/sysoexecute) implemented below, the internal Ohand
+ * (osvolumeopen/sysoexecute) implemented below, the internal Ohand
  * authority and the exported GE shutdown hook.  There is no Dev, no
  * filesystem root and no plan9.ini root= or getest/otest/oobj mount
  * path: nothing here presents objects as files.
@@ -255,16 +255,18 @@ ovolopenblk(char *spec, char *dev, int ndev, vlong *off, vlong *size, int rw)
 	return oopenblk(dev, b, *off, *size, rw, oblockrw, oblockflush);
 }
 
-uintptr
-sysovolopen(sysva_list list)
+/*
+ * Privileged bootstrap/administrative volume activation.  SYSCTL calls this
+ * with the already validated user pointer and length; the existing
+ * PARTUUID, boot-owner and non-formatting checks are unchanged.
+ */
+long
+osvolumeopen(char *p, int n)
 {
-	char *p, *spec, dev[64];
+	char *spec, dev[64];
 	vlong off, size;
 	void *v;
-	int n;
 
-	p = sysva_arg(list, char*);
-	n = sysva_arg(list, int);
 	if(n <= 0 || n > 256)
 		error(Ebadarg);
 	validaddr((uintptr)p, n, 0);

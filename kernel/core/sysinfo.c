@@ -121,17 +121,21 @@ zerofill(void *va, long n)
 
 /* UJ1 fixed read-only status snapshot: version, CPUs, physical/user bytes,
  * native O partition capacity. No kernel pointers or approximate free space.
- * Word 5 is reserved (formerly the removed native TCP6 endpoint count). */
+ * Word 5 is reserved (formerly the removed native TCP6 endpoint count).
+ * SYSCTL SysctlSnapshot: the caller supplies exactly seven uvlong words. */
 extern uvlong ovolcapacity(void);
-uintptr
-syssyssnapshot(sysva_list list)
+long
+sysctlsnapshot(void *user, uvlong n)
 {
- uvlong *user=sysva_arg(list,uvlong*),v[7];
+ uvlong v[7];
+
+ if(user == nil || n != sizeof v)
+  error(Ebadarg);
+ validaddr((uintptr)user,sizeof v,1);
 #ifdef PLAN2001_SYSCALL_TRACE
  extern void syscalltracedump(char*);
  syscalltracedump("snapshot");
 #endif
- validaddr((uintptr)user,sizeof v,1);
  v[0]=1;v[1]=conf.nmach;v[2]=(uvlong)conf.npage*BY2PG;
  v[3]=(uvlong)conf.upages*BY2PG;v[4]=ovolcapacity();v[5]=0;
  lock(&palloc.lk);v[6]=(uvlong)palloc.freecount*BY2PG;unlock(&palloc.lk);

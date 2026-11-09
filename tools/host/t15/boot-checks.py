@@ -15,7 +15,7 @@ def run():
     entries=[e for e in p.obj_device_list(cat) if e[1]==2]
     ok(len(entries)==1,'existing raw Ethernet device discovery')
     d=p.obj_device_open(cat,2,entries[0][2],0)
-    rx,_,_,_=p.obj_device_recv(d)
+    rx=p.obj_device_rx(d)
     ctl,out=p.obj_fifocreate(4),p.obj_fifocreate(4)
     response=p.obj_subscribe(out,12,4)
     code=p.obj_create(NODE_SOURCE.encode())

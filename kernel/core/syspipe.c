@@ -3,8 +3,8 @@
  *
  * The Pipe provider is a VkindPipe capability in the process-local Vhand
  * table; there is no separate Pipehtab and no raw syscall entry point here.
- * OBJCREATE/OBJINVOKE/OBJCLOSE and OSPAWN drive the provider in sysvobj.c.
- * This file keeps only the RFORK/exec/exit, OSPAWN and bootstrap-output
+ * OBJCREATE/OBJINVOKE/OBJCLOSE and SPAWN drive the provider in sysvobj.c.
+ * This file keeps only the fork/exec/exit, spawn and bootstrap-output
  * hooks the core calls.  Pipe stays a blocking byte stream, not an
  * ObjectFIFO and not a file descriptor.
  */

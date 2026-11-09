@@ -22,6 +22,46 @@ object/resource lifetimes coherently.
 from obsolete syscall inventories or try to meet a fixed count. The design
 permits direct process/scalar calls when adding an object would not help.
 
+## Operation groups and authority
+
+Every active operation has exactly one owning group. The group is chosen by
+responsibility and authority, not by argument count:
+
+- **SYSCTL (144)** — system or own-process configuration and introspection.
+  It owns the system snapshot, the caller's own Handle-table listing, process
+  environment operations, privileged bootstrap volume activation and
+  own-process CPU-affinity/memory-budget introspection. It does not transfer
+  object data, mutate namespace bindings, create or wait for children, or
+  issue device commands. Privileged mutations keep their existing authority
+  (the boot owner for volume activation).
+- **IOCTL (145)** — device configuration, control and device-specific status,
+  authorized by a device Handle with per-operation rights: UART
+  configuration/status, KBD LED control, USB provider administration and
+  Ethernet status/detach. Read-only status and mutating control require
+  distinct rights. Opening/closing devices and payload I/O stay in objects.
+- **Objects (136–140)** — resource creation/open/close, capability grants,
+  bindings, namespace views, content and message transport, and storage
+  transactions.
+- **Direct primitives** — `SPAWN`, `OEXECUTE`, `EXITS`, `OTERMINATE`,
+  `PROCWAIT`, `RFORKEX`, memory (`BRK_`, `SEGBRK`, `SEGATTACH`/`DETACH`/
+  `FREE`/`FLUSH`), time (`_NSEC`, `SLEEP`, `ALARM`), synchronization
+  (`RENDEZVOUS`, `SEMACQUIRE`/`TSEMACQUIRE`/`SEMRELEASE`),
+  `NOTIFY`/`NOTED` and `ERRSTR`. They may take structured arguments or
+  authorized Handles but do not create a target-object capability.
+
+`sysctl(scope, operation, SysctlReq*, size)` and
+`ioctl(handle, operation, IoctlReq*, size)` use fixed-width, versioned,
+bounded request records. The kernel validates version, reserved fields,
+nested pointers, lengths and operation numbers, and rejects an unknown
+operation. No textual command language or pathname-like tree is introduced.
+Selection, a PID/OID, an operation number or a requested rights mask never
+creates authority.
+
+Read and write take no provider timeout: timeout zero keeps the provider's
+existing blocking behavior, and a finite value is rejected explicitly rather
+than silently ignored. ObjectFIFO receive keeps its separate bounded
+timeout/non-blocking/infinite semantics.
+
 ## Runtime process namespaces and lifecycle
 
 The active process namespace follows Plan 9's `Pgrp` lifecycle model, not a
@@ -47,20 +87,24 @@ Each namespace role holds one authorized object Handle. `OBJBIND` checks
 delegation rights and can attenuate them; `OBJOPEN(ObjOpenBinding)` opens that
 role through the same path for GE/O, FIFO, and other object kinds. Closing a
 Handle releases one reference. `OBJBIND(ObjBindRemove)` removes a name without
-invalidating Handles already opened from it. `OBJINVOKE(ObjOpRevoke)` revokes
-GE/O authority and its derived copies, or closes a FIFO with `Vcontrol`.
-GE/O revocation follows the existing shared origin: sibling copies of the
-same origin are affected, while independently opened grants to the same OID
-remain valid. Persistent object identity and bytes remain intact.
+invalidating Handles already opened from it. `OBJINVOKE(ObjOpRevoke)` revokes GE/O authority and its derived copies.
+ObjectFIFO shutdown is the separate `OBJINVOKE(ObjOpFifoShutdown)` transport
+operation; closing one Handle only releases its reference and never revokes
+another resource. GE/O revocation follows the existing shared origin: sibling
+copies of the same origin are affected, while independently opened grants to
+the same OID remain valid. Persistent object identity and bytes remain intact.
 
 ## Process creation and capability inheritance
 
 Process creation and object-Handle inheritance are one explicit, atomic
-operation. `RFORKEX(143)` is ordinary `RFORK(19)` plus a bounded, versioned
-list of parent Handles and their rights attenuation; `RFORK(19)` itself never
-copies an object Handle. OSPAWN's existing `Oinherit`/`Oinheritv` options are
-translated into the same internal validation and commit path, so the two
-process-creation entry points cannot diverge.
+operation. `RFORKEX(143)` is the canonical fork boundary: ordinary fork flags
+plus a bounded, versioned list of parent Handles and their rights attenuation.
+An ordinary fork is the libc `rfork()` wrapper with an empty Handle plan; the
+historical `RFORK(19)` number is reserved and never copies an object Handle.
+`SPAWN(146)` is the direct child-creation call taking an authorized Space
+Handle and OID, consistent with `OEXECUTE`. The `Oinherit`/`Oinheritv` options
+are translated into the same internal validation and commit path, so the
+entry points cannot diverge.
 
 Namespace-group sharing/copying/creation is a separate decision from
 Handle-capability inheritance. Sharing a `Pgrp` must not imply that a child
@@ -78,14 +122,14 @@ fresh child-local generations, and RFORKEX returns the assigned numbers
 explicitly when the caller supplies an output array. The result is one child
 Handle per input entry, in input order; the same parent Handle may be listed
 more than once and then produces independent child Handles with independently
-attenuated rights. An ordinary `RFORK` or an unlisted Handle never crosses.
+attenuated rights. An ordinary fork or an unlisted Handle never crosses.
 
-OSPAWN's `stdoutpipe` names one parent Pipe. It must resolve to exactly one
+SPAWN's `stdoutpipe` names one parent Pipe. It must resolve to exactly one
 declared plan entry; an absent source or a source listed more than once is
 ambiguous and is rejected explicitly rather than silently selecting the first
 match.
 
-`OBJINVOKE` is not a configuration side channel for a later process creation:
+`OBJINVOKE`/`SYSCTL`/`IOCTL` are not configuration side channels for a later process creation:
 there is no one-shot inheritance mark. A provider-specific argument such as a
 UART mode or USB kind/mode is validation input to its opened Handle, not
 ambient authority and not a hidden process-creation option.
@@ -142,6 +186,8 @@ supported physical families (UART, PS/2 keyboard, Ethernet, USB control and
 USB endpoints) are discovered with `ObjOpDeviceList` and opened with
 `ObjOpenDevice` through an authorized catalog Handle. Device selectors are
 hints, never authority; options and rights are validated before acquisition.
+Device configuration/control uses `IOCTL`; byte, frame and transfer payload
+stay on the object interface.
 
 ObjectFIFO is the common capability-aware transport for framed messages and
 IPC. Frame bytes and transport metadata should remain separate from object
@@ -153,8 +199,14 @@ The current device integration distinguishes provider semantics:
   session-owned pending response; do not claim that this is universal FIFO
   completion behavior.
 - Raw Ethernet transmission reports accepted/enqueued L2 bytes, not physical
-  completion. Receive frames are exposed as immutable message objects through
-  a FIFO/subscription; device control is separately authorized.
+  completion. Receiver-channel acquisition (`ObjOpDeviceRx`) is a distinct
+  operation from retrieving one completed USB message (`ObjOpDeviceRecv`).
+  Device SEND results carry a typed accepted-bytes or completion-sequence
+  discriminator in `ObjCall.aux`.
+- `ObjOpInfo` exposes only generic identity/type/size/rights metadata;
+  `ObjOpStat` is the separate FIFO/subscription statistics contract.
+- `ObjOpCommit` is a Space-transaction commit. Committing through a GE handle
+  commits the owning Space's pending writes, not just that one object.
 
 Do not restore pathname-based `/dev` adapters, Plan 9 Chan/fid/qid, or
 separate protocol-specific kernel syscall families just to reach userspace.

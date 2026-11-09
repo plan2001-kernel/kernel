@@ -292,6 +292,7 @@ LIBC_SOURCES = [
     "port/muldiv.c",
     "port/nan.c",
     "port/oobject.c",
+    "port/osysctl.c",
     "port/pool.c",
     "port/pow10.c",
     "port/qsort.c",
@@ -501,8 +502,9 @@ def main() -> int:
         for sym, num in (("_start", None), ("setjmp", None), ("longjmp", None)):
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing {sym}")
-        sysnums = {"ovolopen": "0x36", "objopen": "0x89",
-                   "oexecute": "0x3c",
+        sysnums = {"sysctl": "0x90", "ioctl": "0x91", "objopen": "0x89",
+                   "oexecute": "0x3c", "spawn": "0x92",
+                   "procwait": "0x8e",
                    "errstr": "0x29", "_nsec": "0x35", "sleep": "0x11"}
         for sym, num in sysnums.items():
             if not re.search(rf"<{re.escape(sym)}>:", dis):
@@ -511,13 +513,13 @@ def main() -> int:
                 checks.append(f"syscall stub {sym} has no RBP={num}")
         # Migrated process-lifecycle adapters must be real C symbols, not
         # retired syscall stubs; their OBJOP path is checked in the disasm.
-        realsyms = ("wait", "obj_wait", "obj_ospawn")
+        realsyms = ("wait", "proc_wait", "obj_ospawn", "rfork")
         for sym in realsyms:
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing OBJ adapter {sym}")
-        direct = {"rfork": "0x13", "_exits": "0x8", "oterminate": "0x5d",
+        direct = {"_exits": "0x8", "oterminate": "0x5d",
                   "notify": "0x1c", "noted": "0x1d", "brk_": "0x18",
-                  "sleep": "0x11"}
+                  "sleep": "0x11", "rforkex": "0x8f"}
         for sym, num in direct.items():
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing direct syscall stub {sym}")

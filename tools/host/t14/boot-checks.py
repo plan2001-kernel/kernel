@@ -31,7 +31,7 @@ exec(source.decode())
 """
     def start():
         d = p.obj_device_open(cat,2,ctl,0)
-        rf,_,_,_ = p.obj_device_recv(d)
+        rf = p.obj_device_rx(d)
         command, output = p.obj_fifocreate(4), p.obj_fifocreate(4)
         response = p.obj_subscribe(output,12,4)
         code = p.obj_create(NODE_SOURCE.encode())

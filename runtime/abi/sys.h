@@ -20,8 +20,10 @@
 #define	OSEEK		16 /* reserved */
 #define	SLEEP		17
 #define	_STAT		18 /* reserved */
-/* RFORK(19) is the direct historical process/group call. */
-#define	RFORK		19
+/* RFORK(19) is RESERVED.  RFORKEX(143) is the one canonical extended fork
+ * boundary; an ordinary fork is the libc rfork() wrapper with an empty
+ * Handle plan. */
+#define	RFORK		19 /* reserved */
 #define	_WRITE		20 /* reserved */
 #define	PIPE		21 /* reserved */
 #define	CREATE		22 /* reserved */
@@ -43,7 +45,7 @@
 #define	RENDEZVOUS	34
 #define	UNMOUNT		35 /* reserved */
 /* _WAIT(36) is RESERVED: if a name is ever wanted it may not reuse this
- * number; child wait is the direct typed OBJWAIT syscall (142). */
+ * number; child wait is the direct typed PROCWAIT syscall (142). */
 #define	_WAIT		36 /* reserved */
 #define	SEMACQUIRE	37
 #define	SEMRELEASE	38
@@ -55,13 +57,15 @@
 #define	WSTAT		44 /* reserved */
 #define	FWSTAT		45 /* reserved */
 #define	MOUNT		46 /* reserved */
-/* AWAIT(47) is RESERVED: libc await()/wait() use the direct OBJWAIT call. */
+/* AWAIT(47) is RESERVED: libc await()/wait() use the direct PROCWAIT call. */
 #define	AWAIT		47 /* reserved */
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */
 #define	TSEMACQUIRE	52
 #define _NSEC		53
-#define	OVOLOPEN	54
+/* OVOLOPEN(54) is RESERVED: privileged bootstrap/administrative volume
+ * activation is SYSCTL(144), operation SysctlVolumeOpen. */
+#define	OVOLOPEN	54 /* reserved */
 #define	OSPACEOPEN	55 /* reserved */
 #define	OSPACEGET	56 /* reserved */
 #define	OSPACEPUT	57 /* reserved */
@@ -98,20 +102,24 @@
 #define	UARTCLOSE	85 /* reserved */
 #define	RTCGET		86 /* reserved */
 #define	RTCSET		87 /* reserved */
-#define	ENVGET		88
-#define	ENVSET		89
-#define	ENVDELETE	90
-#define	ENVLIST		91
+/* 88-91 RESERVED: process environment operations are SYSCTL(144)
+ * operations SysctlEnvGet/Set/Delete/List. */
+#define	ENVGET		88 /* reserved */
+#define	ENVSET		89 /* reserved */
+#define	ENVDELETE	90 /* reserved */
+#define	ENVLIST		91 /* reserved */
 /* N13 experimental object views.  PIPEINHERIT=100 is RESERVED: the number
  * stays allocated forever but has no dispatch entry.  Handle inheritance is
- * declared atomically by RFORKEX(143) or OSPAWN options, never armed ahead
+ * declared atomically by RFORKEX(143) or SPAWN options, never armed ahead
  * of process creation. */
 #define OBIND           96 /* reserved */
 /* 97-99 reserved: retired object binding calls. */
 #define PIPEINHERIT     100 /* reserved */
 /* 104 reserved: retired extended object binding call. */
 #define OQUERY          106 /* reserved */
-#define SYSSNAPSHOT     107
+/* SYSSNAPSHOT(107) is RESERVED: system status is SYSCTL(144), operation
+ * SysctlSnapshot. */
+#define SYSSNAPSHOT     107 /* reserved */
 /* 108-113 RESERVED: former TCP6* compatibility family.  The numbers stay
  * allocated forever but have no dispatch entry; use the OBJ* five-call ABI. */
 #define TCP6LISTEN      108 /* reserved */
@@ -120,16 +128,17 @@
 #define TCP6READ        111 /* reserved */
 #define TCP6WRITE       112 /* reserved */
 #define TCP6CLOSE       113 /* reserved */
-/* OSPAWN(92) is RESERVED: use OBJINVOKE(ObjOpOspawn) on a VkindSpace Handle
- * carrying Vexecute.  OTERMINATE(93) is the direct historical call again and
- * takes one positive direct-child PID. */
+/* OSPAWN(92) is RESERVED: spawning is the direct SPAWN(146) call taking an
+ * authorized Space Handle and OID, consistent with OEXECUTE(60).
+ * OTERMINATE(93) is the direct historical call again and takes one positive
+ * direct-child PID. */
 #define	OSPAWN		92 /* reserved */
 #define	OTERMINATE	93
 /*
- * OSPAWN's fifth argument.  cpu is an exact online logical kernel CPU
- * (0..conf.nmach-1), or ~0ULL for unpinned.  membudget is bytes and
- * 0 inherits the parent's budget; flags=0 keeps the original 24-byte
- * options layout; flags=1 appends Oinherit.
+ * SPAWN's fifth argument (also the historical OSPAWN options layout).  cpu
+ * is an exact online logical kernel CPU (0..conf.nmach-1), or ~0ULL for
+ * unpinned.  membudget is bytes and 0 inherits the parent's budget; flags=0
+ * keeps the original 24-byte options layout; flags=1 appends Oinherit.
  */
 struct Ospawn {
 	uvlong	cpu;
@@ -175,15 +184,22 @@ struct Ospawn {
 #define	OBJCLOSE	138
 #define	OBJBIND		139
 #define	OBJINVOKE	140
-/* Direct bounded introspection of the caller's own object handle table.
- * Arguments are (VobjListRec *records, unsigned long count); the result is
- * the total number of live handles, or the copied count when records is
- * non-NULL.  It never names another process and transfers no authority. */
-#define	OBJLIST		141
-/* Direct typed child wait.  The single argument points to one ObjWait
+/* OBJLIST(141) is RESERVED: own-process Handle-table introspection is
+ * SYSCTL(144), operation SysctlHandleList. */
+#define	OBJLIST		141 /* reserved */
+/* Direct typed child wait.  The single argument points to one ProcWait
  * record; the kernel fills pid, the three times and the bounded status text
  * exactly as the historical _WAIT did.  No ProcessSelf Handle is created. */
-#define	OBJWAIT		142
+#define	PROCWAIT	142
+/* SYSCTL(144) and IOCTL(145) separate configuration/introspection and
+ * device control from object data operations.  See runtime/abi/sysctl.h and
+ * runtime/abi/ioctl.h for their typed request records. */
+#define	SYSCTL		144
+#define	IOCTL		145
+/* Direct spawn: (int Space handle, uvlong OID, char **argv, int argc,
+ * struct Ospawn *options).  The Handle must carry Vexecute and the same
+ * Oexecute/role checks as OEXECUTE apply.  Returns the child PID or -1. */
+#define	SPAWN		146
 /* flags=1 opts into this bounded extension immediately after Ospawn.
  * view: 0 EMPTY, 1 COPY listed roles, 2 SHARE (list must name whole view).
  * Pipe rights: 1 read, 2 write, 3 both. No implicit endpoint selection.
@@ -209,12 +225,12 @@ struct Oinheritv {
 	struct { uvlong handle; uvlong rights; } h[8];
 };
 
-/* RFORKEX(143): the direct, atomic process-creation call with explicit object
- * Handle delegation.  It is ordinary RFORK(19) with one addition: a bounded,
+/* RFORKEX(143): the one canonical direct fork boundary, with explicit object
+ * Handle delegation.  It carries ordinary RFORK flags plus a bounded,
  * versioned options record naming the parent Handles that cross into the
- * child and their exact rights attenuation.  RFORK(19) itself never copies an
- * object Handle; there is no pending one-shot state and OBJINVOKE cannot arm
- * a later fork.
+ * child and their exact rights attenuation.  An ordinary fork is the libc
+ * rfork() wrapper with an empty plan; there is no pending one-shot state and
+ * OBJINVOKE cannot arm a later fork.
  *
  * All entries are validated before the child is published: the source Handle
  * must be live, carry Vdelegate, not be a subscription, and the requested
@@ -224,12 +240,13 @@ struct Oinheritv {
  * list order.  dstslot conflicts are rejected.  The assigned child Handle for
  * entry i is written to childhandles[i] when childhandles is non-NULL.  On any
  * failure the parent's Handle state and reference counts are unchanged and no
- * child is left published.
+ * child is left published.  Kernospawn's Oinherit/Oinheritv records are
+ * translated into this same plan.
  *
  * flags are ordinary RFORK flags.  RFPROC is required when count is nonzero.
- * The options pointer may be NULL when count is zero.  This call has no
- * OContext, environment, Pipe-list or stdout options; those remain explicit
- * OSPAWN-only fields and are not implicit inheritance. */
+ * The options pointer may be NULL, meaning an empty plan (count 0).  This
+ * call has no OContext, environment, Pipe-list or stdout options; those
+ * remain explicit SPAWN-only fields and are not implicit inheritance. */
 #define RFORKEX			143
 enum {
 	RFORKEX_VERSION		= 1,

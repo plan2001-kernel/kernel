@@ -13,13 +13,15 @@
 #include "../runtime/abi/vobj.h"
 #include "../runtime/abi/obj.h"
 #include "../runtime/abi/sys.h"
+#include "../runtime/abi/sysctl.h"
+#include "../runtime/abi/ioctl.h"
+#include <envapi.h>
 #include <uartapi.h>
 #endif
 
 // p9space.c: a rest before a call blocks (a Space's commit point 3)
 void p9_space_rest(void);
 
-extern long envget(int, char *, void *, long, long *);
 extern int sleep(long);
 extern long long nsec(void);
 
@@ -154,6 +156,58 @@ static mp_obj_t p9_envget(mp_obj_t name) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_envget_obj,p9_envget);
 
+static mp_obj_t p9_envset(mp_obj_t name, mp_obj_t value) {
+    const char *key=mp_obj_str_get_str(name);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(value,&b,MP_BUFFER_READ);
+    return check(envset(strlen(key),(char*)key,b.buf,b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_envset_obj,p9_envset);
+
+static mp_obj_t p9_envdelete(mp_obj_t name) {
+    const char *key=mp_obj_str_get_str(name);
+    return check(envdelete(strlen(key),(char*)key));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_envdelete_obj,p9_envdelete);
+
+static mp_obj_t p9_envlist(void) {
+    long need=0,r;vstr_t v;
+    if(envlist(nil,0,&need)<0)raise_err();
+    vstr_init_len(&v,need>0?need:1);
+    r=envlist(v.buf,need,&need);
+    if(r<0){vstr_clear(&v);raise_err();}
+    v.len=need;
+    return mp_obj_new_bytes_from_vstr(&v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_envlist_obj,p9_envlist);
+
+static mp_obj_t p9_procinfo(void) {
+    SysctlProcInfo i;mp_obj_t a[3];
+    if(proc_info(&i)<0)raise_err();
+    a[0]=mp_obj_new_int_from_ll(i.pid);
+    a[1]=mp_obj_new_int_from_ull(i.cpu);
+    a[2]=mp_obj_new_int_from_ull(i.membudget);
+    return mp_obj_new_tuple(3,a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_procinfo_obj,p9_procinfo);
+
+/* Explicit short-buffer probe: returns (total, copied, handles). */
+static mp_obj_t p9_objlistcap(mp_obj_t capo) {
+    int cap=mp_obj_get_int(capo);VobjListRec *rec;unsigned long long copied=0;
+    long total,i;mp_obj_t *t,result;
+    if(cap<0||cap>96)mp_raise_ValueError(MP_ERROR_TEXT("handle list capacity"));
+    rec=m_new(VobjListRec,cap?cap:1);
+    total=obj_list_count(rec,cap,&copied);
+    if(total<0){m_del(VobjListRec,rec,cap?cap:1);raise_err();}
+    t=m_new(mp_obj_t,copied?copied:1);
+    for(i=0;i<(long)copied;i++)t[i]=mp_obj_new_int((mp_int_t)rec[i].handle);
+    result=mp_obj_new_tuple(3,(mp_obj_t[3]){mp_obj_new_int(total),mp_obj_new_int_from_ull(copied),mp_obj_new_tuple(copied,t)});
+    m_del(mp_obj_t,t,copied?copied:1);
+    m_del(VobjListRec,rec,cap?cap:1);
+    return result;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_objlistcap_obj,p9_objlistcap);
+
 static mp_obj_t p9_sleep(mp_obj_t ms) {
     long n=mp_obj_get_int(ms);
     p9_space_rest();
@@ -280,15 +334,25 @@ static mp_obj_t p9_vobjread(mp_obj_t handle){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjread_obj,p9_vobjread);
 
-static mp_obj_t p9_vobjinfo(mp_obj_t handle){
- VobjInfo i;if(obj_info(mp_obj_get_int(handle),&i)<0)raise_err();
+/* Generic metadata comes from ObjOpInfo; FIFO/subscription counters come
+ * from the separate ObjOpStat contract.  This adapter keeps the historical
+ * 16-tuple view for existing scripts. */
+static mp_obj_t p9_infotuple(int handle){
+ VobjInfo i;VobjFifostat f;
+ if(obj_info(handle,&i)<0)raise_err();
+ memset(&f,0,sizeof f);
+ if(i.kind==VkindFifo)obj_stat(handle,&f);
  mp_obj_t a[16]={mp_obj_new_int_from_ull(i.incarnation),mp_obj_new_int_from_ull(i.space),
   mp_obj_new_int_from_ull(i.oid),mp_obj_new_int_from_ull(i.size),mp_obj_new_int_from_ull(i.holds),
-  mp_obj_new_int_from_ull(i.subscribers),mp_obj_new_int_from_ull(i.sends),mp_obj_new_int_from_ull(i.drops),
+  mp_obj_new_int_from_ull(f.subscribers),mp_obj_new_int_from_ull(f.sends),mp_obj_new_int_from_ull(f.drops),
   mp_obj_new_int(i.kind),mp_obj_new_int(i.flags),mp_obj_new_int(i.rights),
-  mp_obj_new_int(i.sub_capacity),mp_obj_new_int(i.sub_queued),mp_obj_new_int(i.sub_dropped),
-  mp_obj_new_int(i.fifo_closed),mp_obj_new_int(i.sub_closed)};
+  mp_obj_new_int(f.capacity),mp_obj_new_int(f.queued),mp_obj_new_int(f.sub_dropped),
+  mp_obj_new_int(f.fifo_closed),mp_obj_new_int(f.sub_closed)};
  return mp_obj_new_tuple(16,a);
+}
+
+static mp_obj_t p9_vobjinfo(mp_obj_t handle){
+ return p9_infotuple(mp_obj_get_int(handle));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjinfo_obj,p9_vobjinfo);
 
@@ -343,7 +407,14 @@ static mp_obj_t p9_vobjgrant(mp_obj_t h,mp_obj_t rights){
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_vobjgrant_obj,p9_vobjgrant);
 
-static mp_obj_t p9_vobjrevoke(mp_obj_t h){check(obj_revoke(mp_obj_get_int(h)));return mp_const_none;}
+static mp_obj_t p9_vobjrevoke(mp_obj_t h){
+ VobjInfo i;int handle=mp_obj_get_int(h);
+ if(obj_info(handle,&i)==0 && i.kind==VkindFifo)
+  check(obj_fifo_shutdown(handle));
+ else
+  check(obj_revoke(handle));
+ return mp_const_none;
+}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjrevoke_obj,p9_vobjrevoke);
 
 /* Generic object I/O: vobjio(handle, op, size_or_data, timeout=0). */
@@ -515,14 +586,7 @@ static mp_obj_t p9_objwrite(size_t n,const mp_obj_t *a){
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objwrite_obj,2,3,p9_objwrite);
 
 static mp_obj_t p9_objinfo(mp_obj_t h){
- VobjInfo i;if(obj_info(mp_obj_get_int(h),&i)<0)raise_err();
- mp_obj_t a[16]={mp_obj_new_int_from_ull(i.incarnation),mp_obj_new_int_from_ull(i.space),
-  mp_obj_new_int_from_ull(i.oid),mp_obj_new_int_from_ull(i.size),mp_obj_new_int_from_ull(i.holds),
-  mp_obj_new_int_from_ull(i.subscribers),mp_obj_new_int_from_ull(i.sends),mp_obj_new_int_from_ull(i.drops),
-  mp_obj_new_int(i.kind),mp_obj_new_int(i.flags),mp_obj_new_int(i.rights),
-  mp_obj_new_int(i.sub_capacity),mp_obj_new_int(i.sub_queued),mp_obj_new_int(i.sub_dropped),
-  mp_obj_new_int(i.fifo_closed),mp_obj_new_int(i.sub_closed)};
- return mp_obj_new_tuple(16,a);
+ return p9_infotuple(mp_obj_get_int(h));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objinfo_obj,p9_objinfo);
 
@@ -570,9 +634,21 @@ static mp_obj_t p9_objgrant(mp_obj_t h,mp_obj_t rights){
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objgrant_obj,p9_objgrant);
 
 static mp_obj_t p9_objrevoke(mp_obj_t h){
- check(obj_revoke(mp_obj_get_int(h)));return mp_const_none;
+ VobjInfo i;int handle=mp_obj_get_int(h);
+ /* Historical convenience name: GE/O revocation and FIFO transport
+  * shutdown are separate kernel operations. */
+ if(obj_info(handle,&i)==0 && i.kind==VkindFifo)
+  check(obj_fifo_shutdown(handle));
+ else
+  check(obj_revoke(handle));
+ return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objrevoke_obj,p9_objrevoke);
+
+static mp_obj_t p9_objfifoshutdown(mp_obj_t h){
+ check(obj_fifo_shutdown(mp_obj_get_int(h)));return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_objfifoshutdown_obj,p9_objfifoshutdown);
 
 static mp_obj_t p9_objlist(void){
  VobjListRec rec[32];long n,i;mp_obj_t t[32];
@@ -765,17 +841,37 @@ static mp_obj_t p9_devicerecv(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicerecv_obj,p9_devicerecv);
 
+/* Ethernet receive-channel acquisition, distinct from USB completion recv. */
+static mp_obj_t p9_devicerx(mp_obj_t h){
+ return check(obj_device_rx(mp_obj_get_int(h)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicerx_obj,p9_devicerx);
+
+/* Device control is IOCTL(145).  The historical (handle, op, buffer)
+ * convenience form maps the provider-specific operation to a typed IOCTL
+ * based on the handle kind; no device payload travels through this route. */
 static mp_obj_t p9_devicectl(size_t n,const mp_obj_t *a){
  mp_buffer_info_t b;
+ VobjInfo i;
+ int h=mp_obj_get_int(a[0]),op=mp_obj_get_int(a[1]);
+ void *buf=nil;unsigned long long len=0;
  if(n>2){
   mp_get_buffer_raise(a[2],&b,MP_BUFFER_WRITE);
   if(b.len>OBJ_DEVICE_MAXPAYLOAD)
    mp_raise_ValueError(MP_ERROR_TEXT("device control buffer limit"));
-  return check(obj_device_ctl(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
-   b.buf,b.len));
+  buf=b.buf;len=b.len;
  }
- return check(obj_device_ctl(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),
-  nil,0));
+ if(obj_info(h,&i)<0)raise_err();
+ if(i.kind==VkindDevices)
+  return check(obj_device_usb_global_ctl(h,(unsigned)op,buf,len));
+ if(i.kind==VkindUsbEp)
+  return check(obj_device_usb_ep_ctl(h,(unsigned)op,buf,len));
+ if(op==1)return check(obj_device_usb_clear_halt(h));
+ if(op==2)return check(obj_device_ether_status(h,buf));
+ if(op==3)return check(obj_device_ether_detach(h));
+ /* Unknown provider request: pass an unknown IOCTL operation so the kernel
+  * returns its normal Ebadctl error instead of inventing a userland one. */
+ return check(obj_device_ioctl(h,0xffffffffu,nil,0,0));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_devicectl_obj,2,3,p9_devicectl);
 
@@ -858,6 +954,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
     { MP_ROM_QSTR(MP_QSTR_rforkex), MP_ROM_PTR(&p9_rforkex_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },
+    { MP_ROM_QSTR(MP_QSTR_envset), MP_ROM_PTR(&p9_envset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_envdelete), MP_ROM_PTR(&p9_envdelete_obj) },
+    { MP_ROM_QSTR(MP_QSTR_envlist), MP_ROM_PTR(&p9_envlist_obj) },
+    { MP_ROM_QSTR(MP_QSTR_proc_info), MP_ROM_PTR(&p9_procinfo_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_list_capacity), MP_ROM_PTR(&p9_objlistcap_obj) },
     { MP_ROM_QSTR(MP_QSTR_sleep), MP_ROM_PTR(&p9_sleep_obj) },
     { MP_ROM_QSTR(MP_QSTR_time_ns), MP_ROM_PTR(&p9_time_ns_obj) },
     { MP_ROM_QSTR(MP_QSTR_errstr), MP_ROM_PTR(&p9_errstr_get_obj) },
@@ -895,6 +996,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_open), MP_ROM_PTR(&p9_deviceopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_send), MP_ROM_PTR(&p9_devicesend_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_recv), MP_ROM_PTR(&p9_devicerecv_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_rx), MP_ROM_PTR(&p9_devicerx_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ctl), MP_ROM_PTR(&p9_devicectl_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_space), MP_ROM_PTR(&p9_objopenspace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
@@ -913,6 +1015,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_receive), MP_ROM_PTR(&p9_objreceive_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_grant), MP_ROM_PTR(&p9_objgrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_revoke), MP_ROM_PTR(&p9_objrevoke_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_fifo_shutdown), MP_ROM_PTR(&p9_objfifoshutdown_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_list), MP_ROM_PTR(&p9_objlist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_invoke), MP_ROM_PTR(&p9_objinvoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_addr), MP_ROM_PTR(&p9_notify_probe_addr_obj) },
@@ -946,9 +1049,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_CTL), MP_ROM_INT(ObjOpUartCtl) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_UART_STATUS), MP_ROM_INT(ObjOpUartStatus) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_KBD_LEDS), MP_ROM_INT(ObjOpKbdLeds) },
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_CONFIG), MP_ROM_INT(IoctlUartConfig) },
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_STATUS), MP_ROM_INT(IoctlUartStatus) },
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_KBD_LEDS), MP_ROM_INT(IoctlKbdLeds) },
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_ETHER_STATUS), MP_ROM_INT(IoctlEtherStatus) },
+    { MP_ROM_QSTR(MP_QSTR_IOCTL_ETHER_DETACH), MP_ROM_INT(IoctlEtherDetach) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_STREAM_MAXIO), MP_ROM_INT(OBJ_STREAM_MAXIO) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KBD_MAXREAD), MP_ROM_INT(OBJ_KBD_MAXREAD) },
     { MP_ROM_QSTR(MP_QSTR_UART_BAUD), MP_ROM_INT(Uartbaud) },
@@ -969,6 +1074,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_RECV), MP_ROM_INT(ObjOpRecv) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SUBSCRIBE), MP_ROM_INT(ObjOpSubscribe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_FIFO_SHUTDOWN), MP_ROM_INT(ObjOpFifoShutdown) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_DEVICE_RX), MP_ROM_INT(ObjOpDeviceRx) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_COPY), MP_ROM_INT(ObjBindCopy) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_EXCLUSIVE), MP_ROM_INT(ObjBindExclusive) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_SHARE), MP_ROM_INT(ObjBindShare) },
