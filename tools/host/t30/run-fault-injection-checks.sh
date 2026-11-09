@@ -25,7 +25,7 @@ python3 - "$T30F_OUT/boot-boot.log" <<'PY'
 import re,sys
 from pathlib import Path
 s=Path(sys.argv[1]).read_text()
-s=re.sub(r'T30LIFE [gocdsp][+-] seq=\d+ id=\d+ pgrp=-?\d+ octx=-?\d+\n','',s)
+s=re.sub(r'T30LIFE [gocrdsp][+-] seq=\d+ id=\d+ pgrp=-?\d+ octx=-?\d+ proc=-?\d+\n','',s)
 checks=re.findall(r'^T30-PASS (\d+) (.*)$',s,re.M)
 result=re.search(r'^T30-FINISH (\d+) PASS$',s,re.M)
 assert result, 'missing executed result'

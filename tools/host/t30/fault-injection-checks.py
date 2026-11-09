@@ -64,6 +64,17 @@ def run():
             return
         raise AssertionError(name)
 
+    def expect_error(call, expected, name):
+        try:
+            call()
+        except OSError as e:
+            msg = str(e.args[0]) if e.args else ''
+            if msg != expected:
+                raise AssertionError('%s: unexpected OSError %r'
+                                     % (name, msg))
+            return
+        raise AssertionError('expected rejection: ' + name)
+
     def openable(role):
         try:
             h = p.obj_open_binding(role)
@@ -92,6 +103,56 @@ def run():
         ok(True, 'no-child check rejects an unrelated OSError')
     else:
         raise AssertionError('no-child checker accepted an unrelated OSError')
+
+    # --- Early unpublished-child rollback boundaries -----------------------
+    # These hooks run at the three real fallible initialization boundaries:
+    # immediately after newproc(), after the staging allocations and before
+    # the debug locks, and after metadata/text/user/args and PID setup while
+    # both debug locks are still held.  No child may be published.
+    shholds = p.obj_info(sh)[4]
+    shrights = p.obj_info(sh)[10]
+    early = (
+        (b'fork-child-early-abort', 'fork: injected early child abort'),
+        (b'fork-child-staged-abort', 'fork: injected staged child abort'),
+        (b'fork-child-initialized-abort',
+         'fork: injected initialized child abort'),
+    )
+    eplans = (('empty', ()),
+              ('planned', ((sh, 8192 | p.VMETA, 1),)))
+    for ei, (token, expected) in enumerate(early):
+        for pname, plan in eplans:
+            for rnd in range(2):
+                label = 'fork early %s/%s round %d' % (
+                    expected, pname, rnd + 1)
+                p.envset('PLAN2001_FAULT', token)
+                expect_error(lambda: p.rforkex(p.RFPROC, plan),
+                             expected, label)
+                nochild(label + ' leaves no waitable child')
+                ok(p.obj_info(sh)[4] == shholds and
+                   p.obj_info(sh)[10] == shrights,
+                   label + ' leaves the parent Handle unchanged')
+        mark('fork-early-%d' % (ei + 1))
+    ok(openable('fault_keep'),
+       'early rollback failures leave the parent role usable')
+    pid, _ch = p.rforkex(p.RFPROC, ())
+    if pid == 0:
+        p.exits('')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'ordinary RFORKEX after early failures reaps exactly once '
+       'status=%r' % (status,))
+    nochild('ordinary RFORKEX after early failures leaves no extra wait '
+            'record')
+    pid, _ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
+    if pid == 0:
+        p.exits('')
+    waited, status = p.wait()
+    ok(waited == pid and status == '',
+       'planned RFORKEX after early failures reaps exactly once '
+       'status=%r' % (status,))
+    nochild('planned RFORKEX after early failures leaves no extra wait '
+            'record')
+    mark('fork-early-ok')
 
     # --- Non-RFPROC RFNAMEG and RFCNAMEG: fail after the new Pgrp exists --
     def switch_rollback(flag, name):

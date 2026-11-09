@@ -34,8 +34,8 @@ validate_canonical()
 		echo "T30: canonical pgrp.cmd still contains the diagnostic define" >&2
 		return 1
 	fi
-	if nm "$elf" 2>/dev/null | grep -qw -e 'lifepgrp' -e 'lifedelegate' \
-			-e 'lifefpu' -e 'lifefpudiscard'; then
+	if nm "$elf" 2>/dev/null | grep -qw -e 'lifepgrp' -e 'lifeproc' \
+			-e 'lifedelegate' -e 'lifefpu' -e 'lifefpudiscard'; then
 		echo "T30: canonical kernel ELF still exports lifecycle diag symbols" >&2
 		return 1
 	fi
@@ -85,6 +85,10 @@ T30F_OUT="$T30D_OUT/fault" \
 python3 "$T30D_ROOT/tools/host/t30/lifecycle_log.py" \
 	"$T30D_OUT/fault/boot-boot.log"
 
-# The same checker must FAIL on a deliberately leaked delegated capability.
+# The same checker must FAIL on a deliberately leaked delegated capability
+# and on a deliberately leaked reserved New Proc.
 T30N_OUT="$T30D_OUT/leak-negative" \
 	"$T30D_ROOT/tools/host/t30/run-ownership-leak-checks.sh" "$@"
+
+T30L_OUT="$T30D_OUT/fork-leak-negative" \
+	"$T30D_ROOT/tools/host/t30/run-fork-leak-checks.sh" "$@"

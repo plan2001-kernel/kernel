@@ -4,6 +4,7 @@
 #include	"dat.h"
 #include	"fns.h"
 #include	"../core/error.h"
+#include	"lifediag.h"
 #include	"edf.h"
 #include	"tos.h"
 #include	"ureg.h"
@@ -464,6 +465,8 @@ ready(Proc *p)
 {
 	int s, pri;
 
+	if(p->state == New)
+		lifeproc(-1);
 	s = splhi();
 	switch(edfready(p)){
 	default:
@@ -704,6 +707,7 @@ newproc(void)
 	procalloc.free = p->qnext;
 	p->qnext = nil;
 		unlock(&procalloc.lk);
+	lifeproc(1);
 
 	if(!fresh){
 		oprocexit(p);
@@ -1604,6 +1608,7 @@ procdiscard(Proc *p)
 	fpuprocdiscard(p);
 
 	/* Mirror the scheduler's Moribund recycle without running the Proc. */
+	lifeproc(-1);
 	lock(&procalloc.lk);
 	p->state = Dead;
 	p->mach = nil;

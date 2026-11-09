@@ -47,7 +47,11 @@ kernrforkcore(ulong flag, Vinherit *vi)
 {
 	ulong pid;
 	uvlong forkpages;
-	int n, i;
+	char *text, *user, *args;
+	int n, i, lockup, lockp;
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	int leak;
+#endif
 	Proc *p;
 
 	/* Check flags before we commit */
@@ -155,8 +159,63 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if((p = newproc()) == nil)
 		error("no procs");
 
+	/*
+	 * Single prepublication rollback owner for the child's initial state.
+	 * It is armed before the first fallible initialization and is replaced
+	 * by the resource-copy handler below once the child has an identity and
+	 * a PID.  procdiscard() takes P->DEBUG itself, so the handler unlocks
+	 * only the debug locks it actually acquired before calling it.
+	 */
+	text = user = args = nil;
+	lockup = lockp = 0;
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	leak = 0;
+#endif
+	if(waserror()){
+		if(lockp)
+			qunlock(&p->debug);
+		if(lockup)
+			qunlock(&up->debug);
+		free(text);
+		free(user);
+		free(args);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+		/* Negative fixture: deliberately omit the New Proc release. */
+		if(leak)
+			nexterror();
+#endif
+		procdiscard(p);
+		nexterror();
+	}
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* First fallible boundary: only the empty New Proc exists. */
+	if(injectfault("fork-child-early-abort"))
+		error("fork: injected early child abort");
+	/* Negative fixture: fail at the same boundary without cleanup. */
+	if(injectfault("fork-child-leak-proc")){
+		leak = 1;
+		error("fork: injected New Proc leak");
+	}
+#endif
+
+	/* Complete fallible staging before taking the debug locks.  The
+	 * parent's own text/user are process-local and cannot be replaced
+	 * concurrently by another thread of this process. */
+	kstrdup(&text, up->text);
+	kstrdup(&user, up->user);
+	kstrdup(&args, "");
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Second fallible boundary: staging exists but no lock or identity. */
+	if(injectfault("fork-child-staged-abort"))
+		error("fork: injected staged child abort");
+#endif
+
 	qlock(&up->debug);
+	lockup = 1;
 	qlock(&p->debug);
+	lockp = 1;
 
 	p->scallnr = up->scallnr;
 	p->s = up->s;
@@ -184,9 +243,16 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	 */
 	forkchild(p, up->dbgreg);
 
-	kstrdup(&p->text, up->text);
-	kstrdup(&p->user, up->user);
-	kstrdup(&p->args, "");
+	/* Transfer the staged buffers to the child. */
+	free(p->text);
+	p->text = text;
+	text = nil;
+	free(p->user);
+	p->user = user;
+	user = nil;
+	free(p->args);
+	p->args = args;
+	args = nil;
 	p->nargs = 0;
 	p->setargs = 0;
 
@@ -198,8 +264,18 @@ kernrforkcore(ulong flag, Vinherit *vi)
 
 	pid = pidalloc(p);
 
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Third fallible boundary: text/user/args and the PID are initialized,
+	 * both debug locks are held and the child is still unpublished. */
+	if(injectfault("fork-child-initialized-abort"))
+		error("fork: injected initialized child abort");
+#endif
+
 	qunlock(&p->debug);
+	lockp = 0;
 	qunlock(&up->debug);
+	lockup = 0;
+	poperror();		/* end early rollback region */
 
 	/* The child is still unpublished; release it synchronously. */
 	if(waserror()){
