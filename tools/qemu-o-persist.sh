@@ -145,7 +145,7 @@ qop_main()
 		--mib) [ $# -ge 2 ] || qop_die "--mib needs a value"; QOB_MIB=$2; shift ;;
 		--controller) [ $# -ge 2 ] || qop_die "--controller needs a value"; QOB_CONTROLLER=$2; shift ;;
 		--timeout) [ $# -ge 2 ] || qop_die "--timeout needs a value"; QOB_TIMEOUT=$2; shift ;;
-		--tcg) QOB_TCG=1 ;;
+		--tcg) QOB_TCG=1; QOB_ACCEL=tcg ;;
 		--jobs) [ $# -ge 2 ] || qop_die "--jobs needs a value"; QOB_JOBS=$2; shift ;;
 		--repl) repl_mode=1 ;;
 		--boot1-input) [ $# -ge 2 ] || qop_die "--boot1-input needs a file"; QOB_BOOT1_INPUT=$2; shift ;;
