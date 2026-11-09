@@ -344,12 +344,17 @@ enum
 	ENVHASH =	1<<ENVLOG,	/* Egrp hash for variable lookup */
 };
 #define REND(p,s)	((p)->rendhash[(s)&((1<<RENDLOG)-1)])
+enum
+{
+	PgrpNsSealed	= 1<<0,		/* no further namespace extension */
+};
+
 struct Pgrp
 {
 	Ref ref;
-	RWLock	ns;			/* protects devmask */
+	RWLock	ns;			/* protects flags; extension/ seal gate */
 	void	*ocontext;		/* bounded native object view */
-	uchar	devmask[256/8];		/* Room for 256 devices */
+	uint	flags;
 #ifdef PLAN2001_LIFECYCLE_DIAG
 	ulong	diagid;			/* diagnostic identity, never an ABI handle */
 #endif

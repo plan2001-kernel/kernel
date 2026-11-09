@@ -91,8 +91,10 @@ closepgrp(Pgrp *p)
 }
 
 /*
- * A Pgrp owns a native object view and the inherited device mask.
+ * A Pgrp owns a native object view and its namespace-extension state.
  * There is no mount list. RFNAMEG copies bindings; RFCNAMEG starts empty.
+ * The restriction state is copied with the view, so an empty clone does not
+ * silently regain extension authority.
  * The caller owns a live source reference and an unpublished destination.
  * Published Pgrp.ocontext pointers never change; OContext locks protect maps.
  * Allocate first so failure leaves both groups and their references intact.
@@ -105,40 +107,53 @@ pgrpcpy(Pgrp *to, Pgrp *from, int copyview)
 	assert(to != from && to->ref.ref == 1);
 	c = copyview ? octxcopy(from->ocontext) : octxcopy(nil);
 	rlock(&from->ns);
-	memmove(to->devmask, from->devmask, sizeof to->devmask);
+	to->flags = from->flags;
 	runlock(&from->ns);
 	old = to->ocontext;
 	to->ocontext = c;
 	octxput(old);
 }
 
-int
-devmasked(Pgrp *pgrp, int i)
+/*
+ * RFNOMNT is a monotonic restriction of one live Pgrp: a sealed group cannot
+ * gain new role bindings or attach additional namespace views. It does not
+ * delete existing bindings, revoke opened Handles, or block removal,
+ * visibility or detach. Every process sharing the group observes the seal.
+ *
+ * Admission and the following OContext mutation must happen under one read
+ * hold. A successful begin returns with the gate held and must be paired with
+ * exactly one end, including on error paths. This makes the check and the
+ * extension one linearizable step against pgrpsealnamespace(). Lock order is
+ * Pgrp.ns before OContext locks; no caller may hold an OContext or authority
+ * gate when calling begin.
+ */
+void
+pgrpsealnamespace(Pgrp *pgrp)
 {
-	if(i < 0 || i >= sizeof pgrp->devmask * 8)
-		return 1;
-	return (pgrp->devmask[i>>3] & 1<<(i&7)) != 0;
+	assert(pgrp != nil);
+	wlock(&pgrp->ns);
+	pgrp->flags |= PgrpNsSealed;
+	wunlock(&pgrp->ns);
+}
+
+int
+pgrpnamespaceextendbegin(Pgrp *pgrp)
+{
+	if(pgrp == nil)
+		return 0;
+	rlock(&pgrp->ns);
+	if(pgrp->flags & PgrpNsSealed){
+		runlock(&pgrp->ns);
+		return 0;
+	}
+	return 1;
 }
 
 void
-devmask(Pgrp *pgrp, int invert, char *devs)
+pgrpnamespaceextendend(Pgrp *pgrp)
 {
-	int i;
-
-	/*
-	 * The canonical O-only build registers no Dev, so no requested
-	 * device character can name one.  The inherited devno() lookups in
-	 * this loop therefore all failed and its local mask stayed zero.
-	 * Preserve the two observable effects exactly: invert == 0 leaves
-	 * the inherited mask untouched, invert == 1 ORs an all-ones mask
-	 * (the RFNOMNT case).  Keep the same Pgrp lock and ownership.
-	 */
-	(void)devs;
-	wlock(&pgrp->ns);
-	if(invert)
-		for(i = 0; i < sizeof pgrp->devmask; i++)
-			pgrp->devmask[i] = 0xFF;
-	wunlock(&pgrp->ns);
+	assert(pgrp != nil);
+	runlock(&pgrp->ns);
 }
 
 /*

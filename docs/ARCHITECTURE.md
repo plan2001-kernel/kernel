@@ -37,7 +37,10 @@ with an empty view with `RFCNAMEG`. A newly created `Pgrp` has its own
 `OContext`. `SPAWN` creates a fresh group and can populate it from explicitly
 selected delegated roles/views. Namespace ownership is not necessarily
 one-to-one with processes: shared groups remain alive while referenced, and
-the last owning reference releases their runtime view.
+the last owning reference releases their runtime view. `RFNOMNT` seals a live
+`Pgrp` against further namespace extension; because it is group-scoped, shared
+owners observe the seal, while `RFNAMEG` copies it and `RFCNAMEG` preserves it
+with an empty view.
 
 A process may alter its namespace during its lifetime through authorized
 role binding/removal and `NamespaceView` attachment/detachment. Handles already

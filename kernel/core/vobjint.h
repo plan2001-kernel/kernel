@@ -63,7 +63,6 @@ int	vobjnamespacecreate(int control, char (*roles)[32], int nr);
 uvlong	vobjnamespaceattach(int control, int view, int mode);
 void	vobjnamespacedetach(int control, uvlong token);
 int	vobjnamespacevisible(int control, void *out, long bytes);
-void	osviewpermitted(void);
 void	oscheckrole(void *context, char *name, int geonly);
 void	osrevokehand(Ohand*);
 void	osviewgrantvalid(Ohand*);

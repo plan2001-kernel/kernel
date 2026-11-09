@@ -83,6 +83,20 @@ bounded `NsVisible` array. The request shapes and operation numbers are in
 `runtime/abi/obj.h`; the record layout is in `runtime/abi/namespace.h`.
 Visibility uses an epoch-validated snapshot and omits unauthorized identities.
 
+`RFNOMNT` seals the caller's live `Pgrp` against namespace extension. The
+seal is monotonic and group-scoped: it denies new or replacement `OBJBIND`
+role bindings and `NamespaceView` creation/attachment, while removal of an
+existing role, opening an unchanged role, visibility enumeration, view detach,
+and already opened Handles remain permitted. Extension admission and the
+corresponding `OContext` update are performed under one `Pgrp` gate, so a
+concurrent `RFNOMNT` cannot be interleaved between the check and the mutation.
+A plain `RFPROC` child shares the
+same seal; `RFNAMEG` copies the seal together with an independent `OContext`;
+`RFCNAMEG` keeps the inherited seal but starts with no roles. `SPAWN` still
+creates a fresh unsealed group with only explicitly selected authorities,
+while an explicit `SPAWN` SHARE joins the target group and therefore observes
+its seal. There is no unseal operation.
+
 Each namespace role holds one authorized object Handle. `OBJBIND` checks
 delegation rights and can attenuate them; `OBJOPEN(ObjOpenBinding)` opens that
 role through the same path for GE/O, FIFO, and other object kinds. Closing a
