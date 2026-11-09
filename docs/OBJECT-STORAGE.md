@@ -20,6 +20,22 @@ uninterpreted occurrence; a contextual object is its interpretation or role.
 - The native O opener rejects an FS-profile volume. Opening a volume must
   not implicitly reformat it.
 
+## Stored definitions versus runtime namespaces
+
+A process namespace is a volatile, reference-counted `Pgrp`/`OContext`
+capability view, not a GE/O object and not a persistent OID. GE/O may store
+a namespace *definition* as ordinary object content, to be interpreted by
+an authorized userspace loader when constructing or modifying that view.
+The definition's format and loader are not yet implemented. A definition
+is neither a snapshot of live Handles nor an authority token: loading it
+does not grant access to the objects it mentions.
+
+Persistent GE/O objects may also represent object sets and OID membership
+relations as separate data. Those are not process namespaces and are not
+currently an implemented general set/relation engine. Stored object identity,
+versions and lifetime are independent of a process group's `OContext`, role
+removal, or last-Handle close.
+
 ## Writes and visibility
 
 Published versions are visible to readers; an in-progress Space write is not
