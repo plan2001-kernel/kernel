@@ -155,7 +155,6 @@ KERNEL_SOURCES = {
     "mp": "kernel/amd64/mp.c",
     "mtrr": "kernel/amd64/mtrr.c",
     "nativeinh6": "kernel/net/nativeinh6.c",
-    "nativeudp6": "kernel/net/nativeudp6.c",
     "nativev6": "kernel/net/nativev6.c",
     "netlog": "kernel/net/netlog.c",
     "nullmedium": "kernel/net/nullmedium.c",
@@ -192,8 +191,6 @@ KERNEL_SOURCES = {
     "syskbd": "kernel/core/syskbd.c",
     "sysn3": "kernel/core/sysn3.c",
     "sysobj": "kernel/core/sysobj.c",
-    "sysnet6": "kernel/core/sysnet6.c",
-    "systcp6": "kernel/core/systcp6.c",
     "syspipe": "kernel/core/syspipe.c",
     "sysproc": "kernel/core/sysproc.c",
     "sysuart": "kernel/core/sysuart.c",
@@ -205,8 +202,6 @@ KERNEL_SOURCES = {
     "uartcore": "kernel/drivers/uart/uartcore.c",
     "uarti8250": "kernel/amd64/uarti8250.c",
     "uartpci": "kernel/amd64/uartpci.c",
-    "udp": "kernel/net/udp.c",
-    "tcp": "kernel/net/tcp.c",
     "usbcore": "kernel/drivers/usb/usbcore.c",
     "usbehci": "kernel/drivers/usb/usbehci.c",
     "usbehcipc": "kernel/amd64/usbehcipc.c",
@@ -653,7 +648,7 @@ def base_command(cc: str, src: Path, obj: Path, extra: list[str] | None = None) 
     cmd += ["-DPLAN2001_GCC", "-include", str(ROOT / "kernel/compat/plan2001-gcc.h")]
     cmd += CFLAGS
     cmd += extra or []
-    if src.name in ("ocontext.c", "sysgefs.c", "tcp.c", "systcp6.c"):
+    if src.name in ("ocontext.c", "sysgefs.c"):
         # Kernel entry stacks retain Plan 9 alignment; namespace C must not
         # introduce aligned SSE stack stores or borrow the up/Mach registers.
         cmd += ["-mgeneral-regs-only", "-ffixed-r14", "-ffixed-r15"]

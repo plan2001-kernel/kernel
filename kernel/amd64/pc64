@@ -26,11 +26,9 @@ misc
 	rtccore
 	uartcore
 	nativev6
-	nativeudp6
 	espctl
 	espcontrol
 	esp6
-	sysnet6
 	nativeinh6
 	ethernative
 	ipcore
@@ -59,8 +57,6 @@ misc
 	uartpci		pci
 
 ip
-	tcp
-	udp
 	ipifc
 	icmp6
 

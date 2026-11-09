@@ -708,13 +708,11 @@ newproc(void)
 	if(!fresh){
 		oprocexit(p);
 		vobjprocexit(p);
-		net6procexit(p);
 		pipeprocexit(p);
 		kbdprocexit(p);
 		uartprocexit(p);
 	}
 	p->vobjhandles = nil;
-	p->net6permit = 0;
 	p->stdoutpipe = 0;
 	p->iomask = 0;
 	p->psstate = nil;
@@ -1378,7 +1376,6 @@ pexit(char *exitstr, int freemem)
 
 	oprocexit(up);
 	vobjprocexit(up);
-	net6procexit(up);
 	pipeprocexit(up);
 	kbdprocexit(up);
 	uartprocexit(up);

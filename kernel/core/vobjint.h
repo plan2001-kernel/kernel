@@ -10,7 +10,7 @@ typedef struct Ohand Ohand;
 enum {
 	Vobjpaymax	= 1*1024*1024,
 	Vsubcapmax	= 1024,
-	/* One table now covers bytes/FIFO/TCP/GE/UDP6 plus Pipe, UART and KBD.
+	/* One table covers bytes/FIFO/GE plus Pipe, UART, KBD and devices.
 	 * The low Handle byte still addresses 255 slots; keep the table small
 	 * enough for the kernel stack arrays in vobjlist/vobjprocexit. */
 	Vhandmax	= 96,
@@ -57,7 +57,6 @@ int	vobjidentity(int handle, VobjId *id);
 int	vobjcommit(int handle, uvlong *ver);
 int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
-int	vobjprocessselfopen(uvlong rights, VobjId *id);
 int	vobjnamespaceopen(uvlong rights, VobjId *id);
 int	vobjnamespacecreate(int control, char (*roles)[32], int nr);
 uvlong	vobjnamespaceattach(int control, int view, int mode);
@@ -78,7 +77,7 @@ long	kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc,
 		struct Ospawn *uopt);
 int	kernoterminate(int pid);
 long	vobjospawn(int handle, void *req);
-long	vobjwait(int handle, ObjWait *out);
+long	vobjwait(ObjWait *out);
 
 int	vobjopenstream(uvlong provider, void *req, long len, uvlong rights,
 		VobjId *id);
@@ -94,21 +93,13 @@ int	vobjrevoke(int handle);
 long	vobjio(int handle, uvlong op, void *buf, long n, long timeout);
 long	vobjreadver(int handle, void *buf, long n, long timeout, uvlong *ver);
 int	vobjlist(void *buf, long n);
-int	vobjaccept(int handle, int timeout);
-
-/* UDP6 provider implemented in sysnet6.c over nativeudp6.c. */
-long	vudp6addr(void *addr, long len);
-int	vobjopenudp6(void *req, long len, uvlong rights, VobjId *id);
-long	vobjudp6send(int handle, void *req, long len);
-long	vobjudp6recv(int handle, void *out, long outlen, uvlong timeout);
-void	vudp6_release(Vobj*);
 
 /*
  * Native Pipe, UART and KBD providers.  They live in the same Vobj/Vhand
- * core as bytes, FIFO, TCP, GE and UDP6 and are reached only through the
- * OBJ* five-call ABI; syspipe.c, sysuart.c and syskbd.c keep only the
- * RFORK/exec/exit, OSPAWN and bootstrap-output hooks.  All errors use the
- * normal kernel error mechanism.
+ * core as bytes, FIFO and GE and are reached only through the OBJ* five-call
+ * ABI; syspipe.c, sysuart.c and syskbd.c keep only the RFORK/exec/exit,
+ * OSPAWN and bootstrap-output hooks.  All errors use the normal kernel error
+ * mechanism.
  */
 int	vobjpipecreate(VobjId *id);
 int	vobjpipepeer(int handle);
@@ -153,13 +144,6 @@ void vetherstatus(Veth*, ObjEtherStatus*);
 
 /* CLOSE only when the Handle still names the expected provider kind. */
 int	vobjclosekind(int handle, int kind);
-
-/* TCP6 provider implemented in systcp6.c. */
-Vobj*	vtcp_open(int listener, uchar *addr, int port);
-int	vtcp_accept(Vobj*, int timeout, Vobj**);
-long	vtcp_read(Vobj*, void*, long, long);
-long	vtcp_write(Vobj*, void*, long);
-void	vtcp_release(Vobj*);
 
 /* GE/O provider helpers implemented in sysgefs.c. */
 int	vobjrightsfromo(int rights);

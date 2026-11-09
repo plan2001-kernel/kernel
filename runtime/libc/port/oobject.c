@@ -21,6 +21,8 @@ extern long objclose(int);
 extern long objbind(int, void *, long, unsigned long long,
 		unsigned long long);
 extern long objinvoke(int, void *, long);
+extern long objlist(void *, long);
+extern long objwait(void *);
 
 long
 obj_create(unsigned long long space, unsigned int kind, void *data,
@@ -215,16 +217,6 @@ obj_receive(int subscription, void *env, unsigned long long envcap,
 }
 
 long
-obj_accept(int listener, unsigned long long timeout)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpAccept);
-	c.arg0 = timeout;
-	return obj_invoke(listener, &c, sizeof c);
-}
-
-long
 obj_grant(int handle, unsigned long long rights)
 {
     ObjOpenHandleReq req = {handle, 0};
@@ -245,126 +237,7 @@ obj_revoke(int handle)
 long
 obj_list(void *records, unsigned long long count)
 {
-	ObjCall c;
-
-	callinit(&c, ObjOpList);
-	c.out = records;
-	c.outlen = count;
-	return obj_invoke(0, &c, sizeof c);
-}
-
-long
-obj_listen(unsigned char *addr, unsigned int port)
-{
-	VobjTcpReq req;
-
-	if(addr == nil)
-		return -1;
-	memset(&req, 0, sizeof req);
-	memmove(req.addr, addr, 16);
-	req.port = port;
-	req.flags = 0;
-	return obj_open(ObjOpenTcpListen, &req, sizeof req, 0, nil);
-}
-
-long
-obj_connect(unsigned char *addr, unsigned int port)
-{
-	VobjTcpReq req;
-
-	if(addr == nil)
-		return -1;
-	memset(&req, 0, sizeof req);
-	memmove(req.addr, addr, 16);
-	req.port = port;
-	req.flags = 0;
-	return obj_open(ObjOpenTcpConnect, &req, sizeof req, 0, nil);
-}
-
-long
-obj_udp6_addr(unsigned char *addr)
-{
-	ObjCall c;
-
-	if(addr == nil)
-		return -1;
-	callinit(&c, ObjOpNet6Addr);
-	c.out = addr;
-	c.outlen = OBJ_NET6_ADDRLEN;
-	return obj_invoke(0, &c, sizeof c);
-}
-
-long
-obj_udp6_open_rights(unsigned char *addr, unsigned int port,
-		unsigned long long rights)
-{
-	ObjOpenUdp6Req req;
-
-	if(addr == nil)
-		return -1;
-	memset(&req, 0, sizeof req);
-	memmove(req.addr, addr, 16);
-	req.port = port;
-	req.flags = 0;
-	return obj_open(ObjOpenUdp6, &req, sizeof req, rights, nil);
-}
-
-long
-obj_udp6_open(unsigned char *addr, unsigned int port)
-{
-	return obj_udp6_open_rights(addr, port, 0);
-}
-
-long
-obj_udp6_sendto(int handle, unsigned char *addr, unsigned int port,
-		void *data, unsigned long long len)
-{
-	ObjUdp6SendReq req;
-	unsigned char buf[sizeof(ObjUdp6SendReq) + OBJ_UDP6_MAXPAYLOAD];
-	ObjCall c;
-
-	if(addr == nil || len > OBJ_UDP6_MAXPAYLOAD || (len != 0 && data == nil))
-		return -1;
-	memset(&req, 0, sizeof req);
-	memmove(req.addr, addr, 16);
-	req.port = port;
-	req.len = (unsigned int)len;
-	memmove(buf, &req, sizeof req);
-	if(len != 0)
-		memmove(buf + sizeof req, data, len);
-	callinit(&c, ObjOpSendTo);
-	c.in = buf;
-	c.inlen = sizeof req + len;
-	return obj_invoke(handle, &c, sizeof c);
-}
-
-long
-obj_udp6_recvfrom(int handle, void *data, unsigned long long cap,
-		unsigned char *peersrc, unsigned long long timeout)
-{
-	ObjUdp6RecvHdr hdr;
-	unsigned char buf[sizeof(ObjUdp6RecvHdr) + OBJ_UDP6_MAXPAYLOAD];
-	ObjCall c;
-	long r;
-
-	if(data == nil || peersrc == nil || cap == 0
-	|| cap > OBJ_UDP6_MAXPAYLOAD || timeout > 0xffffffffULL)
-		return -1;
-	callinit(&c, ObjOpRecvFrom);
-	c.out = buf;
-	c.outlen = sizeof hdr + cap;
-	c.arg0 = timeout;
-	r = obj_invoke(handle, &c, sizeof c);
-	if(r < 0)
-		return r;
-	memmove(&hdr, buf, sizeof hdr);
-	if((unsigned long long)r > cap)
-		return -1;
-	memmove(data, buf + sizeof hdr, (unsigned long long)r);
-	memmove(peersrc, hdr.addr, 16);
-	peersrc[16] = hdr.port >> 8;
-	peersrc[17] = hdr.port;
-	return r;
+	return objlist(records, (long)count);
 }
 
 /* Native Pipe, UART and KBD userland adapters.  They add no kernel entry
@@ -397,14 +270,45 @@ obj_pipe_inherit(int handle, unsigned int rights)
 	return obj_invoke(handle, &c, sizeof c);
 }
 
-/* Discovery-local UART port count; not a Handle operation. */
+/* Discovery helper: count ObjDeviceUart records in the authorized common
+ * device catalog.  There is no handle-less INVOKE operation and no UART
+ * object invented just to report a count. */
 long
 obj_uart_count(void)
 {
-	ObjCall c;
+	ObjDeviceEntry *e;
+	int cat, n, i, count;
 
-	callinit(&c, ObjOpUartCount);
-	return obj_invoke(0, &c, sizeof c);
+	cat = (int)obj_devices_open(0);
+	if(cat < 0)
+		return -1;
+	n = (int)obj_device_list(cat, nil, 0);
+	if(n < 0 || n > OBJ_DEVICE_LISTMAX){
+		obj_close(cat);
+		return n < 0 ? n : -1;
+	}
+	if(n == 0){
+		obj_close(cat);
+		return 0;
+	}
+	e = malloc(n * sizeof *e);
+	if(e == nil){
+		obj_close(cat);
+		return -1;
+	}
+	n = (int)obj_device_list(cat, e, (unsigned int)n);
+	if(n < 0){
+		free(e);
+		obj_close(cat);
+		return -1;
+	}
+	count = 0;
+	for(i = 0; i < n; i++)
+		if(e[i].family == ObjDeviceUart)
+			count++;
+	free(e);
+	obj_close(cat);
+	return count;
 }
 
 long
@@ -520,21 +424,9 @@ obj_usb_ctl(int handle, unsigned int operation, void *data, unsigned long long l
 long
 obj_wait(ObjWait *w)
 {
-	ObjCall c;
-	int h;
-	long r;
-
 	if(w == nil)
 		return -1;
-	h = obj_open(ObjOpenProcessSelf, nil, 0, Vcontrol, nil);
-	if(h < 0)
-		return -1;
-	callinit(&c, ObjOpWait);
-	c.out = w;
-	c.outlen = sizeof *w;
-	r = obj_invoke(h, &c, sizeof c);
-	obj_close(h);
-	return r;
+	return objwait(w);
 }
 
 long

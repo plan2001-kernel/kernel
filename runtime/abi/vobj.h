@@ -27,8 +27,8 @@ enum {
 	Vcontrol	= 1<<6,	/* revoke/close a FIFO for all subscribers */
 	Vdelegate	= 1<<7,	/* create attenuated handles */
 	Vwrite		= 1<<8,	/* write stream/GE bytes where the provider allows */
-	Vaccept		= 1<<9,	/* accept connections from a listener object */
-	Vconnect	= 1<<10,	/* create a connection from a connection provider */
+	Vaccept		= 1<<9,	/* reserved historical connection right */
+	Vconnect	= 1<<10,	/* reserved historical connection right */
 	Vcreate		= 1<<11,	/* create persistent objects in an O Space */
 	Vcommit		= 1<<12,	/* commit a persistent O Space transaction */
 	Vexecute	= 1<<13,	/* execute/load a GE/O object into a child */
@@ -38,11 +38,9 @@ enum {
 enum {
 	VkindBytes	= 0,	/* immutable byte content, including empty */
 	VkindFifo	= 1,	/* message-framed ObjectFIFO */
-	VkindTcp	= 2,	/* TCP listener or connection */
-	VkindGe		= 3,	/* persistent GE/O object capability */
+	VkindGe		= 3,	/* persistent GE/O object capability (2 reserved) */
 	VkindSpace	= 4,	/* authorized open O Space capability */
-	VkindUdp6	= 5,	/* native UDP6 datagram endpoint capability */
-	VkindPipe	= 6,	/* one end of a native byte-stream Pipe pair */
+	VkindPipe	= 6,	/* one end of a native byte-stream Pipe pair (5 reserved) */
 	VkindUart	= 7,	/* native UART port, mode from OPEN */
 	VkindKbd	= 8,	/* exclusive PS/2 scan-code source */
 	VkindUsb	= 9,	/* USB service: endpoint metadata, no I/O */
@@ -52,17 +50,16 @@ enum {
 	VkindDevice = 14,
 	VkindNamespaceView = 15,	/* sealed role grants */
 	VkindNamespaceControl = 16,	/* caller's current namespace */
-	VkindProcessSelf = 12,	/* caller's own BSEG heap break */
+	/* Kinds 2 (TCP), 5 (UDP6) and 12 (ProcessSelf) are reserved historical
+	 * identifiers and are never installed. */
 };
 
-/* VOBJOPEN providers.  These select a concrete provider, not a data schema. */
+/* VOBJOPEN providers.  These select a concrete provider, not a data schema.
+ * Providers 1, 2 and 6 are reserved historical TCP6/UDP6 identifiers. */
 enum {
-	VopenTcpListen	= 1,
-	VopenTcpConnect	= 2,
 	VopenGe		= 3,
 	VopenSpace	= 4,	/* authorized name -> open O Space */
 	VopenGeSpace	= 5,	/* authorized open O Space + OID -> GE object */
-	VopenUdp6	= 6,	/* authorized native UDP6 endpoint bind */
 };
 
 /* Generic object I/O operations for VOBJIO. */
@@ -115,12 +112,6 @@ typedef struct VobjListRec {
 	unsigned long long	space;
 	unsigned long long	oid;
 } VobjListRec;
-
-typedef struct VobjTcpReq {
-	unsigned char		addr[16];
-	unsigned int		port;
-	unsigned int		flags;
-} VobjTcpReq;
 
 typedef struct VobjGeReq {
 	int			ospace;

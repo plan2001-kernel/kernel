@@ -355,10 +355,6 @@ vobjput(Vobj *o)
 			s = next;
 		}
 		free(f);
-	}else if(o->kind == VkindTcp){
-		vtcp_release(o);
-	}else if(o->kind == VkindUdp6){
-		vudp6_release(o);
 	}else if(o->kind == VkindPipe && o->priv != nil){
 		Vpipe *vp = o->priv;
 		Vobj *peer;
@@ -2113,10 +2109,9 @@ kbdstream(void *buf, long n)
 	return r;
 }
 
-/* LED state is a shared hardware control, not scan-code authority.  Handle 0
- * is the explicit eve-only global control and does not claim the PS/2
- * controller; this preserves the historical LED-only capability.  A
- * nonzero handle names a KBD Handle and must carry Vcontrol. */
+/* LED state is a shared hardware control, not scan-code authority.  A
+ * nonzero KBD Handle carrying Vcontrol is required: there is no handle-less
+ * global control and no implicit authority from a numeric selector. */
 int
 vobjkbdleds(int handle, int leds)
 {
@@ -2124,10 +2119,8 @@ vobjkbdleds(int handle, int leds)
 
 	if(!iseve())
 		error(Eperm);
-	if(handle == 0){
-		kbdsetleds(leds);
-		return 0;
-	}
+	if(handle == 0)
+		error(Ebadarg);
 	h = vlookup(handle, Vcontrol);
 	if(h->obj->kind != VkindKbd){
 		vhandput(h);
@@ -2434,6 +2427,19 @@ vobjdevicelist(int handle, void *out, long bytes)
 	}
     total += vetherlist(total < cap ? (ObjDeviceEntry*)((uchar*)out+total*sizeof e) : nil,
         total < cap ? cap-total : 0);
+	/* UART ports are discovery-only catalog records.  Opening still uses
+	 * ObjOpenUart, which owns the provider-specific rights and lifetime;
+	 * there is no UART object invented just to count ports. */
+	n = uartnports();
+	for(i = 0; i < n; i++){
+		memset(&e, 0, sizeof e);
+		e.version = OBJ_DEVICE_ABI_VERSION;
+		e.family = ObjDeviceUart;
+		e.selector0 = i;
+		if(total < cap)
+			memmove((uchar*)out + total*sizeof e, &e, sizeof e);
+		total++;
+	}
 	poperror();
 	free(entries);
 	vhandput(h);
@@ -2873,39 +2879,6 @@ vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id)
 	return h;
 }
 
-/* ProcessSelf is the caller's typed child-wait capability (Vcontrol). */
-int
-vobjprocessselfopen(uvlong rights, VobjId *id)
-{
-	Vobj *o;
-	int h, defrights, allowed;
-
-	/* The sole ProcessSelf operation is typed child wait (Vcontrol). */
-	defrights = Vcontrol;
-	allowed = Vcontrol;
-	if(rights == 0)
-		rights = defrights;
-	if((rights & ~(uvlong)allowed) != 0)
-		error(Eperm);
-	o = vobjnewkind(VkindProcessSelf, 0);
-	if(o == nil)
-		error(Enomem);
-	o->provider = ObjOpenProcessSelf;
-	if(waserror()){
-		vobjput(o);
-		nexterror();
-	}
-	h = vobjinstallobj(o, (int)rights);
-	poperror();
-	if(id != nil){
-		id->incarnation = o->incarnation;
-		id->space = o->space;
-		id->oid = o->oid;
-	}
-	vobjput(o);
-	return h;
-}
-
 int
 vobjnamespaceopen(uvlong rights, VobjId *id)
 {
@@ -3125,27 +3098,15 @@ vobjospawn(int handle, void *req)
 }
 
 long
-vobjwait(int handle, ObjWait *out)
+vobjwait(ObjWait *out)
 {
-	Vobj *o;
 	Waitmsg w;
 	ulong pid;
 	ulong n;
 
 	if(out == nil)
 		error(Ebadarg);
-	o = vobjholdobj(handle, Vcontrol);
-	if(o->kind != VkindProcessSelf){
-		vobjput(o);
-		error(Ebadarg);
-	}
-	if(waserror()){
-		vobjput(o);
-		nexterror();
-	}
 	pid = pwait(&w);
-	poperror();
-	vobjput(o);
 	memset(out, 0, sizeof *out);
 	out->pid = (long long)pid;
 	out->time[0] = w.time[0];
@@ -3222,14 +3183,6 @@ vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 			n = o->size;
 		memmove(buf, o->data, n);
 		r = n;
-		break;
-	case VkindTcp:
-		if(n < 0 || n > Vobjpaymax)
-			error(Ebadarg);
-		if(n > 0)
-			validaddr((uintptr)buf, n, op == VioRead ? 1 : 0);
-		r = op == VioRead ? vtcp_read(o, buf, n, timeout)
-				  : vtcp_write(o, buf, n);
 		break;
 	case VkindGe:
 		if(n < 0 || n > Vobjpaymax)
@@ -3329,7 +3282,6 @@ int
 vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 {
 	Vobj *o;
-	VobjTcpReq tr;
 	VobjGeReq gr;
 	Ohand *oh;
 	int handle, defrights, ceiling;
@@ -3340,24 +3292,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		error(Ebadarg);
 	o = nil;
 	oh = nil;
-	if(provider == VopenTcpListen || provider == VopenTcpConnect){
-		if(req == nil || len != sizeof tr)
-			error(Ebadarg);
-		validaddr((uintptr)req, sizeof tr, 0);
-		memmove(&tr, req, sizeof tr);
-		if(tr.flags != 0)
-			error(Ebadarg);
-		defrights = provider == VopenTcpListen
-			? (Vaccept|Vmeta|Vcontrol|Vdelegate)
-			: (Vread|Vwrite|Vmeta|Vdelegate);
-		if(rights == 0)
-			rights = defrights;
-		if((rights & ~(uvlong)defrights) != 0
-		|| (provider == VopenTcpListen && (rights & Vaccept) == 0)
-		|| (provider == VopenTcpConnect && (rights & (Vread|Vwrite)) == 0))
-			error(Eperm);
-		o = vtcp_open(provider == VopenTcpListen, tr.addr, (int)tr.port);
-	}else if(provider == VopenSpace){
+	if(provider == VopenSpace){
 		Ohand *cap;
 		if(req == nil || len <= 0 || len >= 256)
 			error(Ebadarg);
@@ -3438,30 +3373,6 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return handle;
-}
-
-int
-vobjaccept(int handle, int timeout)
-{
-	Vobj *lo, *c;
-	int h;
-
-	lo = vobjholdobj(handle, Vaccept);
-	if(waserror()){
-		vobjput(lo);
-		nexterror();
-	}
-	vtcp_accept(lo, timeout, &c);
-	poperror();
-	vobjput(lo);
-	if(waserror()){
-		vobjput(c);
-		nexterror();
-	}
-	h = vobjinstallobj(c, Vread|Vwrite|Vmeta|Vdelegate);
-	poperror();
-	vobjput(c);
-	return h;
 }
 
 /*

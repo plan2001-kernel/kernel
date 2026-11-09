@@ -17,10 +17,10 @@ struct Uartcfg {
 
 /*
  * UART access is reached only through the five-operation OBJ ABI:
- * OBJINVOKE(ObjOpUartCount) discovers the port index,
- * OBJOPEN(ObjOpenUart) opens one, OBJINVOKE(UartCtl/UartStatus) controls it,
- * and OBJCLOSE releases it.  The historical UART* numbers are reserved and
- * dispatch to nothing.
+ * OBJINVOKE(ObjOpDeviceList) reports ObjDeviceUart discovery records with the
+ * port index in selector0, OBJOPEN(ObjOpenUart) opens one,
+ * OBJINVOKE(UartCtl/UartStatus) controls it, and OBJCLOSE releases it.  The
+ * historical UART* numbers are reserved and dispatch to nothing.
  */
 
 #endif

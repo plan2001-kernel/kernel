@@ -3,11 +3,11 @@
 #include "../../abi/obj.h"
 
 /*
- * WAIT/AWAIT are typed OBJINVOKE(ObjOpWait) operations now.  The kernel
- * returns one bounded record (pid, user/sys/real time and the exact status
- * text); these adapters keep the historical libc APIs.  await() formats the
- * same five fields as before, while wait() allocates the historical
- * Waitmsg with a trailing NUL-terminated status string.
+ * WAIT/AWAIT use the direct typed OBJWAIT syscall now.  The kernel returns
+ * one bounded record (pid, user/sys/real time and the exact status text);
+ * these adapters keep the historical libc APIs.  await() formats the same
+ * five fields as before, while wait() allocates the historical Waitmsg with
+ * a trailing NUL-terminated status string.
  */
 
 int

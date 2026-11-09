@@ -120,9 +120,9 @@ zerofill(void *va, long n)
 }
 
 /* UJ1 fixed read-only status snapshot: version, CPUs, physical/user bytes,
- * native O partition capacity. No kernel pointers or approximate free space. */
+ * native O partition capacity. No kernel pointers or approximate free space.
+ * Word 5 is reserved (formerly the removed native TCP6 endpoint count). */
 extern uvlong ovolcapacity(void);
-extern int tcp6endpointcount(void);
 uintptr
 syssyssnapshot(sysva_list list)
 {
@@ -133,7 +133,7 @@ syssyssnapshot(sysva_list list)
 #endif
  validaddr((uintptr)user,sizeof v,1);
  v[0]=1;v[1]=conf.nmach;v[2]=(uvlong)conf.npage*BY2PG;
- v[3]=(uvlong)conf.upages*BY2PG;v[4]=ovolcapacity();v[5]=tcp6endpointcount();
+ v[3]=(uvlong)conf.upages*BY2PG;v[4]=ovolcapacity();v[5]=0;
  lock(&palloc.lk);v[6]=(uvlong)palloc.freecount*BY2PG;unlock(&palloc.lk);
  memmove(user,v,sizeof v);return 0;
 }

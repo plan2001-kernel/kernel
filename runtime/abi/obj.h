@@ -21,16 +21,15 @@
 
 #define OBJ_ABI_VERSION 1
 
-/* obj_open providers.  The first three match VOBJOPEN. */
+/* obj_open providers.  Numbers 1, 2, 3, 8 and 14 are reserved historical
+ * identifiers for the retired TCP6/UDP6 object interface, the old ObjOpenGe
+ * alias and the synthetic ProcessSelf handle.  They have no provider,
+ * declaration or handler. */
 enum {
-	ObjOpenTcpListen	= 1,
-	ObjOpenTcpConnect	= 2,
-	ObjOpenGe		= 3, /* reserved: use ObjOpenGeSpace */
 	ObjOpenHandle		= 4,
 	ObjOpenBinding		= 5,
 	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */
 	ObjOpenGeSpace		= 7,	/* Space handle + OID -> persistent object */
-	ObjOpenUdp6		= 8,	/* authorized native UDP6 endpoint bind */
 	ObjOpenPipe		= 9,	/* provider tag for a native Pipe endpoint */
 	ObjOpenUart		= 10,	/* privileged native UART port open */
 	ObjOpenKbd		= 11,	/* privileged exclusive PS/2 claim */
@@ -38,7 +37,6 @@ enum {
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
-	ObjOpenProcessSelf	= 14,	/* caller's typed child wait */
 	ObjOpenNamespaceCurrent = 17,	/* caller's namespace control */
 };
 
@@ -64,7 +62,12 @@ enum {
 	ObjBindRemove		= 0x100,
 };
 
-/* OBJINVOKE operations. */
+/* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 23, 24 and 35 are reserved
+ * historical identifiers for the retired TCP6/UDP6 object interface, the
+ * handle-less process listing and UART count, and the synthetic ProcessSelf
+ * wait.  They have no dispatch handler.  Process handle introspection is the
+ * direct bounded OBJLIST syscall and child wait is the direct typed OBJWAIT
+ * syscall. */
 enum {
 	ObjOpInfo	= 1,
 	ObjOpRead	= 2,
@@ -73,14 +76,10 @@ enum {
 	ObjOpSend	= 5,
 	ObjOpRecv	= 6,
 	ObjOpSubscribe	= 7,
-	ObjOpAccept	= 8,
 	ObjOpGrant	= 9,	/* RETIRED: OBJOPEN(ObjOpenHandle) */
 	ObjOpRevoke	= 10,
-	ObjOpList	= 11,
 	ObjOpCreatePersist = 12,	/* RETIRED: OBJCREATE(ObjKindGe) */
 	ObjOpCommit	= 13,	/* Space/GE handle: commit pending writes */
-	ObjOpSendTo	= 14,	/* UDP6 handle: send one complete datagram */
-	ObjOpRecvFrom	= 15,	/* UDP6 handle: receive one complete datagram */
 	ObjOpPipePeer	= 16,	/* Pipe end 0: install and return the peer Handle */
 	ObjOpUartCtl	= 17,	/* UART handle: apply one bounded Uartcfg */
 	ObjOpUartStatus	= 18,	/* UART handle: read native status bytes */
@@ -88,8 +87,6 @@ enum {
 	ObjOpUsbList	= 20,	/* USB service: bounded Usbentry snapshot */
 	ObjOpUsbEpOpen	= 21,	/* USB service: open one endpoint Handle */
 	ObjOpPipeInherit = 22,	/* Pipe handle: arm one-shot RFORK selection */
-	ObjOpUartCount	= 23,	/* no Handle: discovery-local UART port count */
-	ObjOpNet6Addr	= 24,	/* no Handle: authorized IPv6 link-local lookup */
 	ObjOpPutOid	= 25,	/* Space handle: replace one named OID, no commit */
 	ObjOpHeapBreak	= 26,	/* RETIRED: direct BRK_(24) is used */
 	ObjOpTimeNow	= 27,	/* RETIRED: direct _NSEC(53) */
@@ -100,7 +97,6 @@ enum {
 	ObjOpRfork	= 32,	/* RETIRED: direct RFORK(19) is used */
 	ObjOpOspawn	= 33,	/* Space handle + OID: spawn a static ELF child */
 	ObjOpOterminate	= 34,	/* RETIRED: direct OTERMINATE(93) is used */
-	ObjOpWait	= 35,	/* ProcessSelf: wait one child, typed ObjWait record */
 	ObjOpDeviceList = 37,	/* catalog: bounded discovery records */
 	ObjOpDeviceSend = 38,	/* device: one complete provider message */
 	ObjOpDeviceRecv = 39,	/* device: completed immutable bytes Handle */
@@ -111,6 +107,18 @@ enum {
 	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
 	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
 };
+
+/* Classification after the OBJINVOKE pragmatization:
+ *  - Object-bound (real Handle + identity/rights/lifetime): GE/O read/write/
+ *    commit, Space+OID PutOid/Ospawn, ObjectFIFO, namespace views, Pipe, UART,
+ *    KBD, USB service/endpoint and common device sessions.
+ *  - Direct syscalls: process handle listing (OBJLIST) and child wait
+ *    (OBJWAIT), because neither concerns a target object capability.
+ *  - Discovery: UART ports are ObjOpDeviceList records, not a handle-less
+ *    INVOKE operation; opening still uses ObjOpenUart.
+ *  - Removed: the TCP6/UDP6 object interface.  Raw Ethernet and ObjectFIFO
+ *    remain; upper-layer protocols are userspace.
+ */
 
 /* Namespace operations require ObjOpenNamespaceCurrent with Vcontrol.
  * Create takes 1..32 fixed 32-byte NUL-terminated role names in in/inlen
@@ -137,6 +145,7 @@ enum {
 enum {
     ObjDeviceUsbControl = 1,
     ObjDeviceEthernet = 2,
+    ObjDeviceUart = 3,             /* discovery record only; open via ObjOpenUart */
     ObjDeviceUsbClearHalt = 1,
     ObjDeviceEtherStatus = 2,
     ObjDeviceEtherDetach = 3,
@@ -249,12 +258,9 @@ typedef struct ObjOpenConsoleReq {
 	unsigned int		reserved;
 } ObjOpenConsoleReq;
 
-/* obj_open(ObjOpenProcessSelf): bind the calling process's own process state.
- * req is NULL and len is zero.  The returned Handle carries Vcontrol;
- * it grants no delegation and cannot name
- * another process or any other memory.  Heap break, sleep, note registration,
- * note return, rfork, oterminate and exits use their direct historical
- * syscalls and no longer have OBJINVOKE variants. */
+/* Heap break, sleep, note registration, note return, rfork, child wait,
+ * oterminate and exits use their direct historical syscalls.  There is no
+ * ProcessSelf object and no OBJINVOKE variant for them. */
 
 /* obj_open(ObjOpenHandle): the source capability and an optional attenuation.
  * rights==0 copies the source rights.  Knowing the numeric Handle alone in
@@ -276,22 +282,12 @@ typedef struct ObjOpenGeSpaceReq {
 	unsigned long long	oid;
 } ObjOpenGeSpaceReq;
 
-/* obj_open(ObjOpenUdp6): bind one native UDP6 endpoint to a local IPv6
- * address and port.  The address is 16 raw IPv6 bytes; flags is zero.  The
- * endpoint is a VkindUdp6 capability, not a socket, file descriptor or
- * ambient network permission.  The former NET6* syscall numbers are
- * reserved; all UDP6 use goes through the five OBJ* calls. */
-typedef struct ObjOpenUdp6Req {
-	unsigned char		addr[16];
-	unsigned int		port;
-	unsigned int		flags;
-} ObjOpenUdp6Req;
-
-/* obj_open(ObjOpenUart): port is the discovery-local UART index returned by
- * OBJINVOKE(ObjOpUartCount=23).  mode is OREAD(0), OWRITE(1) or ORDWR(2);
- * flags and reserved are zero.  The call requires the existing
- * eve/bootstrap authority.  Read requires Vread, write requires Vwrite,
- * UartCtl requires Vcontrol and UartStatus/Info require Vmeta. */
+/* obj_open(ObjOpenUart): port is the discovery-local UART index reported by
+ * OBJINVOKE(ObjOpDeviceList) records with family ObjDeviceUart (selector0).
+ * mode is OREAD(0), OWRITE(1) or ORDWR(2); flags and reserved are zero.  The
+ * call requires the existing eve/bootstrap authority.  Read requires Vread,
+ * write requires Vwrite, UartCtl requires Vcontrol and UartStatus/Info require
+ * Vmeta. */
 typedef struct ObjOpenUartReq {
 	int			port;
 	int			mode;
@@ -369,54 +365,11 @@ typedef struct ObjUsbEntry {
  * explicit `pipes` list is a separate path and never consumes this mark.
  * The result is 0. */
 
-/* obj_invoke(ObjOpUartCount): return the discovery-local UART port count.
- * This is device discovery, not a Handle operation; the caller passes
- * handle 0, and in/out and their lengths must be zero.  The value is the
- * same index space accepted by obj_open(ObjOpenUart). */
-
-/* obj_invoke(ObjOpKbdLeds): set the shared keyboard LED state.  The call
- * always requires the trusted eve/bootstrap user.  handle 0 is the
- * privileged global control that does not claim the scan-code controller;
- * this keeps the historical LED-only authority.  A nonzero handle must name
- * a KBD Handle carrying Vcontrol and is the per-Handle form.  in/out and
- * their lengths must be zero; arg0 carries the LED bits.  The result is 0. */
-
-/* obj_invoke(ObjOpNet6Addr): copy the active native interface's IPv6
- * link-local address (16 raw bytes) into out.  This is an authorized
- * metadata operation, not an endpoint open: it requires the same
- * obootstrap/net6permit gate as UDP6 itself and does not reserve a port.
- * The caller passes handle 0, in==NULL and inlen==0; outlen must be 16.
- * The result is 0.  The former NET6ADDR call is reserved. */
-#define OBJ_NET6_ADDRLEN 16
-
-/* The same 1232-byte IPv6 minimum-MTU payload limit as the retired
- * NET6SENDTO/RECVFROM calls.  A provider accepts no datagram beyond this
- * bound. */
-#define OBJ_UDP6_MAXPAYLOAD 1232
-
-/* obj_invoke(ObjOpSendTo): in points to this header followed by exactly
- * len payload bytes.  flags and reserved must be zero.  port is host byte
- * order.  A successful call transfers one complete datagram. */
-typedef struct ObjUdp6SendReq {
-	unsigned char		addr[16];
-	unsigned int		port;
-	unsigned int		flags;
-	unsigned int		len;
-	unsigned int		reserved;
-} ObjUdp6SendReq;
-
-/* obj_invoke(ObjOpRecvFrom): out points to this header followed by the
- * caller's payload capacity.  On success the kernel fills addr and port with
- * the sender, len with the payload byte count, and copies the payload after
- * the header.  The result is the payload byte count.  arg0 is the timeout in
- * milliseconds; 0xffffffff waits indefinitely. */
-typedef struct ObjUdp6RecvHdr {
-	unsigned char		addr[16];
-	unsigned int		port;
-	unsigned int		len;
-	unsigned int		flags;
-	unsigned int		reserved;
-} ObjUdp6RecvHdr;
+/* obj_invoke(ObjOpKbdLeds): set the shared keyboard LED state through an
+ * authorized KBD Handle carrying Vcontrol.  The call always requires the
+ * trusted eve/bootstrap user; handle 0 is rejected, so LED state is never a
+ * global-handle privilege bypass.  in/out and their lengths must be zero;
+ * arg0 carries the LED bits.  The result is 0. */
 
 /*
  * One typed, versioned INVOKE request/response.
@@ -444,16 +397,10 @@ typedef struct ObjCall {
 	unsigned int		reserved;
 } ObjCall;
 
-/* RFORK(19) and OTERMINATE(93) are direct historical syscalls again.  RFORK
- * keeps the RFPROC child/PID return and the group-only form; OTERMINATE
- * keeps the direct-child, parentpid, kp and exiting checks.  Neither operation
- * has an OBJINVOKE variant. */
-/* obj_invoke(ObjOpWait): wait for one exited child and return a typed record
- * into out (outlen == sizeof(ObjWait)).  The provider Handle must be the
- * caller's VkindProcessSelf Handle carrying Vcontrol.  The kernel uses the
- * existing pwait() core and copies pid, the three accumulated times and the
- * status text; it does not format the record as a text message.  A failed
- * wait raises the ordinary kernel error (Enochild, etc.). */
+/* RFORK(19) and OTERMINATE(93) are direct historical syscalls.  RFORK keeps
+ * the RFPROC child/PID return and the group-only form; OTERMINATE keeps the
+ * direct-child, parentpid, kp and exiting checks.  Child wait is the direct
+ * typed OBJWAIT syscall; none of these has an OBJINVOKE variant. */
 #define OBJ_WAITMSG_MAX 128
 
 typedef struct ObjWait {
@@ -471,8 +418,8 @@ typedef struct ObjWait {
  * copied from user memory, and argv/options are validated exactly as the
  * former OSPAWN(92) validated them, including the Ospawn and optional
  * Oinherit/Oinheritv blocks.  The child receives the same registers, stack,
- * argv, CPU affinity, memory budget, namespace/view, Pipe, environment,
- * network and Vhand inheritance semantics.  The result is the child PID. */
+ * argv, CPU affinity, memory budget, namespace/view, Pipe, environment and
+ * Vhand inheritance semantics.  The result is the child PID. */
 typedef struct ObjOspawnReq {
 	unsigned long long	oid;
 	char			**argv;
@@ -484,8 +431,9 @@ typedef struct ObjOspawnReq {
 
 #define OBJ_EXITMSG_MAX 128
 
-/* Process-lifecycle adapters over OBJINVOKE.  Wait and OSPAWN still use the
- * typed ABI; rfork, oterminate and exits use their direct historical syscalls. */
+/* Process-lifecycle adapters.  Wait is the direct typed OBJWAIT syscall;
+ * OSPAWN remains an explicit Space+OID object operation; rfork, oterminate
+ * and exits use their direct historical syscalls. */
 long obj_wait(ObjWait *w);
 long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options);
@@ -526,27 +474,19 @@ long obj_subscribe(int fifo, unsigned long long rights,
 long obj_publish(int fifo, int object, void *env, unsigned long long envlen);
 long obj_receive(int subscription, void *env, unsigned long long envcap,
 		unsigned long long timeout, unsigned long long *got);
-long obj_accept(int listener, unsigned long long timeout);
 long obj_grant(int handle, unsigned long long rights);
 long obj_revoke(int handle);
+/* Direct bounded process introspection (OBJLIST), not an INVOKE operation.
+ * It reports only the caller's own handle table; it never names another
+ * process or copies a capability. */
 long obj_list(void *records, unsigned long long count);
-
-long obj_listen(unsigned char *addr, unsigned int port);
-long obj_connect(unsigned char *addr, unsigned int port);
-
-long obj_udp6_addr(unsigned char *addr);
-long obj_udp6_open(unsigned char *addr, unsigned int port);
-long obj_udp6_open_rights(unsigned char *addr, unsigned int port,
-		unsigned long long rights);
-long obj_udp6_sendto(int handle, unsigned char *addr, unsigned int port,
-		void *data, unsigned long long len);
-long obj_udp6_recvfrom(int handle, void *data, unsigned long long cap,
-		unsigned char *peersrc, unsigned long long timeout);
 
 /* Native byte-stream providers over the same five-call ABI. */
 long obj_pipe_create(ObjId *out);
 long obj_pipe_peer(int handle);
 long obj_pipe_inherit(int handle, unsigned int rights);
+/* Discovery helper: counts ObjDeviceUart catalog records.  There is no UART
+ * object and no handle-less INVOKE operation. */
 long obj_uart_count(void);
 long obj_uart_open(int port, int mode);
 long obj_uart_ctl(int handle, void *cfg);
