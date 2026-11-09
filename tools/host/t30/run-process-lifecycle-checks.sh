@@ -21,6 +21,10 @@ python3 - "$T30_OUT/boot-boot.log" <<'PY'
 import re,sys
 from pathlib import Path
 s=Path(sys.argv[1]).read_text()
+# The opt-in lifecycle diag build emits complete kernel lines that can
+# interleave with a console write.  Remove them before the strict marker
+# checks; the diag runner consumes them separately.
+s=re.sub(r'T30LIFE [goc][+-] id=\d+ pgrp=-?\d+ octx=-?\d+\n','',s)
 checks=re.findall(r'^T30-PASS (\d+) (.*)$',s,re.M)
 result=re.search(r'^T30-FINISH (\d+) PASS$',s,re.M)
 assert result, 'missing executed result'

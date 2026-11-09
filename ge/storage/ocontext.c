@@ -4,6 +4,7 @@
 #include "dat.h"
 #include "fns.h"
 #include "../../kernel/core/error.h"
+#include "../../kernel/core/lifediag.h"
 #include "ocontext.h"
 
 typedef struct Obinding Obinding;
@@ -31,6 +32,7 @@ octxnew(void)
 	c = mallocz(sizeof *c, 1);
 	if(c == nil) return nil;
 	c->ref.ref = 1;
+	lifeoctx(1);
 	return c;
 }
 
@@ -41,6 +43,7 @@ octxput(void *v)
 	int i;
 	if(c == nil || decref(&c->ref))
 		return;
+	lifeoctx(-1);
 	for(i=0; i<Obindmax; i++)
 		release(&c->b[i]);
 	free(c);

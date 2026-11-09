@@ -63,6 +63,9 @@ if os.environ.get("PLAN2001_SYSCALL_TRACE") == "1":
     CFLAGS.append("-DPLAN2001_SYSCALL_TRACE")
 if os.environ.get("PLAN2001_ALARM_NOTETEST") == "1":
     CFLAGS.append("-DPLAN2001_ALARM_NOTETEST")
+# Opt-in Pgrp/OContext live-allocation tracing for tools/host/t30.
+if os.environ.get("PLAN2001_LIFECYCLE_DIAG") == "1":
+    CFLAGS.append("-DPLAN2001_LIFECYCLE_DIAG")
 
 INCLUDES = [
     ROOT / "kernel/amd64",

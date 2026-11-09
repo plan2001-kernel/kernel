@@ -36,6 +36,7 @@
 #include	"../../runtime/abi/namespace.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
+#include	"lifediag.h"
 #include	"ocontext.h"
 
 enum {
@@ -412,6 +413,7 @@ vobjput(Vobj *o)
 		}
 		free(ve);
 	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
+		lifecontrol(o->priv, -1);
 		closepgrp(o->priv);
 	}else if(o->kind == VkindGe || o->kind == VkindSpace || o->kind == VkindNamespaceView){
 		if(o->priv != nil)
@@ -2988,6 +2990,7 @@ vobjnamespaceopen(uvlong rights, VobjId *id)
 	o->provider = ObjOpenNamespaceCurrent;
 	o->priv = up->pgrp;
 	incref(&up->pgrp->ref);
+	lifecontrol(o->priv, 1);
 	if(waserror()){
 		vobjput(o);
 		nexterror();

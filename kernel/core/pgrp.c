@@ -4,6 +4,7 @@
 #include	"dat.h"
 #include	"fns.h"
 #include	"../core/error.h"
+#include	"lifediag.h"
 
 void* octxnew(void);
 void* octxcopy(void*);
@@ -24,6 +25,7 @@ newpgrp(void)
 	p->ref.ref = 1;
 	p->ocontext = octxnew();
 	if(p->ocontext == nil){ free(p); error(Enomem); }
+	lifepgrp(p, 1);
 	return p;
 }
 
@@ -82,6 +84,7 @@ void
 closepgrp(Pgrp *p)
 {
 	if(decref(&p->ref) == 0){
+		lifepgrp(p, -1);
 		octxput(p->ocontext);
 		free(p);
 	}
@@ -165,6 +168,70 @@ closefdgrp(Ref *r)
 	free(r);
 }
 
+
+#ifdef PLAN2001_LIFECYCLE_DIAG
+/*
+ * Both counters are sampled under one lock so each event line is a
+ * consistent snapshot.  print() runs after unlocking; kernel event lines can
+ * still interleave with a blocking user console write, so the T30 host
+ * parser removes complete event lines before matching test markers.
+ */
+static Lock lifelk;
+static long pgrplive, octxlive, pgrpseq;
+
+static void
+lifeprint(char kind, int delta, ulong id, long pgrp, long octx)
+{
+	print("T30LIFE %c%c id=%lud pgrp=%ld octx=%ld\n",
+		kind, delta > 0 ? '+' : '-', id, pgrp, octx);
+}
+
+void
+lifepgrp(void *v, int delta)
+{
+	Pgrp *pgrp = v;
+	long p, o;
+	ulong id;
+
+	lock(&lifelk);
+	if(delta > 0)
+		pgrp->diagid = ++pgrpseq;
+	pgrplive += delta;
+	id = pgrp->diagid;
+	p = pgrplive;
+	o = octxlive;
+	unlock(&lifelk);
+	lifeprint('g', delta, id, p, o);
+}
+
+void
+lifecontrol(void *v, int delta)
+{
+	Pgrp *pgrp = v;
+	long p, o;
+	ulong id;
+
+	lock(&lifelk);
+	id = pgrp->diagid;
+	p = pgrplive;
+	o = octxlive;
+	unlock(&lifelk);
+	lifeprint('c', delta, id, p, o);
+}
+
+void
+lifeoctx(int delta)
+{
+	long p, o;
+
+	lock(&lifelk);
+	octxlive += delta;
+	p = pgrplive;
+	o = octxlive;
+	unlock(&lifelk);
+	lifeprint('o', delta, 0, p, o);
+}
+#endif
 
 void
 resrcwait(char *reason)
