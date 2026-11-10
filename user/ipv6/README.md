@@ -1,8 +1,10 @@
-# Minimal MicroPython IPv6 node (T14)
+# Minimal MicroPython IPv6 node (current AMD64 demonstration)
 
 `node.py` is the actual guest userspace implementation. It uses the existing
-T13 Device ABI/ObjectFIFO; it implements no kernel provider, socket, filesystem
-or cryptography. Earlier emulated integration checks are part of Git history.
+device ABI and ObjectFIFO; it implements no kernel provider, socket, filesystem
+or cryptography. This entire document describes the **current implementation**
+and test fixture, not the [target memory-publication IPC](../../docs/ARCHITECTURE.md).
+Phase 6 removes the FIFO dependency after device transport migration.
 
 ## Interface and ownership
 
