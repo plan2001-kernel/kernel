@@ -130,6 +130,12 @@ broken/debug state still owns its mapping, so it remains the active writer
 until that mapping is released; that retention is current Phase 5 lifecycle
 behavior, not a completed writer death.
 
+The Phase 4 three-process MicroPython path grants two regions with explicit
+`SPAWN` vhandles: A writes only the task region, B writes only the answer
+region, and C maps both read-only. Its scalar, delta and immutable 8 KiB
+records, notifications and acknowledgements use those mappings and
+`REGIONWAIT`/`REGIONWAKE`; the path has no `ObjectFIFO` or Pipe transport.
+
 The former named `shared` segment attach and `SG_SHARED` type are deleted;
 `SEGATTACH` now serves only the anonymous `memory` and physical device
 segments. `SG_RONLY` remains a per-mapping property of text, physical and
