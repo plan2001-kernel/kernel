@@ -70,11 +70,12 @@ than inherited parent/child policy.
 ## CURRENT IMPLEMENTATION
 
 The AMD64 ABI currently includes object calls 136–140, `SPAWN(146)`,
-`RFORKEX(143)`, `PROCWAIT(142)`, `OTERMINATE`, `OEXECUTE`,
-`RENDEZVOUS(34)`, `SEMACQUIRE(37)`, `SEMRELEASE(38)` and
-`TSEMACQUIRE(52)`. `BRK_`, `SEGBRK`, `SEGATTACH/DETACH/FREE/FLUSH`
-provide existing VM operations. Rendezvous/semaphore public calls currently
-require a writable segment. The target RO WAIT does not exist.
+`RFORKEX(143)`, `PROCWAIT(142)`, `OTERMINATE`, `OEXECUTE`, `SYSCTL(144)`,
+`IOCTL(145)`, `REGIONWAIT(147)` and `REGIONWAKE(148)`. `BRK_`, `SEGBRK`,
+`SEGATTACH/DETACH/FREE/FLUSH` provide existing VM operations. The retired
+public `RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` calls and
+their user wrappers are gone; no old number is kept as a compatibility
+entry. Internal scheduler `Rendez`/sleep/wakeup remains.
 
 Volatile capability regions are `ObjKindRegion` objects reached through the
 same five-call object ABI. Creation takes a non-zero, page-multiple size up to
@@ -99,6 +100,35 @@ already installed mappings readable/writable until unmap or process exit.
 Those mappings and the pages then retain the region until the last relevant
 reference. A read-only Handle does not carry `Vcontrol` and cannot revoke
 other parties. There is no implicit TLB shootdown or forced unmap.
+Installed mappings, including their writable slot, remain usable for
+`REGIONWAIT`/`REGIONWAKE` after revocation; only new maps are denied.
+
+`REGIONWAIT(mapping base, region offset, expected, timeout)` and
+`REGIONWAKE(mapping base, region offset, count)` operate on an installed
+`SG_REGION` mapping, not a Handle or raw pointer. The publication word is
+64-bit, little-endian and 8-byte aligned; offsets are region-relative and
+bounds/alignment checked. Authority is the caller's mapping: an RO observer
+may wait, the mapping survives Handle close, and a guessed address or another
+process's Handle conveys nothing. Only the unique writable mapping may wake;
+an RO holder cannot. `count` must be positive and the call returns how many
+waiters it woke. `WAIT` applies a fixed order: validate the mapping and word;
+compare the word and return changed (0) if it differs even when no writer is
+present; if it still matches and no RW mapping is active, return 3 immediately
+even for an infinite timeout; otherwise apply the non-blocking rule or enroll
+and sleep. Writer-presence, comparison and enrollment are linearizable under
+one short spin lock with writer-slot acquisition and release. Status 3 means
+"no active writer at check time / the previous writer mapping was released",
+not permanent destruction: a new writer may map later unless revocation denies
+it, and the caller decides whether to retry or treat the stream as ended.
+Releasing the writable mapping notifies enrolled waiters with 3 as a lifecycle
+event, which a rapid replacement writer cannot hide. Normal returns also
+include woken (1) and timeout/non-blocking (2); interruption or an invalid
+mapping raises the ordinary error. Waiters always recheck; a wake carries no
+data and proves no particular value. The kernel does not copy payload bytes.
+An NDebug-terminated or faulting process that the kernel retains in its
+broken/debug state still owns its mapping, so it remains the active writer
+until that mapping is released; that retention is current Phase 5 lifecycle
+behavior, not a completed writer death.
 
 The former named `shared` segment attach and `SG_SHARED` type are deleted;
 `SEGATTACH` now serves only the anonymous `memory` and physical device

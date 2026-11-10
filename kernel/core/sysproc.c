@@ -73,7 +73,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if((flag&RFPROC) == 0) {
 		Ref *ofg;
 		Pgrp *opg;
-		Rgrp *org;
 		Egrp *oeg;
 
 		if(flag & (RFMEM|RFNOWAIT))
@@ -81,7 +80,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 
 		ofg = up->fdgrp;
 		opg = up->pgrp;
-		org = up->rgrp;
 		oeg = up->egrp;
 
 		if(waserror()){
@@ -92,10 +90,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			if(up->pgrp != opg){
 				closepgrp(up->pgrp);
 				up->pgrp = opg;
-			}
-			if(up->rgrp != org){
-				closergrp(up->rgrp);
-				up->rgrp = org;
 			}
 			if(up->egrp != oeg){
 				closeegrp(up->egrp);
@@ -113,10 +107,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			up->pgrp = newpgrp();
 			pgrpcpy(up->pgrp, opg, flag & RFNAMEG);
 		}
-
-		/* Rendezvous group */
-		if(flag & RFREND)
-			up->rgrp = newrgrp();
 
 		/* Environment group */
 		if(flag & (RFENVG|RFCENVG)) {
@@ -136,8 +126,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			closefdgrp(ofg);
 		if(opg != nil && opg != up->pgrp)
 			closepgrp(opg);
-		if(org != nil && org != up->rgrp)
-			closergrp(org);
 		if(oeg != nil && oeg != up->egrp)
 			closeegrp(oeg);
 
@@ -327,15 +315,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		p->pgrp = up->pgrp;
 		if(up->pgrp != nil)
 			incref(&up->pgrp->ref);
-	}
-
-	/* Rendezvous group */
-	if(flag & RFREND)
-		p->rgrp = newrgrp();
-	else {
-		p->rgrp = up->rgrp;
-		if(up->rgrp != nil)
-			incref(&up->rgrp->ref);
 	}
 
 	/* Environment group */
@@ -1332,7 +1311,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	/* Fresh, empty environment group; no inherited namespace or handles. */
 	p->fdgrp = nil;
 	p->pgrp = nil;
-	p->rgrp = nil;
 	p->egrp = newegrp();
 	/* Empty by default; selected initial values can be set by the child. */
 	p->vobjhandles = nil;
@@ -1992,336 +1970,6 @@ uintptr
 sysbrk_(sysva_list list)
 {
 	return ibrk(sysva_arg(list, uintptr), BSEG);
-}
-
-uintptr
-sysrendezvous(sysva_list list)
-{
-	uintptr tag, val, new;
-	Proc *p, **l;
-
-	tag = sysva_arg(list, uintptr);
-	new = sysva_arg(list, uintptr);
-	if(up->rgrp == nil)
-		error(Ebadarg);
-	l = &REND(up->rgrp, tag);
-
-	lock(&up->rgrp->lk);
-	for(p = *l; p != nil; p = p->rendhash) {
-		if(p->rendtag == tag) {
-			*l = p->rendhash;
-			val = p->rendval;
-			p->rendval = new;
-			unlock(&up->rgrp->lk);
-
-			ready(p);
-
-			return val;
-		}
-		l = &p->rendhash;
-	}
-
-	/* Going to sleep here */
-	up->rendtag = tag;
-	up->rendval = new;
-	up->rendhash = *l;
-	*l = up;
-	up->state = Rendezvous;
-	unlock(&up->rgrp->lk);
-
-	sched();
-
-	return up->rendval;
-}
-
-/*
- * The implementation of semaphores is complicated by needing
- * to avoid rescheduling in syssemrelease, so that it is safe
- * to call from real-time processes.  This means syssemrelease
- * cannot acquire any qlocks, only spin locks.
- *
- * Semacquire and semrelease must both manipulate the semaphore
- * wait list.  Lock-free linked lists only exist in theory, not
- * in practice, so the wait list is protected by a spin lock.
- *
- * The semaphore value *addr is stored in user memory, so it
- * cannot be read or written while holding spin locks.
- *
- * Thus, we can access the list only when holding the lock, and
- * we can access the semaphore only when not holding the lock.
- * This makes things interesting.  Note that sleep's condition function
- * is called while holding two locks - r and up->rlock - so it cannot
- * access the semaphore value either.
- *
- * An acquirer announces its intention to try for the semaphore
- * by putting a Sema structure onto the wait list and then
- * setting Sema.waiting.  After one last check of semaphore,
- * the acquirer sleeps until Sema.waiting==0.  A releaser of n
- * must wake up n acquirers who have Sema.waiting set.  It does
- * this by clearing Sema.waiting and then calling wakeup.
- *
- * There are three interesting races here.
-
- * The first is that in this particular sleep/wakeup usage, a single
- * wakeup can rouse a process from two consecutive sleeps!
- * The ordering is:
- *
- * 	(a) set Sema.waiting = 1
- * 	(a) call sleep
- * 	(b) set Sema.waiting = 0
- * 	(a) check Sema.waiting inside sleep, return w/o sleeping
- * 	(a) try for semaphore, fail
- * 	(a) set Sema.waiting = 1
- * 	(a) call sleep
- * 	(b) call wakeup(a)
- * 	(a) wake up again
- *
- * This is okay - semacquire will just go around the loop
- * again.  It does mean that at the top of the for(;;) loop in
- * semacquire, phore.waiting might already be set to 1.
- *
- * The second is that a releaser might wake an acquirer who is
- * interrupted before he can acquire the lock.  Since
- * release(n) issues only n wakeup calls -- only n can be used
- * anyway -- if the interrupted process is not going to use his
- * wakeup call he must pass it on to another acquirer.
- *
- * The third race is similar to the second but more subtle.  An
- * acquirer sets waiting=1 and then does a final canacquire()
- * before going to sleep.  The opposite order would result in
- * missing wakeups that happen between canacquire and
- * waiting=1.  (In fact, the whole point of Sema.waiting is to
- * avoid missing wakeups between canacquire() and sleep().) But
- * there can be spurious wakeups between a successful
- * canacquire() and the following semdequeue().  This wakeup is
- * not useful to the acquirer, since he has already acquired
- * the semaphore.  Like in the previous case, though, the
- * acquirer must pass the wakeup call along.
- *
- * This is all rather subtle.  The code below has been verified
- * with the spin model /sys/src/9/port/semaphore.p.  The
- * original code anticipated the second race but not the first
- * or third, which were caught only with spin.  The first race
- * is mentioned in /sys/doc/sleep.ps, but I'd forgotten about it.
- * It was lucky that my abstract model of sleep/wakeup still managed
- * to preserve that behavior.
- *
- * I remain slightly concerned about memory coherence
- * outside of locks.  The spin model does not take
- * queued processor writes into account so we have to
- * think hard.  The only variables accessed outside locks
- * are the semaphore value itself and the boolean flag
- * Sema.waiting.  The value is only accessed with cmpswap,
- * whose job description includes doing the right thing as
- * far as memory coherence across processors.  That leaves
- * Sema.waiting.  To handle it, we call coherence() before each
- * read and after each write.		- rsc
- */
-
-/* Add semaphore p with addr a to list in seg. */
-static void
-semqueue(Segment *s, long *a, Sema *p)
-{
-	memset(p, 0, sizeof *p);
-	p->addr = a;
-	lock(&s->sema.rz.lk);	/* Sema -> Rendez -> named Lock */
-	p->next = &s->sema;
-	p->prev = s->sema.prev;
-	p->next->prev = p;
-	p->prev->next = p;
-	unlock(&s->sema.rz.lk);
-}
-
-/* Remove semaphore p from list in seg. */
-static void
-semdequeue(Segment *s, Sema *p)
-{
-	lock(&s->sema.rz.lk);
-	p->next->prev = p->prev;
-	p->prev->next = p->next;
-	unlock(&s->sema.rz.lk);
-}
-
-/* Wake up n waiters with addr a on list in seg. */
-static void
-semwakeup(Segment *s, long *a, long n)
-{
-	Sema *p;
-
-	lock(&s->sema.rz.lk);
-	for(p=s->sema.next; p!=&s->sema && n>0; p=p->next){
-		if(p->addr == a && p->waiting){
-			p->waiting = 0;
-			coherence();
-			wakeup(&p->rz);
-			n--;
-		}
-	}
-	unlock(&s->sema.rz.lk);
-}
-
-/* Add delta to semaphore and wake up waiters as appropriate. */
-static long
-semrelease(Segment *s, long *addr, long delta)
-{
-	long value;
-
-	do
-		value = *addr;
-	while(!cmpswap(addr, value, value+delta));
-	semwakeup(s, addr, delta);
-	return value+delta;
-}
-
-/* Try to acquire semaphore using compare-and-swap */
-static int
-canacquire(long *addr)
-{
-	long value;
-
-	while((value=*addr) > 0)
-		if(cmpswap(addr, value, value-1))
-			return 1;
-	return 0;
-}
-
-/* Should we wake up? */
-static int
-semawoke(void *p)
-{
-	coherence();
-	return !((Sema*)p)->waiting;
-}
-
-/* Acquire semaphore (subtract 1). */
-static int
-semacquire(Segment *s, long *addr, int block)
-{
-	int acquired;
-	Sema phore;
-
-	if(canacquire(addr))
-		return 1;
-	if(!block)
-		return 0;
-	semqueue(s, addr, &phore);
-	if(acquired = !waserror()){
-		for(;;){
-			phore.waiting = 1;
-			coherence();
-			if(canacquire(addr))
-				break;
-			sleep(&phore.rz, semawoke, &phore);
-		}
-		poperror();
-	}
-	semdequeue(s, &phore);
-	coherence();	/* not strictly necessary due to lock in semdequeue */
-	if(!phore.waiting)
-		semwakeup(s, addr, 1);
-	if(!acquired)
-		nexterror();
-	return 1;
-}
-
-/* Acquire semaphore or time-out */
-static int
-tsemacquire(Segment *s, long *addr, ulong ms)
-{
-	int timedout, acquired;
-	ulong t;
-	Sema phore;
-
-	if(canacquire(addr))
-		return 1;
-	if(ms == 0)
-		return 0;
-	timedout = 0;
-	semqueue(s, addr, &phore);
-	if(acquired = !waserror()){
-		for(;;){
-			phore.waiting = 1;
-			coherence();
-			if(canacquire(addr))
-				break;
-			t = MACHP(0)->pmach.ticks;
-			tsleep(&phore.rz, semawoke, &phore, ms);
-			t = TK2MS(MACHP(0)->pmach.ticks - t);
-			if(t >= ms){
-				timedout = 1;
-				break;
-			}
-			ms -= t;
-		}
-		poperror();
-	}
-	semdequeue(s, &phore);
-	coherence();	/* not strictly necessary due to lock in semdequeue */
-	if(!phore.waiting)
-		semwakeup(s, addr, 1);
-	if(!acquired)
-		nexterror();
-	return !timedout;
-}
-
-uintptr
-syssemacquire(sysva_list list)
-{
-	int block;
-	long *addr;
-	Segment *s;
-
-	addr = sysva_arg(list, long*);
-	block = sysva_arg(list, int);
-	evenaddr((uintptr)addr);
-	s = seg(up, (uintptr)addr, 0);
-	if(s == nil || (s->type&SG_RONLY) != 0 || (uintptr)addr+sizeof(long) > s->top){
-		validaddr((uintptr)addr, sizeof(long), 1);
-		error(Ebadarg);
-	}
-	if(*addr < 0)
-		error(Ebadarg);
-	return (uintptr)semacquire(s, addr, block);
-}
-
-uintptr
-systsemacquire(sysva_list list)
-{
-	long *addr;
-	ulong ms;
-	Segment *s;
-
-	addr = sysva_arg(list, long*);
-	ms = sysva_arg(list, ulong);
-	evenaddr((uintptr)addr);
-	s = seg(up, (uintptr)addr, 0);
-	if(s == nil || (s->type&SG_RONLY) != 0 || (uintptr)addr+sizeof(long) > s->top){
-		validaddr((uintptr)addr, sizeof(long), 1);
-		error(Ebadarg);
-	}
-	if(*addr < 0)
-		error(Ebadarg);
-	return (uintptr)tsemacquire(s, addr, ms);
-}
-
-uintptr
-syssemrelease(sysva_list list)
-{
-	long *addr, delta;
-	Segment *s;
-
-	addr = sysva_arg(list, long*);
-	delta = sysva_arg(list, long);
-	evenaddr((uintptr)addr);
-	s = seg(up, (uintptr)addr, 0);
-	if(s == nil || (s->type&SG_RONLY) != 0 || (uintptr)addr+sizeof(long) > s->top){
-		validaddr((uintptr)addr, sizeof(long), 1);
-		error(Ebadarg);
-	}
-	/* delta == 0 is a no-op, not a release */
-	if(delta < 0 || *addr < 0)
-		error(Ebadarg);
-	return (uintptr)semrelease(s, addr, delta);
 }
 
 /* amd64: full nanosecond value in the return register. */

@@ -435,8 +435,6 @@ def make_systab_gcc() -> None:
         c = re.sub(r"_$", "", c)
         if name == "SYSR1":
             c = "Running"
-        if name == "RENDEZVOUS":
-            c = "Rendez"
         out.append(f'\t[{name}]\t"{c}",')
     out += ["};", "", "/* Reserved historical numbers: reject as Ebadarg, no note. */",
             "char sysreserved[]={"]

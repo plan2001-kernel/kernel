@@ -1,4 +1,4 @@
-"""Userland regression for the native segment and semaphore ABI."""
+"""Userland regression for the native segment and memory ABI."""
 
 class Counter:
     def __init__(self, n=0):
@@ -24,12 +24,6 @@ def run():
     print('T16-PASS segment free')
     p.seg_detach(addr)
     print('T16-PASS segment flush free detach')
-    word = bytearray(8)
-    assert p.sem_acquire(word, 0) == 0
-    assert p.sem_release(word, 1) >= 0
-    assert p.sem_acquire(word, 0) == 1
-    assert p.sem_timed_acquire(word, 1) == 0
-    print('T16-PASS semaphore release acquire timeout')
     import space
     sh = p.obj_open_space('init')
     if hasattr(shared, 'previous_ge_oid'):

@@ -149,10 +149,27 @@ released by unmap or process exit; the region and its pages are reclaimed at
 the last mapping/Handle reference. Writer transfer is rejected in this phase.
 An authorized `Vcontrol` revoke blocks all future mappings through existing
 Handles without invalidating installed mappings; readers cannot revoke.
-Atomic publication ordering, RO WAIT/WAKE and free-process grants are not
-implemented as specified above. The former named `shared` segment attach,
-`SG_SHARED` type and `_globalsegattach` hook were removed; `SEGATTACH`
-remains only for the anonymous `memory` and physical device segments.
+`REGIONWAIT(147)` and `REGIONWAKE(148)` implement region-scoped publication
+waiting over an installed mapping. The publication word is a naturally
+aligned 64-bit little-endian value compared only for equality; userspace uses
+release/acquire atoms, and the kernel never copies payload. Waiters are keyed
+by the live region plus region-relative offset in a per-region queue guarded
+by a spin lock; writer presence, word comparison and registration are
+linearizable with writer-slot acquisition and release. Read-only mappings may
+wait, the mapping survives Handle close, and only the writable mapping may
+wake. A changed word returns immediately even with no writer; an unchanged
+word with no active writer returns writer-released immediately, including for
+a late waiter after unmap or writer-process exit. Timeout, interruption,
+writer-slot release and process exit remove the waiter; return values
+distinguish changed, woken, timeout and writer-release so callers always
+recheck. A later writer may map and publish, so status 3 is temporal rather
+than destruction. The retired public
+`RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` ABI, its user
+wrappers, `RF*REND` resource and internal `Rgrp`/`Sema` waiting lists were
+deleted. Free-process grants remain Phase 5. The former named `shared`
+segment attach, `SG_SHARED` type and `_globalsegattach` hook were removed;
+`SEGATTACH` remains only for the anonymous `memory` and physical device
+segments.
 
 ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff, mappings,
 console, timer interrupts and physical-page allocation, not full-system

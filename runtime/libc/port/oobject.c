@@ -29,6 +29,10 @@ extern long ioctl(int, unsigned int, IoctlReq *, long);
 extern long procwait(void *);
 extern long spawn(int, unsigned long long, char **, int, struct Ospawn *);
 extern long rforkex(unsigned long, void *, unsigned long long *);
+extern long regionwait(unsigned long long, unsigned long long,
+		unsigned long long, long long);
+extern long regionwake(unsigned long long, unsigned long long,
+		unsigned long long);
 
 long
 obj_create(unsigned long long space, unsigned int kind, void *data,
@@ -320,6 +324,20 @@ obj_region_unmap(unsigned long long addr)
 	callinit(&c, ObjOpRegionUnmap);
 	c.arg0 = addr;
 	return obj_invoke(0, &c, sizeof c);
+}
+
+long
+region_wait(unsigned long long base, unsigned long long offset,
+		unsigned long long expected, long long timeout)
+{
+	return regionwait(base, offset, expected, timeout);
+}
+
+long
+region_wake(unsigned long long base, unsigned long long offset,
+		unsigned long long count)
+{
+	return regionwake(base, offset, count);
 }
 
 /* Device control is IOCTL(145); payload stays in OBJINVOKE. */

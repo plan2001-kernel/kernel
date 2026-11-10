@@ -171,7 +171,7 @@ ouserproc(void *arg)
 	 * Only the objects needed to execute user code are initialized.
 	 * The initial process gets one empty, private Egrp so native ENV
 	 * operations work from userspace without exposing confegrp.
-	 * proc0's FD group and Rgrp, namec("#/"), cclone and init0 are
+	 * proc0's FD group, namec("#/"), cclone and init0 are
 	 * deliberately absent.  kproc has already supplied the shared
 	 * Pgrp; it remains initialized but unused here.
 	 */
@@ -185,7 +185,6 @@ ouserproc(void *arg)
 		up->egrp = nil;
 	}
 	up->egrp = newegrp();
-	up->rgrp = nil;
 	up->parent = nil;
 	up->parentpid = 0;
 

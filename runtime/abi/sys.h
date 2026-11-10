@@ -42,13 +42,10 @@
 #define	SEGDETACH	31
 #define	SEGFREE		32
 #define	SEGFLUSH	33
-#define	RENDEZVOUS	34
 #define	UNMOUNT		35 /* reserved */
 /* _WAIT(36) is RESERVED: if a name is ever wanted it may not reuse this
  * number; child wait is the direct typed PROCWAIT syscall (142). */
 #define	_WAIT		36 /* reserved */
-#define	SEMACQUIRE	37
-#define	SEMRELEASE	38
 #define	SEEK		39 /* reserved */
 #define	FVERSION	40 /* reserved */
 #define	ERRSTR		41
@@ -61,7 +58,6 @@
 #define	AWAIT		47 /* reserved */
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */
-#define	TSEMACQUIRE	52
 #define _NSEC		53
 /* OVOLOPEN(54) is RESERVED: privileged bootstrap/administrative volume
  * activation is SYSCTL(144), operation SysctlVolumeOpen. */
@@ -200,6 +196,67 @@ struct Ospawn {
  * struct Ospawn *options).  The Handle must carry Vexecute and the same
  * Oexecute/role checks as OEXECUTE apply.  Returns the child PID or -1. */
 #define	SPAWN		146
+/* Region-scoped publication wait/wake.
+ *
+ * The publication word is an aligned 64-bit little-endian value.  A writer
+ * constructs every byte of the payload first and publishes the word with
+ * release ordering; readers acquire the word before reading the payload.  The
+ * syscall compares and waits only on equality, so no ordering or wrap-around
+ * assumption beyond exact equality is required.  A payload is named by a
+ * region-relative offset or delta, never by a cross-process virtual address.
+ * The writer must not overwrite bytes belonging to an immutable snapshot that
+ * is still published; use separate buffers/versions or publish a later word
+ * before reusing storage.  Readers must not read payload bytes unless the
+ * acquired word selects that complete snapshot.
+ *
+ * The first argument is the process-local base address returned by
+ * ObjOpRegionMap (not a raw credential and not any interior address).  The
+ * second argument is the region-relative byte offset of the word and must be
+ * 8-byte aligned with at least 8 bytes inside the region.  Authority is the
+ * caller's installed mapping, so a read-only observer may WAIT and the
+ * mapping remains usable after its Handle is closed or the region is revoked.
+ *
+ * REGIONWAIT(base, offset, expected, timeout) applies this order:
+ *   1. Validate the installed mapping and aligned/in-bounds word.
+ *   2. Compare the word: if it differs from expected, return 0 immediately,
+ *      whether or not a writer is present.
+ *   3. If it still matches and no RW mapping is active, return 3 immediately,
+ *      even when timeout < 0.  This covers a region that never had a writer, a
+ *      writer that unmapped, and a writer process that exited or was killed
+ *      and whose mappings were released.  A process retained in the kernel's
+ *      broken/debug state still owns its mapping and remains the active
+ *      writer until that mapping is released.
+ *   4. If a writer is active and the word still matches, timeout == 0 returns
+ *      2; otherwise atomically enroll and sleep with the timeout/interrupt
+ *      rules below.
+ *   5. If the active writer mapping is released while enrolled, the waiter is
+ *      notified and returns 3.  A replacement writer mapping later cannot
+ *      erase that notification.  If a normal WAKE wins the race, returning 1
+ *      is permitted.
+ * Status 3 is "no active writer at check time / the previous writer mapping
+ * was released", not permanent region destruction: a new writer may map later
+ * unless Phase 2 revocation denies it.  The caller decides whether to retry,
+ * request a new grant or treat the stream as ended.  timeout < 0 blocks until
+ * notified, timeout == 0 only checks, and timeout > 0 is a bounded millisecond
+ * wait.  Other returns are:
+ *   0  value already differed from expected; nothing was slept on
+ *   1  woken (possibly spuriously); the caller must recheck the word
+ *   2  timeout or a non-blocking check with the value still equal
+ * An invalid or unmapped mapping, a bad offset or an interruption raises the
+ * usual error (an installed mapping remains usable after revocation, as noted
+ * above).  Returned notification never proves a particular value.  Check of
+ * writer presence, word comparison and enrollment are one linearizable step
+ * with writer-slot acquisition/release; the kernel does not infer process
+ * ancestry or a permanent owner.
+ *
+ * REGIONWAKE(base, offset, count) requires the current writable mapping (the
+ * single writer) and wakes at most count waiters registered for the same
+ * region and region-relative offset.  count must be greater than zero; a
+ * value greater than the number of waiters wakes those present.  It returns
+ * the number actually woken.  Wait keys use the kernel region identity plus
+ * offset, never a virtual address.  A wake carries no payload. */
+#define	REGIONWAIT	147
+#define	REGIONWAKE	148
 /* flags=1 opts into this bounded extension immediately after Ospawn.
  * view: 0 EMPTY, 1 COPY listed roles, 2 SHARE (list must name whole view).
  * Pipe rights: 1 read, 2 write, 3 both. No implicit endpoint selection.

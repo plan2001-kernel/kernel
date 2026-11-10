@@ -702,6 +702,39 @@ static mp_obj_t p9_regionwrite(mp_obj_t addr,mp_obj_t data){
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionwrite_obj,p9_regionwrite);
 
+/* The publication word is 64-bit, naturally aligned and little-endian.
+ * These accessors are real C11/GCC atomic operations so a release publish
+ * cannot be simulated by an ordinary Python object or memmove.  Payload
+ * bytes are built with region_write; the release store of the word orders
+ * those stores before publication, and the acquire load orders the reader's
+ * later payload reads after it. */
+static unsigned long long* p9_atomicword(mp_obj_t addr){
+ unsigned long long *p=(unsigned long long*)(uintptr_t)mp_obj_get_uint(addr);
+ if(((uintptr_t)p & (sizeof *p-1))!=0)
+  mp_raise_ValueError(MP_ERROR_TEXT("aligned 64-bit publication word required"));
+ return p;
+}
+static mp_obj_t p9_regionatomicload(mp_obj_t addr){
+ return mp_obj_new_int_from_ull(__atomic_load_n(p9_atomicword(addr),__ATOMIC_ACQUIRE));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_regionatomicload_obj,p9_regionatomicload);
+static mp_obj_t p9_regionatomicstore(mp_obj_t addr,mp_obj_t value){
+ __atomic_store_n(p9_atomicword(addr),(unsigned long long)mp_obj_get_uint(value),__ATOMIC_RELEASE);
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionatomicstore_obj,p9_regionatomicstore);
+static mp_obj_t p9_regionwait(size_t n,const mp_obj_t *a){
+ long timeout=n>3?mp_obj_get_int(a[3]):-1;
+ return check(region_wait(mp_obj_get_uint(a[0]),mp_obj_get_uint(a[1]),
+  mp_obj_get_uint(a[2]),(long long)timeout));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_regionwait_obj,3,4,p9_regionwait);
+static mp_obj_t p9_regionwake(mp_obj_t base,mp_obj_t offset,mp_obj_t count){
+ return check(region_wake(mp_obj_get_uint(base),mp_obj_get_uint(offset),
+  mp_obj_get_uint(count)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(p9_regionwake_obj,p9_regionwake);
+
 /* Test-only callback address for ObjOpNotifyRegister: a real user text
  * address that accepts any note.  It is not installed by normal startup;
  * a script can pass it as arg0 of the new operation, remove it, and observe
@@ -960,17 +993,6 @@ static mp_obj_t p9_segflush(mp_obj_t addr,mp_obj_t size){check(segflush((void*)(
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_segflush_obj,p9_segflush);
 static mp_obj_t p9_segdetach(mp_obj_t addr){check(segdetach(mp_obj_get_int(addr)));return mp_const_none;}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_segdetach_obj,p9_segdetach);
-static long* p9_semaddr(mp_obj_t word){
- mp_buffer_info_t b;mp_get_buffer_raise(word,&b,MP_BUFFER_WRITE);
- if(b.len<sizeof(long) || ((uintptr_t)b.buf & (sizeof(long)-1))) mp_raise_ValueError(MP_ERROR_TEXT("aligned semaphore word required"));
- return (long*)b.buf;
-}
-static mp_obj_t p9_semacquire(mp_obj_t word,mp_obj_t block){return check(semacquire(p9_semaddr(word),mp_obj_get_int(block)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_semacquire_obj,p9_semacquire);
-static mp_obj_t p9_semrelease(mp_obj_t word,mp_obj_t delta){return check(semrelease(p9_semaddr(word),mp_obj_get_int(delta)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_semrelease_obj,p9_semrelease);
-static mp_obj_t p9_tsemacquire(mp_obj_t word,mp_obj_t ms){return check(tsemacquire(p9_semaddr(word),mp_obj_get_int(ms)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_tsemacquire_obj,p9_tsemacquire);
 
 /* Diagnostic raw-syscall trampoline for ABI retirement tests.  It adds no
  * kernel entry point: the number is chosen by the caller exactly as the
@@ -992,9 +1014,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_seg_free), MP_ROM_PTR(&p9_segfree_obj) },
     { MP_ROM_QSTR(MP_QSTR_seg_flush), MP_ROM_PTR(&p9_segflush_obj) },
     { MP_ROM_QSTR(MP_QSTR_seg_detach), MP_ROM_PTR(&p9_segdetach_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sem_acquire), MP_ROM_PTR(&p9_semacquire_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sem_release), MP_ROM_PTR(&p9_semrelease_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sem_timed_acquire), MP_ROM_PTR(&p9_tsemacquire_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_pipenew), MP_ROM_PTR(&p9_pipenew_obj) },
     { MP_ROM_QSTR(MP_QSTR_piperead), MP_ROM_PTR(&p9_piperead_obj) },
@@ -1078,6 +1097,10 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_region_unmap), MP_ROM_PTR(&p9_regionunmap_obj) },
     { MP_ROM_QSTR(MP_QSTR_region_read), MP_ROM_PTR(&p9_regionread_obj) },
     { MP_ROM_QSTR(MP_QSTR_region_write), MP_ROM_PTR(&p9_regionwrite_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_atomic_load), MP_ROM_PTR(&p9_regionatomicload_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_atomic_store), MP_ROM_PTR(&p9_regionatomicstore_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_wait), MP_ROM_PTR(&p9_regionwait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_wake), MP_ROM_PTR(&p9_regionwake_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_addr), MP_ROM_PTR(&p9_notify_probe_addr_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_count), MP_ROM_PTR(&p9_notify_probe_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_reset), MP_ROM_PTR(&p9_notify_probe_reset_obj) },
@@ -1177,7 +1200,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_RFCNAMEG), MP_ROM_INT(RFCNAMEG) },
     { MP_ROM_QSTR(MP_QSTR_RFCENVG), MP_ROM_INT(RFCENVG) },
     { MP_ROM_QSTR(MP_QSTR_RFCFDG), MP_ROM_INT(RFCFDG) },
-    { MP_ROM_QSTR(MP_QSTR_RFREND), MP_ROM_INT(RFREND) },
     { MP_ROM_QSTR(MP_QSTR_RFNOMNT), MP_ROM_INT(RFNOMNT) },
 };
 static MP_DEFINE_CONST_DICT(plan9_globals_dict, plan9_globals);

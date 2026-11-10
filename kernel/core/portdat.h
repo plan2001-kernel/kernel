@@ -26,11 +26,9 @@ typedef struct Queue	Queue;
 typedef struct Ref	Ref;
 typedef struct Rendez	Rendez;
 typedef struct Rendezq	Rendezq;
-typedef struct Rgrp	Rgrp;
 typedef struct RWLock	RWLock;
 typedef struct Sargs	Sargs;
 typedef struct Schedq	Schedq;
-typedef struct Sema	Sema;
 typedef struct Segment	Segment;
 typedef struct Segio	Segio;
 typedef struct Sysstat	Sysstat;
@@ -292,15 +290,6 @@ struct Physseg
 	uintptr	size;			/* Maximum segment size in bytes */
 };
 
-struct Sema
-{
-	Rendez rz;
-	long	*addr;
-	int	waiting;
-	Sema	*next;
-	Sema	*prev;
-};
-
 struct Segment
 {
 	Ref ref;
@@ -319,7 +308,6 @@ struct Segment
 	Pte	*ssegmap[SSEGMAPSIZE];
 
 	ulong	used;
-	Sema	sema;		/* pages in use */
 
 	/*
 	 * SG_REGION mappings hold one VkindRegion reference and record whether
@@ -349,12 +337,9 @@ struct Segio
 
 enum
 {
-	RENDLOG	=	5,
-	RENDHASH =	1<<RENDLOG,	/* Hash to lookup rendezvous tags */
 	ENVLOG =	5,
 	ENVHASH =	1<<ENVLOG,	/* Egrp hash for variable lookup */
 };
-#define REND(p,s)	((p)->rendhash[(s)&((1<<RENDLOG)-1)])
 enum
 {
 	PgrpNsSealed	= 1<<0,		/* no further namespace extension */
@@ -369,13 +354,6 @@ struct Pgrp
 #ifdef PLAN2001_LIFECYCLE_DIAG
 	ulong	diagid;			/* diagnostic identity, never an ABI handle */
 #endif
-};
-
-struct Rgrp
-{
-	Ref ref;
-	Lock lk;
-	Proc	*rendhash[RENDHASH];	/* Rendezvous tag hash */
 };
 
 struct Evalue
@@ -450,7 +428,6 @@ enum
 	RFCNAMEG	= (1<<10),
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),
-	RFREND		= (1<<13),
 	RFNOMNT		= (1<<14),
 };
 
@@ -476,7 +453,6 @@ enum
 	Wakeme,
 	Broken,
 	Stopped,
-	Rendezvous,
 	Waitrelease,
 
 	Proc_stopme = 1, 	/* devproc requests */
@@ -560,7 +536,6 @@ struct Proc
 	int	stdoutpipe;	/* explicit Pipe-backed IOWRITE route, otherwise 0 */
 	void	*vobjhandles;	/* Unified process-local OBJ, GE and namespace Handles */
 	ulong	iomask;		/* Process-local native output grants */
-	Rgrp	*rgrp;		/* Rendez group */
 
 	int	insyscall;
 	ulong	time[6];	/* User, Sys, Real; child U, S, R */
@@ -592,10 +567,6 @@ struct Proc
 	Proc	*palarm;	/* Next alarm time */
 	ulong	alarm;		/* Time of call */
 	int	newtlb;		/* Pager has changed my pte's, I must flush */
-
-	uintptr	rendtag;	/* Tag for rendezvous */
-	uintptr	rendval;	/* Value for rendezvous */
-	Proc	*rendhash;	/* Hash list for tag values */
 
 	Timer timer;		/* For tsleep and real-time */
 	Rendez	*trend;
