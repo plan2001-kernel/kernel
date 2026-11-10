@@ -288,7 +288,51 @@ def run():
     p.region_unmap(rw)
     p.obj_close(reg)
 
+    # --- revocation blocks only future mappings -------------------------
+    reg = p.region_create(4096)
+    rw = p.region_map(reg)
+    p.region_write(rw, b'PRE-REVOKE')
+    reader = p.obj_open_handle(reg,
+                               p.VREAD | p.VMETA | p.VDELEGATE)
+    ro = p.region_map(reader, 0x31000000)
+    denied(lambda: p.obj_revoke(reader),
+           'read-only delegated Handle cannot revoke')
+    p.obj_revoke(reg)
+    denied(lambda: p.region_map(reader, 0x32000000),
+           'new mapping through delegated Handle after revoke')
+    denied(lambda: p.region_map(reg, 0x33000000),
+           'new mapping through creator Handle after revoke')
+    ok(p.region_read(ro, 10) == b'PRE-REVOKE',
+       'installed RO mapping survives revocation')
+    p.region_write(rw, b'POST-REVOKE')
+    ok(p.region_read(ro, 11) == b'POST-REVOKE',
+       'installed writer mapping remains live after revocation')
+    p.region_unmap(ro)
+    p.region_unmap(rw)
+    p.obj_close(reader)
+    p.obj_close(reg)
+    ok(True, 'revocation leaves existing mappings and page lifetime intact')
+
+    # --- ordinary anonymous memory is unaffected by region machinery ----
+    anon = p.seg_attach('memory', 8192)
+    if p.region_read(anon, 16) != b'\x00' * 16:
+        raise AssertionError('anonymous memory is not zero-initialized')
+    p.region_write(anon, b'ANON-KEEP')
+    reg = p.region_create(4096)
+    rw = p.region_map(reg)
+    p.region_write(rw, b'region')
+    p.region_unmap(rw)
+    p.obj_close(reg)
+    ok(p.region_read(anon, 9) == b'ANON-KEEP',
+       'ordinary anonymous BSS/data memory keeps its zeroing and data')
+    p.seg_detach(anon)
+
     # --- repeated create/map/unmap/close reclaims cleanly ----------------
+    reg = p.region_create(4096)
+    rw = p.region_map(reg)
+    p.region_unmap(rw)
+    p.obj_close(reg)
+    free0 = p.system()[6]
     for _ in range(32):
         reg = p.region_create(4096)
         rw = p.region_map(reg)
@@ -297,9 +341,43 @@ def run():
             raise AssertionError('reclaim round trip')
         p.region_unmap(rw)
         p.obj_close(reg)
-    ok(True, 'repeated region create/map/unmap/close completes')
+    free1 = p.system()[6]
+    if free0 - free1 > 4096:
+        raise AssertionError('region accounting lost %d bytes: %d -> %d' %
+                             (free0 - free1, free0, free1))
+    ok(True, 'repeated create/map/unmap/close returns physical pages '
+       '(heap/Pte overhead <= 1 page)')
 
-    # --- main writer/reader pair delivered over a FIFO capability channel -
+    # --- failed installation rolls back object and page accounting -------
+    fill = []
+    while True:
+        try:
+            fill.append(p.obj_create(b'x'))
+        except OSError:
+            break
+    free0 = p.system()[6]
+    for _ in range(8):
+        denied(lambda: p.region_create(4096),
+               'region creation with a full Handle table')
+    free1 = p.system()[6]
+    if free0 - free1 > 4096:
+        raise AssertionError('failed creation lost %d bytes: %d -> %d' %
+                             (free0 - free1, free0, free1))
+    ok(True, 'failed region creation releases its pages and object accounting')
+    for h in fill:
+        p.obj_close(h)
+    reg = p.region_create(4096)
+    p.obj_close(reg)
+    ok(True, 'Handle table remains usable after failed creation rollback')
+
+    # --- normal-exit child lifecycle accounting baseline -----------------
+    freec0 = p.system()[6]
+    c1 = spawn(C_UNAUTHORIZED)
+    c2 = spawn(C_UNAUTHORIZED)
+    got = waitmap((c1, c2))
+    p.sleep(1000)
+    freec1 = p.system()[6]
+    ctrl = freec0 - freec1
     fifo = p.obj_fifocreate(64)
     b = spawn(B_MAIN, fifo)
     p.sleep(2000)
@@ -312,24 +390,38 @@ def run():
     ok(True, 'explicit FIFO delivery authorizes the sibling reader')
 
     # --- writer exits before reader --------------------------------------
+    free0 = p.system()[6]
     fifo = p.obj_fifocreate(64)
     b = spawn(B_EXIT, fifo)
     p.sleep(2000)
     a = spawn(A_EXIT, fifo)
     got = waitmap((a, b))
+    p.sleep(1000)
     ok(got[a] == '' and got[b] == '',
        'reader maps and reads retained data after writer exit')
     p.obj_close(fifo)
+    free1 = p.system()[6]
+    if free0 - free1 > ctrl + 65536:
+        raise AssertionError('writer-exit order lost %d bytes (control %d)' %
+                             (free0 - free1, ctrl))
+    ok(True, 'writer-exit order matches normal child lifecycle accounting')
 
     # --- reader exits before writer --------------------------------------
+    free0 = p.system()[6]
     fifo = p.obj_fifocreate(64)
     b = spawn(B_READER_EXIT, fifo)
     p.sleep(2000)
     a = spawn(A_READER_EXIT, fifo)
     got = waitmap((a, b))
+    p.sleep(1000)
     ok(got[a] == '' and got[b] == '',
        'writer remains functional after reader exit')
     p.obj_close(fifo)
+    free1 = p.system()[6]
+    if free0 - free1 > ctrl + 65536:
+        raise AssertionError('reader-exit order lost %d bytes (control %d)' %
+                             (free0 - free1, ctrl))
+    ok(True, 'reader-exit order matches normal child lifecycle accounting')
 
     # --- ungranted third process -----------------------------------------
     c = spawn(C_UNAUTHORIZED)

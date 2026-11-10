@@ -231,7 +231,7 @@ obj_grant(int handle, unsigned long long rights)
     return obj_open(ObjOpenHandle, &req, sizeof req, rights, nil);
 }
 
-/* GE/O capability revocation only. */
+/* GE/O grant or volatile-region map revocation. */
 long
 obj_revoke(int handle)
 {

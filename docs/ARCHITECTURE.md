@@ -147,6 +147,8 @@ Handles map the same pages read-only at process-local addresses, with PTERONLY
 enforced per `SG_REGION` Segment. A mapping survives Handle close and is
 released by unmap or process exit; the region and its pages are reclaimed at
 the last mapping/Handle reference. Writer transfer is rejected in this phase.
+An authorized `Vcontrol` revoke blocks all future mappings through existing
+Handles without invalidating installed mappings; readers cannot revoke.
 Atomic publication ordering, RO WAIT/WAKE and free-process grants are not
 implemented as specified above. The former named `shared` segment attach,
 `SG_SHARED` type and `_globalsegattach` hook were removed; `SEGATTACH`

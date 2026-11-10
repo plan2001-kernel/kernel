@@ -101,13 +101,26 @@ fixfault(Segment *s, uintptr addr, int read)
 			putpage(old);
 		}
 		/* wet floor */
+	case SG_STICKY:			/* Never paged out */
+		mmuphys = PPN((*pg)->pa) | PTEWRITE | PTECACHED | PTEVALID;
+		(*pg)->modref |= up->privatemem? PG_PRIV|PG_MOD|PG_REF: PG_MOD|PG_REF;
+		break;
+
+	case SG_FIXED:			/* Never paged out */
+		mmuphys = PPN((*pg)->pa) | PTEWRITE | PTEUNCACHED | PTEVALID;
+		(*pg)->modref |= up->privatemem? PG_PRIV|PG_MOD|PG_REF: PG_MOD|PG_REF;
+		break;
+
 	case SG_REGION:
 		/*
 		 * Every mapping has its own Segment and PTE set; the physical
 		 * Page objects are shared.  SG_RONLY is therefore a per-address-
 		 * space property, enforced both by fault() rejecting stores and
 		 * by installing PTERONLY here.  A missing page is an invariant
-		 * violation: region backing is allocated eagerly.
+		 * violation: region backing is allocated eagerly.  This case is
+		 * deliberately separate from the SG_DATA/SG_BSS/SG_STACK
+		 * fallthrough so ordinary private memory keeps its PG_PRIV
+		 * sanitization.
 		 */
 		if(pagedout(*pg)){
 			qunlock(&s->qlk);
@@ -123,16 +136,6 @@ fixfault(Segment *s, uintptr addr, int read)
 			mmuphys = PPN((*pg)->pa) | PTEWRITE | PTECACHED | PTEVALID;
 			(*pg)->modref |= PG_MOD|PG_REF;
 		}
-		break;
-
-	case SG_STICKY:			/* Never paged out */
-		mmuphys = PPN((*pg)->pa) | PTEWRITE | PTECACHED | PTEVALID;
-		(*pg)->modref |= up->privatemem? PG_PRIV|PG_MOD|PG_REF: PG_MOD|PG_REF;
-		break;
-
-	case SG_FIXED:			/* Never paged out */
-		mmuphys = PPN((*pg)->pa) | PTEWRITE | PTEUNCACHED | PTEVALID;
-		(*pg)->modref |= up->privatemem? PG_PRIV|PG_MOD|PG_REF: PG_MOD|PG_REF;
 		break;
 	}
 

@@ -78,7 +78,7 @@ require a writable segment. The target RO WAIT does not exist.
 
 Volatile capability regions are `ObjKindRegion` objects reached through the
 same five-call object ABI. Creation takes a non-zero, page-multiple size up to
-16 MiB and returns a Handle with `Vread|Vwrite|Vmeta|Vdelegate`; `OBJOPEN`
+16 MiB and returns a Handle with `Vread|Vwrite|Vmeta|Vdelegate|Vcontrol`; `OBJOPEN`
 attenuates it like any other Handle, and explicit delegation is the only way
 another process obtains authority. `ObjOpRegionMap` installs the region at a
 process-local address (arg0, 0 chooses) and returns that address.
@@ -91,6 +91,14 @@ reference. Writer exit releases the writer slot but not pages still referenced
 by reader Handles or mappings. The region and its eagerly zeroed pages are
 freed at the last reference. Phase 2 does not transfer the writer role
 automatically.
+
+`ObjOpRevoke` on a region Handle carrying `Vcontrol` is the explicit
+revocation operation. It permanently denies **new** mappings through every
+previously delegated region Handle, including the creator's, but leaves
+already installed mappings readable/writable until unmap or process exit.
+Those mappings and the pages then retain the region until the last relevant
+reference. A read-only Handle does not carry `Vcontrol` and cannot revoke
+other parties. There is no implicit TLB shootdown or forced unmap.
 
 The former named `shared` segment attach and `SG_SHARED` type are deleted;
 `SEGATTACH` now serves only the anonymous `memory` and physical device

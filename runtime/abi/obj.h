@@ -82,7 +82,7 @@ enum {
 	ObjOpRecv	= 6,	/* FIFO receive one completed message */
 	ObjOpSubscribe	= 7,
 	ObjOpGrant	= 9,	/* RETIRED: OBJOPEN(ObjOpenHandle) */
-	ObjOpRevoke	= 10,	/* GE/O capability revocation only */
+	ObjOpRevoke	= 10,	/* GE/O grant or volatile-region map revocation */
 	ObjOpCreatePersist = 12,	/* RETIRED: OBJCREATE(ObjKindGe) */
 	ObjOpCommit	= 13,	/* Space transaction commit (via Space/GE handle) */
 	ObjOpPipePeer	= 16,	/* Pipe end 0: install and return the peer Handle */
@@ -462,7 +462,9 @@ long obj_publish(int fifo, int object, void *env, unsigned long long envlen);
 long obj_receive(int subscription, void *env, unsigned long long envcap,
 		unsigned long long timeout, unsigned long long *got);
 long obj_grant(int handle, unsigned long long rights);
-/* GE/O capability revocation only.  Closing a FIFO channel is a distinct
+/* GE/O capability revocation and volatile-region map revocation.  A region
+ * Handle needs Vcontrol to revoke; existing mappings survive, new mappings
+ * through any Handle are denied.  Closing a FIFO channel is a distinct
  * operation (obj_fifo_shutdown); it is not capability revocation. */
 long obj_revoke(int handle);
 long obj_fifo_shutdown(int handle);
@@ -480,10 +482,12 @@ long obj_pipe_create(ObjId *out);
 long obj_pipe_peer(int handle);
 
 /* Volatile capability regions.  Creation takes a page-multiple size and
- * returns a Handle carrying Vread|Vwrite|Vmeta|Vdelegate.  A writer mapping
- * is unique for the region; read-only mappings are shared.  The mapping
- * survives closing the Handle and is released by obj_region_unmap() or
- * process exit. */
+ * returns a Handle carrying Vread|Vwrite|Vmeta|Vdelegate|Vcontrol.  A writer
+ * mapping is unique for the region; read-only mappings are shared.  The
+ * mapping survives closing the Handle and is released by obj_region_unmap()
+ * or process exit.  obj_revoke() on a Vcontrol Handle blocks all future
+ * mappings; installed mappings and page backing remain until unmap/exit and
+ * the last reference. */
 long obj_region_create(unsigned long long size, ObjId *out);
 long obj_region_map(int handle, unsigned long long addr);
 long obj_region_unmap(unsigned long long addr);
