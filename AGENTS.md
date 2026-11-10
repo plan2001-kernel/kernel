@@ -14,7 +14,12 @@ ABI, wrappers/adapters, dormant providers, fixtures, tests and docs. List
 exact deleted paths in the phase PR. Do not preserve old syscall numbers,
 compatibility aliases, shims, dual paths or feature toggles solely for
 rejected behavior. Every phase PR states Added, Deleted, Tests actually run,
-NOT RUN and Remaining obsolete code. Issue #36, Phase 1, changes docs only.
+NOT RUN and Remaining obsolete code. Physical deletion includes dead code;
+compatibility retention is not the default.
+
+All Phase 1–6 issues, work branches and PRs in the architecture experiment
+must target `arch-reset`, not `main`, unless the owner explicitly changes
+this instruction. Unrelated maintenance PRs may target `main`.
 
 This is an experimental AMD64/ARM64 operating-system kernel. AMD64 currently
 has the functional full-system path; ARM64 has a verified early-boot foundation,

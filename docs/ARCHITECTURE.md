@@ -83,6 +83,48 @@ Do not mandate permanent `ObjectFIFO` or Pipe endpoints. Define service
 failure recovery and reader lifetime. Protected boot/panic console output
 remains available. See [device ABI](DEVICE-ABI.md) for current device facts.
 
+### Console/session contract (TARGET)
+
+One authorized console service owns the keyboard device. Keep raw hardware
+access separate from scan-code decoding, keyboard layout and terminal policy.
+Only the active session receives physical input; independent REPLs must never
+race for raw keystrokes. The service routes input, output and diagnostics
+through explicit namespace/capability views independently of launch ancestry.
+Sessions retain their own references and may outlive individual processes.
+
+Each session has separate input, output, diagnostics and control authority.
+Input is a service-owned publication region mapped RO by its client. Output
+and diagnostics use client-owned writer regions observed RO by the service;
+multiple writers require separate regions. Control requests require a separate
+grant. Publish immutable records with release/acquire and use WAIT/WAKE for
+blocked observers. Endpoint grants convey no raw keyboard ownership, global
+framebuffer access or kernel debug-output authority. Role removal and focus
+switching do not implicitly revoke previously delegated capabilities.
+
+The service/library boundary handles scan codes, modifiers and UTF-8 conversion.
+Specify one owner for echo, line editing, raw/cooked mode and control-key
+interpretation. Deliver Ctrl-C interrupt and Ctrl-D EOF exactly once to the
+active session, including cancellation/wakeup of blocked readers. Readers
+recheck state after every wake. Define bounded buffering and backpressure for
+inactive output and slow clients. Focus changes atomically select the input
+recipient; queued input must not leak into the next session. On client exit,
+release its references and select a surviving session by explicit policy.
+On service death, unblock observers with a detectable termination condition,
+release device claims and allow an authorized recovery owner to reacquire the
+keyboard and rebuild sessions. The protected kernel-owned early-boot/panic
+framebuffer/serial diagnostics path remains independent and cannot be blocked
+indefinitely by a failed userspace service.
+
+Phase 6 must demonstrate an end-to-end handoff: boot to MicroPython, start the
+console owner, attach two independent REPLs through publication-region grants,
+switch focus, type UTF-8 and control keys, observe separate output/diagnostics,
+and interrupt or terminate a blocked reader. Exit the active client and recover
+a surviving session; kill/restart the service and reacquire the keyboard
+without leaked claims. Check denied raw-device/control grants and absence of
+input theft; kernel diagnostics must still work. Run the AMD64 guest checks
+and record hardware checks separately. This is a future acceptance contract,
+not evidence that this data path exists today.
+
 ## CURRENT IMPLEMENTATION
 
 AMD64 has a functional full-system path with GE/O, MicroPython and device
@@ -92,7 +134,9 @@ logic depend on parent relationships. `Proc.parent/parentpid/nchild/waitq`,
 `Pgrp/OContext` sharing/copying/sealing and namespace views remain in source.
 `ObjectFIFO` carries framed IPC and Ethernet receive data; Pipe and current
 console paths also remain. The `-I` REPL directly claims PS/2 input;
-`ObjOpenConsole` and `stdoutpipe` route selected output. These are current
+`micropython/p9console.c` decodes the scan codes and supplies the HAL.
+`ObjOpenConsole` and `stdoutpipe` route selected output;
+`kernel/core/fbconsole.c` is the kernel-owned framebuffer text sink. These are current
 facts, not target requirements. Independent RW-writer/RO-observer mappings,
 atomic publication, RO WAIT and free-process grants are not implemented as
 specified above.
@@ -129,4 +173,4 @@ for backward compatibility.
 6. **Delete old kernel IPC:** migrate required device/console transport;
    physically delete `ObjectFIFO` implementation, provider types, ABI,
    MicroPython/libc adapters, obsolete tests/docs, plus replaced Pipe/other
-   IPC. Boot and minimal console/REPL must still work.
+   IPC. Boot and the console/REPL handoff acceptance contract above must pass.

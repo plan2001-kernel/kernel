@@ -12,9 +12,10 @@ MCP service, or external build environment.
 3. Build and run checks that the environment actually supports. Report
    **PASS**, **FAIL**, or **NOT RUN** accurately. ARM64 host execution does not
    prove an AMD64 boot, and early ARM64 QEMU boot does not prove a full port.
-4. Submit a focused pull request against the issue's target branch (normally
-   `main`; issue #36 targets `arch-reset`). Do not merge without an explicit
-   instruction to do so.
+4. All Phase 1–6 issues, work branches and PRs in the architecture experiment
+   must target `arch-reset`, not `main`, unless the owner explicitly changes
+   this instruction. Unrelated maintenance PRs may target `main`. Do not
+   merge without explicit authorization.
 
 ## Documentation and local task records
 
