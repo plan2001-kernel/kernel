@@ -378,9 +378,9 @@ static void
 ipv6nativebootidle(void)
 {
 	/*
-	 * main starts this parentless kproc before schedinit.  proc.c treats
-	 * exit of any parentpid==0 process as a boot failure, so retain the
-	 * startup process after init; the native RX worker owns packet service.
+	 * main starts this kproc before schedinit.  It has no boot role, so
+	 * retaining it after init is simply a service lifetime decision; the
+	 * native RX worker owns packet service.
 	 */
 	for(;;)
 		tsleep(&up->sleep, return0, nil, 60000);

@@ -36,7 +36,9 @@ typedef struct Timer	Timer;
 typedef struct Timers	Timers;
 typedef struct Tos	Tos;
 typedef struct Uart	Uart;
-typedef struct Waitq	Waitq;
+typedef struct Procstat	Procstat;
+typedef struct Pwait	Pwait;
+typedef struct ObjProcessInfo ObjProcessInfo;
 typedef struct Watchpt	Watchpt;
 typedef struct Watchdog	Watchdog;
 
@@ -385,10 +387,37 @@ struct Palloc
 	Rendezq	pwait[2];		/* Queues of procs waiting for memory */
 };
 
-struct Waitq
+/*
+ * Process completion is a separate, reference-counted resource so it can
+ * outlive the scheduler Proc and its address space.  A Proc owns one
+ * reference while it exists; every VkindProcess Handle owns another.  The
+ * record is immutable after the single completion transition.
+ */
+enum {
+	PstatCreated	= 0,
+	PstatRunning	= 1,
+	PstatCompleted	= 2,
+};
+
+enum {
+	PcauseNone	= 0,
+	PcauseExit	= 1,
+	PcauseTerminated = 2,
+	PcauseFault	= 3,
+};
+
+struct Procstat
 {
-	Waitmsg	w;
-	Waitq	*next;
+	Ref	ref;
+	Lock	lk;
+	int	state;
+	int	cause;
+	ulong	pid;
+	uvlong	generation;
+	ulong	time[3];	/* user, sys, real (ms) */
+	char	msg[128];
+	Proc	*proc;		/* live target, nil after completion */
+	Pwait	*wait;		/* observers blocked on completion */
 };
 
 /*
@@ -424,7 +453,6 @@ enum
 	RFNOTEG		= (1<<3),
 	RFPROC		= (1<<4),
 	RFMEM		= (1<<5),
-	RFNOWAIT	= (1<<6),
 	RFCNAMEG	= (1<<10),
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),
@@ -451,7 +479,6 @@ enum
 	QueueingR,
 	QueueingW,
 	Wakeme,
-	Broken,
 	Stopped,
 	Waitrelease,
 
@@ -516,16 +543,10 @@ struct Proc
 
 	ulong	pid;
 	ulong	noteid;		/* Equivalent of note group */
-	ulong	parentpid;
 	ulong	index;
 
-	Proc	*parent;	/* Process to send wait record on exit */
-	Lock	exl;		/* Lock count and waitq */
-	Waitq	*waitq;		/* Exited processes wait children */
-	int	nchild;		/* Number of living children */
-	int	nwait;		/* Number of uncollected wait records */
-	QLock	qwaitr;
-	Rendez	waitr;		/* Place to hang out in wait */
+	Procstat *stat;		/* completion resource, nil only before creation */
+	int	boot;		/* explicit initial/boot process, never ancestry */
 
 	QLock	seglock;	/* locked whenever seg[] changes */
 	Segment	*seg[NSEG];

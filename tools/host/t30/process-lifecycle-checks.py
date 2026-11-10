@@ -367,8 +367,6 @@ def run():
         try:
             denied(lambda: p.rfork(p.RFNAMEG | p.RFCNAMEG),
                    'RFNAMEG together with RFCNAMEG')
-            denied(lambda: p.rfork(p.RFNOWAIT),
-                   'RFNOWAIT without RFPROC')
             assert visible(base_oid) and openable('rollback')
             control0 = p.obj_open_namespace_current()
             probe = space.view(('rollback',))
@@ -530,7 +528,7 @@ def run():
             p.exits('A-bind:' + p.errstr())
         try:
             pid_b, chb = p.rforkex(
-                p.RFPROC | p.RFNOWAIT,
+                p.RFPROC,
                 ((cgo, p.VREAD | p.VMETA | p.VDELEGATE, 1),
                  (cres, p.VWRITE | p.VMETA | p.VDELEGATE, 2)))
         except OSError:
@@ -697,6 +695,7 @@ def run():
         except OSError:
             p.exits('exec-exec:' + p.errstr())
         p.exits('exec-child-returned')
+    realpid = p.process_info(pid)[0]
     waited, status = p.wait()
     ok(waited == pid and status == '',
        'OEXECUTE replaces the image in place with the same PID/Pgrp '
@@ -704,7 +703,7 @@ def run():
     m, env = p.obj_receive(report_sub, 1000, 64)
     rec = p.obj_read(m, 64)
     p.obj_close(m)
-    ok((b'PID=' + str(pid).encode()) in rec and b'STALE=C' in rec and
+    ok((b'PID=' + str(realpid).encode()) in rec and b'STALE=C' in rec and
        b'KEEP=' + BASE in rec and b'MARKER=ok' in rec,
        'post-exec PID is unchanged, old Handle numbers are stale and the '
        'authorized role still reads: %r' % (rec,))

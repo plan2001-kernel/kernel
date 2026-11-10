@@ -510,7 +510,7 @@ rxmitproc(void *v)
 	arp->rxmitp = up;
 	if(waserror()){
 		arp->rxmitp = nil;
-		pexit("hangup", 1);
+		pexit("hangup");
 	}
 	for(;;){
 		sleep(&arp->rxmtq, rxready, v);

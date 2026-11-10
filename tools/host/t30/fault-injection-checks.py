@@ -57,7 +57,7 @@ def run():
             (call if call is not None else space.wait)()
         except OSError as e:
             msg = str(e.args[0]) if e.args else ''
-            if msg != 'no living children':
+            if msg != 'no child':
                 raise AssertionError('%s: unexpected OSError %r'
                                      % (name, msg))
             ok(True, name)

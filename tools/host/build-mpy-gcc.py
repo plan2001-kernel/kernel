@@ -504,7 +504,6 @@ def main() -> int:
                 checks.append(f"missing {sym}")
         sysnums = {"sysctl": "0x90", "ioctl": "0x91", "objopen": "0x89",
                    "oexecute": "0x3c", "spawn": "0x92",
-                   "procwait": "0x8e",
                    "errstr": "0x29", "_nsec": "0x35", "sleep": "0x11"}
         for sym, num in sysnums.items():
             if not re.search(rf"<{re.escape(sym)}>:", dis):
@@ -513,11 +512,13 @@ def main() -> int:
                 checks.append(f"syscall stub {sym} has no RBP={num}")
         # Migrated process-lifecycle adapters must be real C symbols, not
         # retired syscall stubs; their OBJOP path is checked in the disasm.
-        realsyms = ("wait", "proc_wait", "obj_ospawn", "rfork")
+        realsyms = ("wait", "obj_ospawn", "obj_rforkex", "rfork",
+                    "obj_process_wait", "obj_process_info",
+                    "obj_process_terminate")
         for sym in realsyms:
             if not re.search(rf"<{re.escape(sym)}>:", dis):
                 checks.append(f"missing OBJ adapter {sym}")
-        direct = {"_exits": "0x8", "oterminate": "0x5d",
+        direct = {"_exits": "0x8",
                   "notify": "0x1c", "noted": "0x1d", "brk_": "0x18",
                   "sleep": "0x11", "rforkex": "0x8f"}
         for sym, num in direct.items():

@@ -699,7 +699,6 @@ enum
 	RFNOTEG		= (1<<3),
 	RFPROC		= (1<<4),
 	RFMEM		= (1<<5),
-	RFNOWAIT	= (1<<6),
 	RFCNAMEG	= (1<<10),
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),

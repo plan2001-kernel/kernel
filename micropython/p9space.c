@@ -21,7 +21,6 @@
 
 // Stage 4: volume bootstrap followed by OBJ Space handles
 extern long ovolopen(char *, int);
-extern long oterminate(long);
 
 /* Shared exact OSPAWN layout, including the optional extension. */
 #ifndef NO_QSTR
@@ -1088,7 +1087,9 @@ static mp_obj_t space_info(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(space_info_obj, space_info);
 
 /*
- * spawn(oid, cpu=None, argv=None, membudget=0) -> child PID.
+ * spawn(oid, cpu=None, argv=None, membudget=0) -> VkindProcess Handle.
+ * The Handle carries Vobserve|Vcontrol|Vmeta|Vdelegate and is the process
+ * authority; a numeric PID is only an identifier obtainable by observation.
  * The Space must be open; oid selects its published executable bytes.
  * cpu is an exact logical kernel CPU, or None/-1 for unpinned.  argv
  * is an iterable of str, at most 32 entries.  membudget is bytes; 0
@@ -1264,7 +1265,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(space_spawn_obj, 1, space_spawn);
 
-// wait() -> (pid, status): status '' if the child succeeded
+// wait() -> (handle, status): status '' if the process exited cleanly
 static mp_obj_t space_wait(void) {
     Waitmsg *w;
     mp_obj_t t[2];
@@ -1280,12 +1281,12 @@ static mp_obj_t space_wait(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(space_wait_obj, space_wait);
 
-// terminate(pid): request NDebug termination of a direct child
-static mp_obj_t space_terminate(mp_obj_t pidobj) {
-    if (!mp_obj_is_int(pidobj)) {
-        mp_raise_TypeError(MP_ERROR_TEXT("space.terminate: pid must be an int"));
+// terminate(handle): authorized termination through a Vcontrol Handle
+static mp_obj_t space_terminate(mp_obj_t handle) {
+    if (!mp_obj_is_int(handle)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("space.terminate: handle must be an int"));
     }
-    if (oterminate(mp_obj_get_int(pidobj)) < 0) {
+    if (obj_process_terminate(mp_obj_get_int(handle)) < 0) {
         raise_err();
     }
     return mp_const_none;

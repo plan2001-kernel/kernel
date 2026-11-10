@@ -26,7 +26,6 @@ extern long objbind(int, void *, long, unsigned long long,
 extern long objinvoke(int, void *, long);
 extern long sysctl(unsigned int, unsigned int, SysctlReq *, long);
 extern long ioctl(int, unsigned int, IoctlReq *, long);
-extern long procwait(void *);
 extern long spawn(int, unsigned long long, char **, int, struct Ospawn *);
 extern long rforkex(unsigned long, void *, unsigned long long *);
 extern long regionwait(unsigned long long, unsigned long long,
@@ -404,19 +403,150 @@ obj_device_ether_detach(int device)
 	return obj_device_ioctl(device, IoctlEtherDetach, nil, 0, 0);
 }
 
+/* Typed process-capability operations over OBJINVOKE. */
 long
-proc_wait(ProcWait *w)
+obj_process_info(int handle, ObjProcessInfo *out)
 {
-	if(w == nil)
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpProcessInfo;
+	c.out = out;
+	c.outlen = sizeof *out;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_process_wait(int handle, ObjProcessInfo *out, long long timeout)
+{
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpProcessWait;
+	c.arg0 = (unsigned long long)timeout;
+	c.out = out;
+	c.outlen = sizeof *out;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_process_terminate(int handle)
+{
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpProcessTerminate;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+/*
+ * Userland bookkeeping for the historical no-argument wait()/await()
+ * interface only.  The kernel never consumes completion; this table merely
+ * remembers which process Handles this process created.  Explicit users use
+ * obj_process_wait() and may observe a completion repeatedly.
+ */
+#define PWATCHMAX 64
+static int pwatch[PWATCHMAX];
+static int npwatch;
+
+void
+objprocwatch(int handle)
+{
+	int i;
+
+	if(handle <= 0)
+		return;
+	for(i = 0; i < npwatch; i++)
+		if(pwatch[i] == handle)
+			return;
+	if(npwatch < PWATCHMAX)
+		pwatch[npwatch++] = handle;
+}
+
+void
+objprocclear(void)
+{
+	npwatch = 0;
+}
+
+static void
+pwatchdrop(int i)
+{
+	if(i < 0 || i >= npwatch)
+		return;
+	npwatch--;
+	if(i != npwatch)
+		pwatch[i] = pwatch[npwatch];
+}
+
+/* Wait for any tracked process; completion remains kernel-owned until the
+ * tracked Handle is closed after the result is copied. */
+long
+objprocwaitany(ObjProcessInfo *out)
+{
+	int i, h;
+	long r;
+
+	if(out == nil)
 		return -1;
-	return procwait(w);
+	for(;;){
+		for(i = 0; i < npwatch;){
+			r = obj_process_wait(pwatch[i], out, 0);
+			if(r < 0){
+				pwatchdrop(i);
+				continue;
+			}
+			if(r == 0){
+				h = pwatch[i];
+				pwatchdrop(i);
+				obj_close(h);
+				out->pid = h;	/* historical wait() names the child */
+				return 0;
+			}
+			i++;
+		}
+		if(npwatch == 0){
+			werrstr("no child");
+			return -1;
+		}
+		/* Block on one Handle, then recheck the others.  The kernel wait
+		 * itself is a real wakeup path, not a sleep-and-compare loop. */
+		r = obj_process_wait(pwatch[0], out, 20);
+		if(r < 0)
+			pwatchdrop(0);
+		else if(r == 0){
+			h = pwatch[0];
+			pwatchdrop(0);
+			obj_close(h);
+			out->pid = h;
+			return 0;
+		}
+	}
+}
+
+/* RFORKEX wrapper: track the returned process Handle in the parent and
+ * drop copied bookkeeping when this is the child. */
+long
+obj_rforkex(unsigned long flags, void *opts, unsigned long long *childhandles)
+{
+	long r;
+
+	r = rforkex(flags, opts, childhandles);
+	if(r == 0)
+		objprocclear();
+	else if(r > 0)
+		objprocwatch((int)r);
+	return r;
 }
 
 /* Ordinary fork is the canonical extended fork with an empty Handle plan. */
 int
 rfork(int flags)
 {
-	return (int)rforkex((unsigned long)flags, nil, nil);
+	return (int)obj_rforkex((unsigned long)flags, nil, nil);
 }
 
 /* Direct SPAWN: an authorized Space Handle plus OID, never an INVOKE route. */
@@ -424,9 +554,14 @@ long
 obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options)
 {
+	long r;
+
 	if(argc < 0)
 		return -1;
-	return spawn(space, oid, argv, argc, options);
+	r = spawn(space, oid, argv, argc, options);
+	if(r > 0)
+		objprocwatch((int)r);
+	return r;
 }
 
 /* Common device adapters; concrete wire messages remain provider-specific. */

@@ -536,7 +536,7 @@ gproc(void *a)
 	p = *(Gproc*)a;
 	free(a);
 	(*p.f)(p.fs, p.id, p.arg);
-	pexit("", 1);
+	pexit("");
 }
 
 void

@@ -35,17 +35,19 @@ injectfault(char *point)
 
 /*
  * Shared fork core.  RFORKEX(143) and its empty-plan wrapper use this
- * function, so forkchild, resource copying, rollback and parent/child
- * linkage cannot diverge.  The caller has already validated the Handle or
- * the raw syscall boundary; this function validates only the flag word and
- * resources.  VI is a prepared, pinned Handle plan (or nil); it is not
+ * function, so forkchild, resource copying, rollback and process
+ * publication cannot diverge.  The caller has already validated the Handle
+ * or the raw syscall boundary; this function validates only the flag word
+ * and resources.  VI is a prepared, pinned Handle plan (or nil); it is not
  * mutated and it is committed only after every non-Handle resource has been
- * copied successfully.
+ * copied successfully.  The parent receives an independent VkindProcess
+ * Handle; no child accounting or ancestral wait state is created.
  */
 static ulong
 kernrforkcore(ulong flag, Vinherit *vi)
 {
 	ulong pid;
+	int childhandle;
 	uvlong forkpages;
 	char *text, *user, *args;
 	int n, i, lockup, lockp;
@@ -75,7 +77,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		Pgrp *opg;
 		Egrp *oeg;
 
-		if(flag & (RFMEM|RFNOWAIT))
+		if(flag & RFMEM)
 			error(Ebadarg);
 
 		ofg = up->fdgrp;
@@ -251,6 +253,8 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	p->pcycles = -p->kentry;
 
 	pid = pidalloc(p);
+	p->stat = procstatnew(pid);
+	p->stat->proc = p;
 
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 	/* Third fallible boundary: text/user/args and the PID are initialized,
@@ -341,17 +345,15 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		error("fork: injected post-procfork failure");
 #endif
 
+	/* Install the process capability before publication.  If it fails the
+	 * prepublication error region discards the child and its completion
+	 * record; no partially installed authority is possible. */
+	childhandle = vobjprocinstall(p->stat);
+
 	poperror();	/* prepublication error region */
 
 	if(flag & RFNOMNT)
 		pgrpsealnamespace(p->pgrp);
-
-	if((flag&RFNOWAIT) == 0){
-		p->parent = up;
-		lock(&up->exl);
-		up->nchild++;
-		unlock(&up->exl);
-	}
 
 	/*
 	 *  since the bss/data segments are now shareable,
@@ -364,9 +366,10 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if(up->wired)
 		procwired(p, up->affinity);
 
+	procstatstart(p->stat);
 	ready(p);
 	sched();
-	return pid;
+	return childhandle;
 }
 
 /*
@@ -380,7 +383,7 @@ ulong
 kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 {
 	Vinherit vi;
-	ulong pid;
+	ulong handle;
 	int i;
 
 	if((flag & RFPROC) == 0){
@@ -394,7 +397,7 @@ kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 		nexterror();
 	}
 	vobjinheritprepare(&vi, list, n);
-	pid = kernrforkcore(flag, &vi);
+	handle = kernrforkcore(flag, &vi);
 	/* One result per input entry, in input order.  Do not search by source:
 	 * the same parent Handle may legitimately appear several times. */
 	if(childhandles != nil)
@@ -403,7 +406,7 @@ kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 				(uvlong)vobjinheritchildhandle(&vi, i);
 	vobjinheritrelease(&vi);
 	poperror();
-	return pid;
+	return handle;
 }
 
 ulong
@@ -856,7 +859,7 @@ execo(uvlong oid, void *vbuf, long n, char **uargv, int argc)
 			qunlock(&up->seglock);
 		}
 		if(up->seg[SSEG] == nil)
-			pexit(up->errstr, 1);
+			pexit(up->errstr);
 		nexterror();
 	}
 
@@ -1030,8 +1033,8 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
  * Shared spawn: create a real child from a published static x86-64 ELF.
  * The caller's Space handle is used only to read the image. The child
  * gets fresh segments and Egrp plus only the explicitly selected O view,
- * Pipe handles, environment and UDP6 permit. CPU placement is applied
- * before ready(). OTERMINATE may only interrupt a direct child.
+ * Pipe handles, environment and UDP6 permit.  CPU placement is applied
+ * before ready().  The caller receives an independent process Handle.
  */
 /*
  * Shared spawn core.  The explicit GE/O Space capability is supplied by the
@@ -1059,7 +1062,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	char **kargv, **av;
 	char *uarg[Oargmax];
 	char name[64], ebuf[ERRMAX];
-	int argn, cpu, i, nargs;
+	int argn, cpu, i, nargs, childhandle;
 	struct Oinherit *inh;
 	struct Oinheritv *inhv;
 	Vinhand plan[24];
@@ -1303,6 +1306,8 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->kentry = up->kentry;
 	p->pcycles = -p->kentry;
 	pid = pidalloc(p);
+	p->stat = procstatnew(pid);
+	p->stat->proc = p;
 	qunlock(&p->debug);
 	lockp = 0;
 	qunlock(&up->debug);
@@ -1446,57 +1451,19 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		error("ospawn: injected late child abort");
 #endif
 
-	/* Publication boundary: from here the child is parent-visible and
-	 * must not be rolled back as if it never existed. */
-	lock(&up->exl);
-	p->parent = up;
-	up->nchild++;
-	unlock(&up->exl);
+	/* Install the initial observe+control authority before publication.
+	 * The prepublication error region tears down both the child and the
+	 * completion record if this fails. */
+	childhandle = vobjprocinstall(p->stat);
 
-	print("o: SPAWN pid=%lud oid=%#llux cpu=%d\n", pid, oid, cpu);
+	print("o: SPAWN pid=%lud handle=%d oid=%#llux cpu=%d\n",
+		pid, childhandle, oid, cpu);
 	poperror();
 
+	procstatstart(p->stat);
 	ready(p);
 	sched();
-	return pid;
-}
-
-/*
- * Shared OTERMINATE core.  Only a direct, live child can be named; the
- * caller's own ProcessSelf capability has already been checked by the OBJ
- * provider.  PID reuse, parent/parentpid, kp and exiting are all judged
- * exactly as before.
- */
-int
-kernoterminate(int ipid)
-{
-	Proc *p;
-	char *err;
-	ulong pid;
-	int idx;
-
-	if(ipid <= 0)
-		error(Ebadarg);
-	pid = (ulong)ipid;
-	if(pid == up->pid)
-		error(Ebadarg);
-	if((idx = procindex(pid)) < 0)
-		error(Ebadarg);
-	if((p = proctab(idx)) == nil)
-		error(Ebadarg);
-
-	err = nil;
-	qlock(&p->debug);
-	if(p->pid != pid || p->exiting)
-		err = Ebadarg;
-	else if(p->kp || p->parent != up || p->parentpid != up->pid)
-		err = Eperm;
-	else
-		postnote(p, 0, "terminated", NDebug);
-	qunlock(&p->debug);
-	if(err != nil)
-		error(err);
-	return 0;
+	return childhandle;
 }
 
 int
@@ -1574,7 +1541,7 @@ sysrforkex(sysva_list list)
 	uvlong *uch;
 	Vinhand list_[RFORKEX_MAXHANDLES];
 	ulong flag;
-	ulong pid;
+	ulong handle;
 	int i;
 
 	flag = (ulong)sysva_arg(list, uvlong);
@@ -1605,8 +1572,8 @@ sysrforkex(sysva_list list)
 		list_[i].rights = opt.h[i].rights;
 		list_[i].dstslot = (int)opt.h[i].dstslot;
 	}
-	pid = kernrforkex(flag, list_, (int)opt.count, uch);
-	return pid;
+	handle = kernrforkex(flag, list_, (int)opt.count, uch);
+	return handle;
 }
 
 /*
@@ -1621,7 +1588,7 @@ sysspawn(sysva_list list)
 	char **argv;
 	struct Ospawn *opt;
 	uvlong oid;
-	long pid;
+	long handle;
 	int space, argc;
 
 	space = (int)sysva_arg(list, int);
@@ -1634,16 +1601,10 @@ sysspawn(sysva_list list)
 		oshandput(soh);
 		nexterror();
 	}
-	pid = kernospawn(soh, oid, argv, argc, opt);
+	handle = kernospawn(soh, oid, argv, argc, opt);
 	poperror();
 	oshandput(soh);
-	return (uintptr)pid;
-}
-
-uintptr
-sysoterminate(sysva_list list)
-{
-	return kernoterminate((int)sysva_arg(list, int));
+	return (uintptr)handle;
 }
 
 uintptr
@@ -1668,7 +1629,7 @@ sysexits(sysva_list list)
 		}
 
 	}
-	pexit(status, 1);
+	pexit(status);
 }
 
 void
@@ -1770,7 +1731,7 @@ donotify(Ureg *ureg)
 	|| (nureg = notify(ureg, msg)) == nil){
 		if(up->lastnote->flag == NDebug)
 			pprint("suicide: %s\n", msg);
-		pexit(msg, up->lastnote->flag!=NDebug);
+		pexit(msg);
 	}
 
 	/* word under Ureg is old ureg */
@@ -1805,7 +1766,7 @@ notecont(int arg)
 	nureg = up->noteureg;
 	if(!okaddr((uintptr)nureg-BY2WD, BY2WD+sizeof(Ureg), 0)){
 		pprint("suicide: bad ureg in noted or call to noted when not notified\n");
-		pexit("Suicide", 0);
+		pexit("Suicide");
 	}
 
 	switch(arg){
@@ -1817,7 +1778,7 @@ notecont(int arg)
 	case NSAVE:
 		if(noted(up->dbgreg, nureg, arg)){
 			pprint("suicide: trap in noted\n");
-			pexit("Suicide", 0);
+			pexit("Suicide");
 		}
 		break;
 	default:
@@ -1827,7 +1788,7 @@ notecont(int arg)
 		noted(up->dbgreg, nureg, arg);	/* for debugging */
 		if(up->lastnote->flag == NDebug)
 			pprint("suicide: %s\n", up->lastnote->msg);
-		pexit(up->lastnote->msg, up->lastnote->flag!=NDebug);
+		pexit(up->lastnote->msg);
 	}
 
 	/* allow next note */

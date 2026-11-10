@@ -81,6 +81,12 @@ _Static_assert(sizeof(ObjOpenDeviceReq) == 32 + OBJ_DEVICE_OPTMAX,
 	"device open ABI");
 _Static_assert(OBJ_DEVICE_OPTMAX >= sizeof(ObjDeviceOpenOptions),
 	"device option bound");
+_Static_assert(ObjProcCreated == PstatCreated &&
+	ObjProcRunning == PstatRunning && ObjProcCompleted == PstatCompleted,
+	"process state ABI");
+_Static_assert(ObjProcCauseExit == PcauseExit &&
+	ObjProcCauseTerminated == PcauseTerminated &&
+	ObjProcCauseFault == PcauseFault, "process cause ABI");
 
 typedef struct Vobj	Vobj;
 typedef struct Vmsg	Vmsg;
@@ -468,6 +474,11 @@ vobjput(Vobj *o)
 				putpage(r->pages[i]);
 		free(r->pages);
 		free(r);
+	}else if(o->kind == VkindProcess && o->priv != nil){
+		Procstat *st = o->priv;
+
+		o->priv = nil;
+		procstatput(st);
 	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
 		lifecontrol(o->priv, -1);
 		closepgrp(o->priv);
@@ -638,6 +649,97 @@ vobjinstallobj(Vobj *o, int rights)
 		error("vobj: too many handles");
 	}
 	return handle;
+}
+
+/*
+ * Install one initial VkindProcess Handle in the caller.  The completion
+ * record is reference-counted independently of the Proc, so the Handle is
+ * valid before the process is published and remains valid after it exits.
+ */
+int
+vobjprocinstall(Procstat *st)
+{
+	Vobj *o;
+	int h;
+
+	if(st == nil)
+		error(Ebadarg);
+	o = vobjalloc(VkindProcess, 0, 0);
+	if(o == nil)
+		error(Enomem);
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	o->priv = st;
+	procstatref(st);
+	h = vobjinstallobj(o, Vobserve|Vcontrol|Vmeta|Vdelegate);
+	poperror();
+	vobjput(o);
+	return h;
+}
+
+int
+vobjprocinfo(int handle, ObjProcessInfo *out)
+{
+	Vobj *o;
+
+	if(out == nil)
+		error(Ebadarg);
+	validaddr((uintptr)out, sizeof *out, 1);
+	o = vobjholdobj(handle, Vmeta);
+	if(o->kind != VkindProcess){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	procstatinfo(o->priv, out);
+	vobjput(o);
+	return 0;
+}
+
+long
+vobjprocesswait(int handle, ObjProcessInfo *out, long timeout)
+{
+	Vobj *o;
+	long r;
+
+	if(out == nil)
+		error(Ebadarg);
+	validaddr((uintptr)out, sizeof *out, 1);
+	o = vobjholdobj(handle, Vobserve);
+	if(o->kind != VkindProcess){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	r = procstatwait(o->priv, out, timeout);
+	poperror();
+	vobjput(o);
+	return r;
+}
+
+int
+vobjprocterminate(int handle)
+{
+	Vobj *o;
+	int r;
+
+	o = vobjholdobj(handle, Vcontrol);
+	if(o->kind != VkindProcess){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	r = procstatterminate(o->priv);
+	poperror();
+	vobjput(o);
+	return r;
 }
 
 /*
@@ -3857,35 +3959,6 @@ vobjnamespacevisible(int control, void *out, long bytes)
 	poperror();
 	for(i=0; i<n; i++) ohandput(grants[i]);
 	return count;
-}
-
-/*
- * Process-lifecycle OBJINVOKE providers.  Each validates the same
- * process-local capability that the retired direct number would have
- * trusted and then calls the one shared kernel core.  No raw syscall
- * dispatch is re-entered and no second scheduler/exit path exists.
- */
-long
-vobjprocwait(ProcWait *out)
-{
-	Waitmsg w;
-	ulong pid;
-	ulong n;
-
-	if(out == nil)
-		error(Ebadarg);
-	pid = pwait(&w);
-	memset(out, 0, sizeof *out);
-	out->pid = (long long)pid;
-	out->time[0] = w.time[0];
-	out->time[1] = w.time[1];
-	out->time[2] = w.time[2];
-	n = strlen(w.msg);
-	if(n > PROCWAIT_MSG_MAX)
-		n = PROCWAIT_MSG_MAX;
-	memmove(out->msg, w.msg, n);
-	out->msglen = (unsigned int)n;
-	return 0;
 }
 
 static long

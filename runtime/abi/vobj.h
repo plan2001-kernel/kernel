@@ -32,6 +32,7 @@ enum {
 	Vcreate		= 1<<11,	/* create persistent objects in an O Space */
 	Vcommit		= 1<<12,	/* commit a persistent O Space transaction */
 	Vexecute	= 1<<13,	/* execute/load a GE/O object into a child */
+	Vobserve	= 1<<14,	/* read a process completion record and wait */
 	Vall		= 0xffff,
 };
 
@@ -50,6 +51,7 @@ enum {
 	VkindNamespaceView = 15,	/* sealed role grants */
 	VkindNamespaceControl = 16,	/* caller's current namespace */
 	VkindRegion	= 17,	/* volatile capability-mapped memory region */
+	VkindProcess	= 18,	/* volatile process observation/control capability */
 	/* Kinds 2 (TCP), 5 (UDP6), 9 (USB service) and 12 (ProcessSelf) are
 	 * reserved historical identifiers and are never installed. */
 };

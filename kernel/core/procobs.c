@@ -18,14 +18,6 @@ procpid(void)
 	return up->pid;
 }
 
-int
-procppid(void)
-{
-	if(up == nil)
-		return -1;
-	return up->parentpid;
-}
-
 char*
 procusername(void)
 {

@@ -128,10 +128,12 @@ not evidence that this data path exists today.
 ## CURRENT IMPLEMENTATION
 
 AMD64 has a functional full-system path with GE/O, MicroPython and device
-providers. `SPAWN` creates a child with a fresh `Pgrp`; `RFORKEX` transfers
-planned Handles; `PROCWAIT` waits for a direct child. `OTERMINATE` and exit
-logic depend on parent relationships. `Proc.parent/parentpid/nchild/waitq`,
-`Pgrp/OContext` sharing/copying/sealing and namespace views remain in source.
+providers. `SPAWN` and `RFORKEX` return a process-local `VkindProcess` Handle
+carrying `Vobserve|Vcontrol|Vmeta|Vdelegate`; a process Handle, not a PID, is
+the authority. Observation and control are separate `OBJINVOKE` operations,
+completion is an immutable multi-reader record, and no parent/child wait
+state or ancestral control path exists. `Pgrp/OContext` sharing/copying/
+sealing and namespace views remain independent resource mechanisms.
 `ObjectFIFO` carries framed IPC and Ethernet receive data; Pipe and current
 console paths also remain. The `-I` REPL directly claims PS/2 input;
 `micropython/p9console.c` decodes the scan codes and supplies the HAL.
@@ -178,6 +180,21 @@ delta and immutable 8 KiB records cross only through shared pages;
 `REGIONWAIT`/`REGIONWAKE` carry notification only. The processes receive
 attenuated region Handles through explicit `SPAWN` vhandles, so this data
 path uses no `ObjectFIFO`, Pipe or payload-copy syscall.
+
+Phase 5 adds one reference-counted `Procstat` completion resource per user
+process, owned by the live `Proc` and then by every process Handle. A single
+completion transition publishes state, cause (voluntary exit, authorized
+termination or unhandled fault), bounded status and runtime accounting, then
+wakes every enrolled observer without consuming the record. The address
+space and its writable region mappings are released before completion, so a
+faulted or terminated writer cannot retain the only RW slot; read-only
+snapshots survive through their own mappings. `SPAWN` and `RFORKEX` install
+the initial Handle before publication, and `PROCWAIT`, `OTERMINATE`,
+`Proc.parent/parentpid/nchild/nwait/waitq`, the Broken-retention path and
+`RFNOWAIT` are deleted. `SPAWN` still creates a fresh `Pgrp`; no ancestry
+grants authority. The boot process has an explicit `Proc.boot` role, not a
+`parentpid == 0` test. `OEXECUTE` keeps the same Process identity and its
+observers; it replaces the image in place without granting new rights.
 
 ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff, mappings,
 console, timer interrupts and physical-page allocation, not full-system

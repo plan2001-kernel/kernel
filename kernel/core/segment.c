@@ -743,7 +743,7 @@ segmentioproc(void *arg)
 		wakeup(&sio->replywait);
 	}
 
-	pexit("done", 1);
+	pexit("done");
 }
 
 long

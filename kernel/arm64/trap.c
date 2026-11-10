@@ -287,7 +287,7 @@ faultarm64(Ureg *ureg)
 		if(waserror()){
 			if(up->nerrlab == 0){
 				pprint("suicide: sys: %s\n", up->errstr);
-				pexit(up->errstr, 1);
+				pexit(up->errstr);
 			}
 			/* skipping bottom of trap(), so do it outselfs */
 			splhi();

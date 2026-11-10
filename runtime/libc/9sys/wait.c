@@ -3,21 +3,25 @@
 #include "../../abi/obj.h"
 
 /*
- * WAIT/AWAIT use the direct typed PROCWAIT syscall now.  The kernel returns
- * one bounded record (pid, user/sys/real time and the exact status text);
- * these adapters keep the historical libc APIs.  await() formats the same
- * five fields as before, while wait() allocates the historical Waitmsg with
- * a trailing NUL-terminated status string.
+ * The no-argument wait()/await() interface is userland bookkeeping over
+ * VkindProcess Handles created by this process's spawn/rforkex adapters.
+ * Completion is multi-reader and non-consumptive in the kernel; this adapter
+ * closes its tracking Handle after copying the result, matching the
+ * historical "collect one child" ergonomics.  New code should use
+ * obj_process_wait() directly so it can observe completion repeatedly and
+ * keep the Handle.
  */
+
+extern long objprocwaitany(ObjProcessInfo *out);
 
 int
 await(char *buf, int n)
 {
-	ProcWait w;
+	ObjProcessInfo w;
 
 	if(buf == nil || n <= 0)
 		return -1;
-	if(proc_wait(&w) < 0)
+	if(objprocwaitany(&w) < 0)
 		return -1;
 	return snprint(buf, n, "%d %lud %lud %lud %q",
 		(int)w.pid,
@@ -28,11 +32,11 @@ await(char *buf, int n)
 Waitmsg*
 wait(void)
 {
-	ProcWait w;
+	ObjProcessInfo w;
 	Waitmsg *m;
 	int l;
 
-	if(proc_wait(&w) < 0)
+	if(objprocwaitany(&w) < 0)
 		return nil;
 	l = w.msglen + 1;
 	m = malloc(sizeof(Waitmsg) + l);

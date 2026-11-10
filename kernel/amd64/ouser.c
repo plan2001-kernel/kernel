@@ -185,8 +185,9 @@ ouserproc(void *arg)
 		up->egrp = nil;
 	}
 	up->egrp = newegrp();
-	up->parent = nil;
-	up->parentpid = 0;
+	/* Explicit boot role: privileged lifecycle status is never inferred
+	 * from ancestry or from a zero parent PID. */
+	up->boot = 1;
 
 	ts = newseg(SG_TEXT|SG_RONLY, UTZERO, 1);
 	ts->flushme = 1;
