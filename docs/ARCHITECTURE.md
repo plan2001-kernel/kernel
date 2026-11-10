@@ -171,6 +171,14 @@ segment attach, `SG_SHARED` type and `_globalsegattach` hook were removed;
 `SEGATTACH` remains only for the anonymous `memory` and physical device
 segments.
 
+Phase 4 demonstrates three independent MicroPython processes over two
+capability regions: A is the only writer of the task region, B the only
+writer of the answer region, and C holds read-only mappings to both. Scalar,
+delta and immutable 8 KiB records cross only through shared pages;
+`REGIONWAIT`/`REGIONWAKE` carry notification only. The processes receive
+attenuated region Handles through explicit `SPAWN` vhandles, so this data
+path uses no `ObjectFIFO`, Pipe or payload-copy syscall.
+
 ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff, mappings,
 console, timer interrupts and physical-page allocation, not full-system
 scheduler, GE/O, syscalls, userspace or device parity. MicroPython is the
