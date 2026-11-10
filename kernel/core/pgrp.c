@@ -192,21 +192,22 @@ closefdgrp(Ref *r)
  * parser removes complete event lines before matching test markers.
  */
 static Lock lifelk;
-static long pgrplive, octxlive, pgrpseq;
-static ulong lifeseq;
+static long pgrplive, octxlive, fpulive, proclive, pgrpseq;
+static ulong lifeseq, delegateid;
 
 static void
-lifeprint(char kind, int delta, ulong seq, ulong id, long pgrp, long octx)
+lifeprint(char kind, int delta, ulong seq, ulong id, long pgrp, long octx,
+	long proc)
 {
-	print("T30LIFE %c%c seq=%lud id=%lud pgrp=%ld octx=%ld\n",
-		kind, delta > 0 ? '+' : '-', seq, id, pgrp, octx);
+	print("T30LIFE %c%c seq=%lud id=%lud pgrp=%ld octx=%ld proc=%ld\n",
+		kind, delta > 0 ? '+' : '-', seq, id, pgrp, octx, proc);
 }
 
 void
 lifepgrp(void *v, int delta)
 {
 	Pgrp *pgrp = v;
-	long p, o;
+	long p, o, r;
 	ulong id, seq;
 
 	lock(&lifelk);
@@ -216,40 +217,122 @@ lifepgrp(void *v, int delta)
 	id = pgrp->diagid;
 	p = pgrplive;
 	o = octxlive;
+	r = proclive;
 	seq = ++lifeseq;
 	unlock(&lifelk);
-	lifeprint('g', delta, seq, id, p, o);
+	lifeprint('g', delta, seq, id, p, o, r);
 }
 
 void
 lifecontrol(void *v, int delta)
 {
 	Pgrp *pgrp = v;
-	long p, o;
+	long p, o, r;
 	ulong id, seq;
 
 	lock(&lifelk);
 	id = pgrp->diagid;
 	p = pgrplive;
 	o = octxlive;
+	r = proclive;
 	seq = ++lifeseq;
 	unlock(&lifelk);
-	lifeprint('c', delta, seq, id, p, o);
+	lifeprint('c', delta, seq, id, p, o, r);
 }
 
 void
 lifeoctx(int delta)
 {
-	long p, o;
+	long p, o, r;
 	ulong seq;
 
 	lock(&lifelk);
 	octxlive += delta;
 	p = pgrplive;
 	o = octxlive;
+	r = proclive;
 	seq = ++lifeseq;
 	unlock(&lifelk);
-	lifeprint('o', delta, seq, 0, p, o);
+	lifeprint('o', delta, seq, 0, p, o, r);
+}
+
+/*
+ * Procs reserved by newproc() but not yet published by ready() or released
+ * by procdiscard().  A leaked New Proc at a test marker is visible here even
+ * when no PID was allocated yet.
+ */
+void
+lifeproc(int delta)
+{
+	long p, o, r;
+	ulong seq;
+
+	lock(&lifelk);
+	proclive += delta;
+	if(proclive < 0)
+		proclive = 0;
+	p = pgrplive;
+	o = octxlive;
+	r = proclive;
+	seq = ++lifeseq;
+	unlock(&lifelk);
+	lifeprint('r', delta, seq, 0, p, o, r);
+}
+
+/*
+ * Delegated caps=2 Space capabilities and the two resources they own: the
+ * opened native Ospace and the pinned grant-origin reference.  The host
+ * parser rejects an unmatched alloc/free for any of the three kinds, so a
+ * leaked internal reference that VobjInfo.holds cannot see still fails.
+ */
+ulong
+lifedelegateid(void)
+{
+	ulong id;
+
+	lock(&lifelk);
+	id = ++delegateid;
+	unlock(&lifelk);
+	return id;
+}
+
+void
+lifedelegate(int kind, ulong id, int delta)
+{
+	long p, o, r;
+	ulong seq;
+
+	lock(&lifelk);
+	p = pgrplive;
+	o = octxlive;
+	r = proclive;
+	seq = ++lifeseq;
+	unlock(&lifelk);
+	lifeprint(kind, delta, seq, id, p, o, r);
+}
+
+/* Net live FPalloc buffers.  Reported only when a never-scheduled Proc had
+ * an FP context, so repeated prepublication failures can be compared. */
+void
+lifefpu(int delta)
+{
+	lock(&lifelk);
+	fpulive += delta;
+	if(fpulive < 0)
+		fpulive = 0;
+	unlock(&lifelk);
+}
+
+void
+lifefpudiscard(int fpsave, int kfpsave)
+{
+	long n;
+
+	lock(&lifelk);
+	n = fpulive;
+	unlock(&lifelk);
+	print("T30FPU discard fpsave=%d kfpsave=%d live=%ld\n",
+		fpsave != 0, kfpsave != 0, n);
 }
 #endif
 

@@ -38,6 +38,17 @@
 #include	"../core/vobjint.h"
 #include	"lifediag.h"
 #include	"ocontext.h"
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+#include	"env/envapi.h"
+#endif
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+static int
+injectfault(char *point)
+{
+	return envfaulttake("PLAN2001_FAULT", point);
+}
+#endif
 
 enum {
 	Vobjmax		= 4096,
@@ -323,6 +334,8 @@ static int
 vinstall(Vhtab*, Vhand*);
 static Vhand*
 vlookup(int, int);
+static void
+vgecaplimit(Ohand*, int);
 
 void
 vobjput(Vobj *o)
@@ -802,6 +815,8 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 {
 	Vhtab *t;
 	Vhand *h;
+	Vobj *src, *o;
+	Ohand *doh;
 	ulong gen;
 	int i;
 
@@ -817,10 +832,84 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 		gen = vnewgen();
 		if(gen == 0)
 			error("vobj: handle generation exhausted");
-		h = vhandalloc(vi->e[i].src->obj, nil, vi->e[i].rights);
-		vi->e[i].gen = gen;
-		t->s[vi->e[i].slot].h = h;
-		t->s[vi->e[i].slot].gen = gen;
+		src = vi->e[i].src->obj;
+		if(src->kind == VkindSpace){
+			/*
+			 * A bootstrap Space Ohand belongs to the boot owner.
+			 * An explicitly inherited Vexecute capability gets a
+			 * delegated caps=2 Space copy instead, so the child can
+			 * OEXECUTE under the rights it was actually granted.
+			 *
+			 * Ownership invariant through this block:
+			 *  - before the handoff DOH exclusively owns the new
+			 *    Ohand and O, when it exists, has priv == nil;
+			 *  - after the handoff O->priv == DOH and DOH == nil, so
+			 *    O is the only owner and vobjput(O) closes the Ospace
+			 *    and drops the origin pin;
+			 *  - H is a local child Vhand owned by this function until
+			 *    it is installed in the child table T.  Once installed,
+			 *    procdiscard()/vobjprocexit() owns its cleanup.
+			 * The error path releases O when it exists, DOH unless
+			 * ownership was transferred to O, and H when it has already
+			 * been allocated.
+			 */
+			doh = nil;
+			o = nil;
+			h = nil;
+			doh = oscopycapdelegate((Ohand*)src->priv,
+				((Ohand*)src->priv)->rights);
+			if(waserror()){
+				if(h != nil)
+					vhandput(h);
+				if(o != nil)
+					vobjput(o);
+				/* Before the handoff DOH is still this frame's; after
+				 * it DOH is nil and O released it above. */
+				oshandput(doh);
+				nexterror();
+			}
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+			if(injectfault("inherit-space-ohand"))
+				error("vobj: injected delegated Ohand failure");
+#endif
+			vgecaplimit(doh, vi->e[i].rights);
+			o = vobjalloc(VkindSpace, src->space, 0);
+			if(o == nil)
+				error(Enomem);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+			if(injectfault("inherit-space-vobj"))
+				error("vobj: injected delegated Vobj failure");
+#endif
+			o->provider = VopenSpace;
+			o->priv = doh;
+			o->space = ossid(doh);
+			o->oid = 0;
+			doh = nil;		/* O owns the Ohand now */
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+			if(injectfault("inherit-space-vhand"))
+				error("vobj: injected delegated Vhand failure");
+			/* Negative fixture: reproduce the old handoff bug by
+			 * detaching the provider before the Vobj is released.
+			 * The deliberate leak must fail the T30 ownership log. */
+			if(injectfault("inherit-space-leak-ohand")){
+				o->priv = nil;
+				error("vobj: injected delegated Ohand leak");
+			}
+#endif
+			/* Keep cleanup armed until the new Vhand is installed. */
+			h = vhandalloc(o, nil, vi->e[i].rights);
+			vi->e[i].gen = gen;
+			t->s[vi->e[i].slot].h = h;
+			t->s[vi->e[i].slot].gen = gen;
+			h = nil;
+			poperror();
+			vobjput(o);		/* the installed Vhand owns O */
+		}else{
+			h = vhandalloc(src, nil, vi->e[i].rights);
+			vi->e[i].gen = gen;
+			t->s[vi->e[i].slot].h = h;
+			t->s[vi->e[i].slot].gen = gen;
+		}
 	}
 }
 

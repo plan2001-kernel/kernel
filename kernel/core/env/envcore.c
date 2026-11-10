@@ -354,6 +354,51 @@ envnativedelete(char *name)
 	return 0;
 }
 
+#ifdef PLAN2001_LIFECYCLE_DIAG
+/*
+ * Test-only deterministic fault trigger for the lifecycle diagnostic kernel.
+ * If the current process environment carries NAME with exactly WANT, consume
+ * the entry and return 1.  This never raises and is compiled out of the
+ * canonical kernel, so production process-creation paths are unchanged.
+ */
+int
+envfaulttake(char *name, char *want)
+{
+	Egrp *eg;
+	Evalue *e, **h;
+	int i, match, wlen;
+
+	if(up == nil || up->egrp == nil || name == nil || want == nil)
+		return 0;
+	eg = up->egrp;
+	match = 0;
+	wlen = strlen(want);
+	wlock(&eg->rwlk);
+	e = lookupname(*envhash(eg, name), name);
+	if(e != nil && e->len == wlen &&
+	   (wlen == 0 || memcmp(e->value, want, wlen) == 0)){
+		match = 1;
+		for(i = 0; i < eg->nent; i++)
+			if(eg->ent[i] == e)
+				break;
+		if(i < eg->nent){
+			for(h = envhash(eg, e->name); *h != nil; h = &(*h)->hash)
+				if(*h == e){
+					*h = e->hash;
+					break;
+				}
+			eg->ent[i] = nil;
+			if(i < eg->low)
+				eg->low = i;
+			envrealloc(eg, e->value, 0);
+			envrealloc(eg, e, 0);
+		}
+	}
+	wunlock(&eg->rwlk);
+	return match;
+}
+#endif
+
 static void
 envputbe32(uchar *p, ulong v)
 {

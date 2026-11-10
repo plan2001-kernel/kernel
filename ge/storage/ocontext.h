@@ -13,6 +13,9 @@ struct Ohand {
 	uvlong sid, oid;
 	int rights, bootstrap, revoked, caps;
 	char space[256];
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	ulong diagid;		/* delegated caps=2 ownership tracking only */
+#endif
 };
 void ohandput(Ohand*);
 void* octxnew(void);

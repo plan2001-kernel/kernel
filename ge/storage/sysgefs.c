@@ -12,6 +12,7 @@
 #include "fns.h"
 #include "../../kernel/core/error.h"
 #include "../../kernel/core/sd.h"
+#include "../../kernel/core/lifediag.h"
 #include "ocontext.h"
 #include "../../kernel/core/vobjint.h"
 
@@ -340,13 +341,38 @@ okernelvol(char *spec)
 void
 ohandput(Ohand *oh)
 {
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	int delegate;
+#endif
+
 	if(oh == nil)
 		return;
 	if(decref(&oh->ref) != 0)
 		return;
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	/* Only oscopycapdelegate() creates caps=2 capabilities; their own
+	 * Ospace and origin pin are separate live resources. */
+	delegate = oh->caps == 2;
+#endif
 	if(oh->provider != nil) octxput(oh->provider);
-	if(oh->sp != nil) onativeclose(oh->sp);
-	ohandput(oh->origin);
+	if(oh->sp != nil){
+		onativeclose(oh->sp);
+#ifdef PLAN2001_LIFECYCLE_DIAG
+		if(delegate)
+			lifedelegate('s', oh->diagid, -1);
+#endif
+	}
+	if(oh->origin != nil){
+		ohandput(oh->origin);
+#ifdef PLAN2001_LIFECYCLE_DIAG
+		if(delegate)
+			lifedelegate('p', oh->diagid, -1);
+#endif
+	}
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	if(delegate)
+		lifedelegate('d', oh->diagid, -1);
+#endif
 	free(oh);
 }
 
@@ -553,6 +579,72 @@ oscopycap(Ohand *src, uvlong oid)
   incref(&n->origin->ref);
  }
  poperror();qunlock(ohgate(src));
+	return n;
+}
+
+/*
+ * Explicitly delegated Space capability for a child process.  Unlike the
+ * bootstrap Ohand obtained by osopenspace(), this copy is not tied to the
+ * boot owner: oauthorize() accepts a caps=2 Space capability across a
+ * process boundary.  The caller passes the already-validated O-rights
+ * attenuation; the copy owns its own opened Ospace and gate.
+ */
+Ohand*
+oscopycapdelegate(Ohand *src, int rights)
+{
+	Ohand *n;
+
+	if(src == nil)
+		error(Eperm);
+	if(rights == 0 || (rights & ~src->rights) != 0)
+		error(Eperm);
+	qlock(ohgate(src));
+	if(waserror()){
+		qunlock(ohgate(src));
+		nexterror();
+	}
+	oauthorize(src, src->oid, 0);
+	if(ovol == nil)
+		error("O: no volume");
+	n = smalloc(sizeof *n);
+	n->ref.ref = 1;
+	n->rights = rights;
+	n->sid = src->sid;
+	n->oid = 0;
+	n->bootstrap = 0;
+	n->caps = 2;
+	memmove(n->space, src->space, sizeof n->space);
+	n->space[sizeof n->space - 1] = 0;
+	if(waserror()){
+		free(n);
+		nexterror();
+	}
+	n->sp = onativeopen(ovol, n->space);
+	poperror();
+	if(n->sp == nil){
+		free(n);
+		error("O: capability open failed");
+	}
+	if(onativesid(n->sp) != src->sid){
+		onativeclose(n->sp);
+		free(n);
+		error(Eperm);
+	}
+	/* Pin the grant origin across the process boundary.  The capability
+	 * copy owns its own Ospace, but revocation and its gate continue to
+	 * follow the originating Ohand. */
+	n->origin = src->origin ? src->origin : src;
+	incref(&n->origin->ref);
+#ifdef PLAN2001_LIFECYCLE_DIAG
+	/* Publish the three live resources only after every fallible step.
+	 * ohandput() emits the matching frees exactly once at final close. */
+	n->diagid = lifedelegateid();
+	lifedelegate('s', n->diagid, 1);
+	lifedelegate('p', n->diagid, 1);
+	lifedelegate('d', n->diagid, 1);
+#endif
+	poperror();
+	qunlock(ohgate(src));
 	return n;
 }
 

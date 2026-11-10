@@ -138,6 +138,14 @@ Handle per input entry, in input order; the same parent Handle may be listed
 more than once and then produces independent child Handles with independently
 attenuated rights. An ordinary fork or an unlisted Handle never crosses.
 
+An inherited Space Handle is materialized as an explicitly delegated Space
+capability with the declared attenuated rights, not as the boot owner's
+bootstrap authority. That explicit delegation is what lets a child use
+`OEXECUTE(60)` or `SPAWN(146)` on the selected OIDs; an unlisted Space Handle,
+an OID, or a Space name alone still grants nothing. `OEXECUTE` retains the
+current `Proc`, PID and `Pgrp`, while the process-local Handle table follows
+its existing close-on-exec policy.
+
 SPAWN's `stdoutpipe` names one parent Pipe. It must resolve to exactly one
 declared plan entry; an absent source or a source listed more than once is
 ambiguous and is rejected explicitly rather than silently selecting the first

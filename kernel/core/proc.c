@@ -4,6 +4,7 @@
 #include	"dat.h"
 #include	"fns.h"
 #include	"../core/error.h"
+#include	"lifediag.h"
 #include	"edf.h"
 #include	"tos.h"
 #include	"ureg.h"
@@ -464,6 +465,8 @@ ready(Proc *p)
 {
 	int s, pri;
 
+	if(p->state == New)
+		lifeproc(-1);
 	s = splhi();
 	switch(edfready(p)){
 	default:
@@ -704,6 +707,7 @@ newproc(void)
 	procalloc.free = p->qnext;
 	p->qnext = nil;
 		unlock(&procalloc.lk);
+	lifeproc(1);
 
 	if(!fresh){
 		oprocexit(p);
@@ -1496,6 +1500,121 @@ pexit(char *exitstr, int freemem)
 	up->state = Moribund;
 	sched();
 	panic("pexit");
+}
+
+/*
+ * Discard a Proc allocated by newproc() that was never scheduled or
+ * published.  It has no parent wait contract, run-queue membership or
+ * per-Mach MMU state yet, so release its resources synchronously instead
+ * of scheduling an abort child.  This is the prepublication rollback used
+ * by the fork/spawn error paths.
+ *
+ * Callers must own the only reference, hold no locks that pexit() would
+ * take, and must not have called ready().
+ */
+void
+procdiscard(Proc *p)
+{
+	Segment *s;
+	Waitq *wq;
+	Ref *fdgrp;
+	Egrp *egrp;
+	Rgrp *rgrp;
+	Pgrp *pgrp;
+	int i;
+
+	if(p == nil)
+		return;
+	if(p->state != New)
+		panic("procdiscard: proc state %d", p->state);
+
+	fdgrp = p->fdgrp;
+	p->fdgrp = nil;
+	egrp = p->egrp;
+	p->egrp = nil;
+	rgrp = p->rgrp;
+	p->rgrp = nil;
+	pgrp = p->pgrp;
+	p->pgrp = nil;
+
+	oprocexit(p);
+	vobjprocexit(p);
+	pipeprocexit(p);
+	kbdprocexit(p);
+	uartprocexit(p);
+
+	if(fdgrp != nil)
+		closefdgrp(fdgrp);
+	if(egrp != nil)
+		closeegrp(egrp);
+	if(rgrp != nil)
+		closergrp(rgrp);
+	if(pgrp != nil)
+		closepgrp(pgrp);
+
+	qlock(&p->seglock);
+	for(i = 0; i < NSEG; i++){
+		s = p->seg[i];
+		if(s != nil){
+			p->seg[i] = nil;
+			putseg(s);
+		}
+	}
+	qunlock(&p->seglock);
+
+	qlock(&p->debug);
+	/* pidalloc() may not have run yet if an early setup allocation failed. */
+	if(p->pid != 0)
+		pidfree(p);
+	p->parent = nil;
+	p->parentpid = 0;
+	p->nchild = p->nwait = 0;
+	while((wq = p->waitq) != nil){
+		p->waitq = wq->next;
+		free(wq);
+	}
+	freenotes(p);
+	freenote(p->lastnote);
+	p->lastnote = nil;
+	p->notified = 0;
+	p->noteureg = nil;
+	p->dbgreg = nil;
+	free(p->text);
+	p->text = nil;
+	free(p->user);
+	p->user = nil;
+	free(p->args);
+	p->args = nil;
+	if(p->syscalltrace != nil){
+		free(p->syscalltrace);
+		p->syscalltrace = nil;
+	}
+	if(p->watchpt != nil){
+		free(p->watchpt);
+		p->watchpt = nil;
+	}
+	p->nwatchpt = 0;
+	qunlock(&p->debug);
+
+	edfstop(p);
+	if(p->edf != nil){
+		free(p->edf);
+		p->edf = nil;
+	}
+
+	/* The child may have an FP context copied by procfork() even though it
+	 * was never scheduled, so the Moribund cleanup in fpuprocsave() will
+	 * never run for it. */
+	fpuprocdiscard(p);
+
+	/* Mirror the scheduler's Moribund recycle without running the Proc. */
+	lifeproc(-1);
+	lock(&procalloc.lk);
+	p->state = Dead;
+	p->mach = nil;
+	p->qnext = procalloc.free;
+	procalloc.free = p;
+	unlock(&procalloc.lk);
 }
 
 static int

@@ -10,17 +10,28 @@
 #include	"sys.h"	/* repository-relative for Linux GCC */
 #include	"../../runtime/abi/vobj.h"
 #include	"vobjint.h"
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+#include	"env/envapi.h"
+#endif
 
 #include	<a.out.h>
 
 /* ge/storage/sysgefs.c: bounded published-object read for spawn/exec. */
 extern long osgetobject(int, uvlong, uchar**, long, uvlong*);
 
-static void
-abortion(void)
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+/*
+ * Opt-in test hook for the lifecycle diagnostic kernel only.  A matching
+ * PLAN2001_FAULT environment value names one safe rollback point and is
+ * consumed here.  This function and its call sites are absent from the
+ * canonical kernel.
+ */
+static int
+injectfault(char *point)
 {
-	pexit("fork aborted", 1);
+	return envfaulttake("PLAN2001_FAULT", point);
 }
+#endif
 
 /*
  * Shared fork core.  RFORKEX(143) and its empty-plan wrapper use this
@@ -36,7 +47,11 @@ kernrforkcore(ulong flag, Vinherit *vi)
 {
 	ulong pid;
 	uvlong forkpages;
-	int n, i;
+	char *text, *user, *args;
+	int n, i, lockup, lockp;
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	int leak;
+#endif
 	Proc *p;
 
 	/* Check flags before we commit */
@@ -110,6 +125,13 @@ kernrforkcore(ulong flag, Vinherit *vi)
 				envcpy(up->egrp, oeg);
 		}
 
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+		/* Safe rollback point: every new resource is allocated, but the
+		 * caller's pointers have not been replaced yet. */
+		if(injectfault("fork-current-rollback"))
+			error("fork: injected rollback failure");
+#endif
+
 		if(ofg != up->fdgrp)
 			closefdgrp(ofg);
 		if(opg != nil && opg != up->pgrp)
@@ -137,8 +159,63 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if((p = newproc()) == nil)
 		error("no procs");
 
+	/*
+	 * Single prepublication rollback owner for the child's initial state.
+	 * It is armed before the first fallible initialization and is replaced
+	 * by the resource-copy handler below once the child has an identity and
+	 * a PID.  procdiscard() takes P->DEBUG itself, so the handler unlocks
+	 * only the debug locks it actually acquired before calling it.
+	 */
+	text = user = args = nil;
+	lockup = lockp = 0;
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	leak = 0;
+#endif
+	if(waserror()){
+		if(lockp)
+			qunlock(&p->debug);
+		if(lockup)
+			qunlock(&up->debug);
+		free(text);
+		free(user);
+		free(args);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+		/* Negative fixture: deliberately omit the New Proc release. */
+		if(leak)
+			nexterror();
+#endif
+		procdiscard(p);
+		nexterror();
+	}
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* First fallible boundary: only the empty New Proc exists. */
+	if(injectfault("fork-child-early-abort"))
+		error("fork: injected early child abort");
+	/* Negative fixture: fail at the same boundary without cleanup. */
+	if(injectfault("fork-child-leak-proc")){
+		leak = 1;
+		error("fork: injected New Proc leak");
+	}
+#endif
+
+	/* Complete fallible staging before taking the debug locks.  The
+	 * parent's own text/user are process-local and cannot be replaced
+	 * concurrently by another thread of this process. */
+	kstrdup(&text, up->text);
+	kstrdup(&user, up->user);
+	kstrdup(&args, "");
+
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Second fallible boundary: staging exists but no lock or identity. */
+	if(injectfault("fork-child-staged-abort"))
+		error("fork: injected staged child abort");
+#endif
+
 	qlock(&up->debug);
+	lockup = 1;
 	qlock(&p->debug);
+	lockp = 1;
 
 	p->scallnr = up->scallnr;
 	p->s = up->s;
@@ -166,9 +243,16 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	 */
 	forkchild(p, up->dbgreg);
 
-	kstrdup(&p->text, up->text);
-	kstrdup(&p->user, up->user);
-	kstrdup(&p->args, "");
+	/* Transfer the staged buffers to the child. */
+	free(p->text);
+	p->text = text;
+	text = nil;
+	free(p->user);
+	p->user = user;
+	user = nil;
+	free(p->args);
+	p->args = args;
+	args = nil;
 	p->nargs = 0;
 	p->setargs = 0;
 
@@ -180,14 +264,22 @@ kernrforkcore(ulong flag, Vinherit *vi)
 
 	pid = pidalloc(p);
 
-	qunlock(&p->debug);
-	qunlock(&up->debug);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Third fallible boundary: text/user/args and the PID are initialized,
+	 * both debug locks are held and the child is still unpublished. */
+	if(injectfault("fork-child-initialized-abort"))
+		error("fork: injected initialized child abort");
+#endif
 
-	/* Abort the child process on error */
+	qunlock(&p->debug);
+	lockp = 0;
+	qunlock(&up->debug);
+	lockup = 0;
+	poperror();		/* end early rollback region */
+
+	/* The child is still unpublished; release it synchronously. */
 	if(waserror()){
-		p->kp = 1;
-		kprocchild(p, abortion);
-		ready(p);
+		procdiscard(p);
 		nexterror();
 	}
 
@@ -256,8 +348,14 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if(vi != nil)
 		vobjinheritcommit(p, vi);
 	procfork(p);
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Latest safe fork failure point: procfork() may have allocated the
+	 * child's FP save chain, but no parent/child state is published. */
+	if(injectfault("fork-child-fpu-abort"))
+		error("fork: injected post-procfork failure");
+#endif
 
-	poperror();	/* abortion */
+	poperror();	/* prepublication error region */
 
 	if(flag & RFNOMNT)
 		pgrpsealnamespace(p->pgrp);
@@ -1004,12 +1102,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			qunlock(&p->debug);
 		if(lockup)
 			qunlock(&up->debug);
-		if(p != nil){
-			vobjprocexit(p);
-			p->kp = 1;
-			kprocchild(p, abortion);
-			ready(p);
-		}
+		procdiscard(p);
 		vobjinheritrelease(&vi);
 		free(buf);
 		free(inh);
@@ -1360,6 +1453,16 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	procpriority(p, up->basepri, up->fixedpri);
 	procfirstlog(p, cpu);
 
+#ifdef	PLAN2001_LIFECYCLE_DIAG
+	/* Latest safe prepublication point: the child is fully built,
+	 * including Handle-plan commit and Pgrp COPY/SHARE, but parent/child
+	 * accounting has not been committed and it is not schedulable. */
+	if(injectfault("spawn-child-late-abort"))
+		error("ospawn: injected late child abort");
+#endif
+
+	/* Publication boundary: from here the child is parent-visible and
+	 * must not be rolled back as if it never existed. */
 	lock(&up->exl);
 	p->parent = up;
 	up->nchild++;
