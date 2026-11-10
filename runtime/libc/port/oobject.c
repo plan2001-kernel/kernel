@@ -231,7 +231,7 @@ obj_grant(int handle, unsigned long long rights)
     return obj_open(ObjOpenHandle, &req, sizeof req, rights, nil);
 }
 
-/* GE/O capability revocation only. */
+/* GE/O grant or volatile-region map revocation. */
 long
 obj_revoke(int handle)
 {
@@ -294,6 +294,32 @@ obj_pipe_peer(int handle)
 
 	callinit(&c, ObjOpPipePeer);
 	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_region_create(unsigned long long size, ObjId *out)
+{
+	return obj_create(0, ObjKindRegion, nil, size, out);
+}
+
+long
+obj_region_map(int handle, unsigned long long addr)
+{
+	ObjCall c;
+
+	callinit(&c, ObjOpRegionMap);
+	c.arg0 = addr;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_region_unmap(unsigned long long addr)
+{
+	ObjCall c;
+
+	callinit(&c, ObjOpRegionUnmap);
+	c.arg0 = addr;
+	return obj_invoke(0, &c, sizeof c);
 }
 
 /* Device control is IOCTL(145); payload stays in OBJINVOKE. */

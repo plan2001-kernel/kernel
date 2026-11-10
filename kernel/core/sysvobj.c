@@ -58,6 +58,7 @@ enum {
 	Vglobalmsgs	= 65536,
 	Venvmax		= 64,
 	Vsubcapdef	= 64,
+	Vregionmax	= 16*1024*1024,
 	Vgenmax		= 0x7fffff,
 	Vnamemax	= 32,
 	/* Native-family compatibility limits, now enforced over the one
@@ -159,6 +160,15 @@ struct Vusbep {
 	Ep	*ep;
 	int	kind;
 	int	mode;
+};
+
+typedef struct Vregion Vregion;
+struct Vregion {
+	QLock	lk;		/* protects writer and revoked */
+	Page	**pages;	/* one reference per backing page */
+	ulong	npages;
+	int	writer;		/* a writable mapping is installed */
+	int	revoked;	/* no further mappings through any Handle */
 };
 
 typedef struct Vdevice Vdevice;
@@ -296,7 +306,7 @@ vobjalloc(int kind, uvlong space, ulong size)
 		vrelease(size, kind == VkindFifo);
 		return nil;
 	}
-	if(size != 0){
+	if(size != 0 && kind != VkindRegion){
 		o->data = mallocz(size, 0);
 		if(o->data == nil){
 			free(o);
@@ -425,6 +435,16 @@ vobjput(Vobj *o)
 			ve->ep = nil;
 		}
 		free(ve);
+	}else if(o->kind == VkindRegion && o->priv != nil){
+		Vregion *r = o->priv;
+		ulong i;
+
+		o->priv = nil;
+		for(i = 0; i < r->npages; i++)
+			if(r->pages[i] != nil)
+				putpage(r->pages[i]);
+		free(r->pages);
+		free(r);
 	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
 		lifecontrol(o->priv, -1);
 		closepgrp(o->priv);
@@ -595,6 +615,272 @@ vobjinstallobj(Vobj *o, int rights)
 		error("vobj: too many handles");
 	}
 	return handle;
+}
+
+/*
+ * Volatile capability regions.
+ *
+ * A region owns its Page backing and one writer slot.  Each mapping is a
+ * distinct SG_REGION Segment in one address space, holding a region reference
+ * and its own PTE set; writer mappings lack SG_RONLY and readers carry it, so
+ * the MMU enforces the split even though the Page objects are shared.  A
+ * mapping is independent of its Handle and survives Handle close; process
+ * exit or obj_region_unmap() releases it.  The writer slot is never
+ * transferred automatically; while any writable mapping exists another
+ * writer request is rejected.
+ */
+int
+vobjregioncreate(uvlong size, VobjId *id)
+{
+	Vobj *o;
+	Vregion *r;
+	Vhtab *t;
+	Vhand *h;
+	Page *p;
+	ulong npages, i;
+	int handle;
+
+	if(size == 0 || size > Vregionmax || (size % BY2PG) != 0)
+		error(Ebadarg);
+	npages = (ulong)(size / BY2PG);
+	if((t = vgettab(1)) == nil)
+		error(Enomem);
+	o = vobjnewkind(VkindRegion, (ulong)size);
+	if(o == nil)
+		error(Enomem);
+	r = nil;
+	h = nil;
+	if(waserror()){
+		if(h != nil)
+			vhandput(h);
+		if(r != nil){
+			if(r->pages != nil)
+				for(i = 0; i < npages; i++)
+					if(r->pages[i] != nil)
+						putpage(r->pages[i]);
+			free(r->pages);
+			free(r);
+			o->priv = nil;
+		}
+		vobjput(o);
+		nexterror();
+	}
+	r = mallocz(sizeof *r, 1);
+	if(r == nil)
+		error(Enomem);
+	r->npages = npages;
+	r->pages = mallocz(npages*sizeof(Page*), 1);
+	if(r->pages == nil)
+		error(Enomem);
+	for(i = 0; i < npages; i++){
+		p = newpage(0, nil);
+		if(p == nil)
+			error(Enomem);
+		r->pages[i] = fillpage(p, 0);
+	}
+	o->priv = r;
+	r = nil;			/* o owns the backing now */
+	o->flags = 0;			/* a region payload is mutable */
+	o->provider = VkindRegion;
+	h = vhandalloc(o, nil,
+		Vread|Vwrite|Vmeta|Vdelegate|Vcontrol);
+	handle = vinstall(t, h);
+	if(handle < 0)
+		error("vobj: too many handles");
+	h = nil;
+	if(id != nil){
+		id->incarnation = o->incarnation;
+		id->space = o->space;
+		id->oid = o->oid;
+	}
+	poperror();
+	vobjput(o);			/* the installed Handle owns the object */
+	return handle;
+}
+
+/* Called from putseg() when the last reference to a region mapping goes. */
+void
+regionsegput(Segment *s)
+{
+	Vobj *o;
+	Vregion *r;
+
+	if(s == nil || (o = s->region) == nil)
+		return;
+	s->region = nil;
+	r = o->priv;
+	if(r != nil && s->regionwriter){
+		qlock(&r->lk);
+		r->writer = 0;
+		qunlock(&r->lk);
+	}
+	s->regionwriter = 0;
+	vobjput(o);
+}
+
+static void
+regionfillseg(Segment *s, Vregion *r)
+{
+	Pte **pte, *etp;
+	Page **pg, *p;
+	uintptr off;
+	ulong i;
+
+	qlock(&s->qlk);
+	if(waserror()){
+		qunlock(&s->qlk);
+		nexterror();
+	}
+	for(i = 0; i < r->npages; i++){
+		off = (uintptr)i*BY2PG;
+		pte = &s->map[off/PTEMAPMEM];
+		if((etp = *pte) == nil){
+			etp = ptealloc();
+			if(etp == nil)
+				error(Enomem);
+			*pte = etp;
+		}
+		pg = &etp->pages[(off&(PTEMAPMEM-1))/BY2PG];
+		p = r->pages[i];
+		incref(&p->ref);
+		*pg = p;
+		s->used++;
+		if(pg < etp->first)
+			etp->first = pg;
+		if(pg > etp->last)
+			etp->last = pg;
+	}
+	qunlock(&s->qlk);
+	poperror();
+}
+
+uintptr
+vobjregionmap(int handle, uintptr va)
+{
+	Vhand *h;
+	Vobj *o;
+	Vregion *r;
+	Segment *s, *os;
+	ulong npages, len;
+	int sno, write, charged, writerheld;
+
+	h = vlookup(handle, Vread);
+	o = h->obj;
+	if(o->kind != VkindRegion || o->priv == nil){
+		vhandput(h);
+		error(Ebadarg);
+	}
+	r = o->priv;
+	npages = r->npages;
+	len = npages*BY2PG;
+	write = (h->rights & Vwrite) != 0;
+	if(va != 0 && (va >= USTKTOP || (va & (BY2PG-1)) != 0)){
+		vhandput(h);
+		error(Ebadarg);
+	}
+	charged = 0;
+	writerheld = 0;
+	s = nil;
+	qlock(&up->seglock);
+	if(waserror()){
+		if(s != nil)
+			putseg(s);	/* also releases the writer slot */
+		else if(writerheld){
+			qlock(&r->lk);
+			r->writer = 0;
+			qunlock(&r->lk);
+		}
+		if(charged)
+			procmemdecommit(up, npages);
+		qunlock(&up->seglock);
+		vhandput(h);
+		nexterror();
+	}
+	for(sno = 0; sno < NSEG; sno++)
+		if(up->seg[sno] == nil && sno != ESEG)
+			break;
+	if(sno == NSEG)
+		error(Enovmem);
+	if(va == 0){
+		for(os = up->seg[SSEG]; os != nil; os = isoverlap(va, len)){
+			va = os->base;
+			if(len >= va)
+				error(Enovmem);
+			va -= len;
+		}
+	}
+	va &= ~(BY2PG-1);
+	if(va == 0 || va+len > USTKTOP || va+len < va)
+		error(Ebadarg);
+	if(isoverlap(va, len) != nil)
+		error(Esoverlap);
+	if(procmemcommit(up, npages) < 0)
+		error(Enovmem);
+	charged = 1;
+	s = newseg(SG_REGION|SG_NOEXEC|(write? 0: SG_RONLY), va, npages);
+	s->region = o;
+	incref(&o->ref);
+	s->regionwriter = 0;
+	regionfillseg(s, r);
+	/*
+	 * The revoked check, writer-slot reservation and Segment publication
+	 * are one critical section so a successful revoke can never race with
+	 * a new mapping.  Existing mappings are deliberately unaffected.
+	 */
+	qlock(&r->lk);
+	if(r->revoked){
+		qunlock(&r->lk);
+		error(Eperm);
+	}
+	if(write && r->writer){
+		qunlock(&r->lk);
+		error(Einuse);
+	}
+	if(write){
+		r->writer = 1;
+		s->regionwriter = 1;
+		writerheld = 1;
+	}
+	up->seg[sno] = s;
+	s = nil;
+	charged = 0;
+	writerheld = 0;			/* the installed Segment owns the slot */
+	qunlock(&r->lk);
+	qunlock(&up->seglock);
+	poperror();
+	vhandput(h);
+	flushmmu();
+	return va;
+}
+
+int
+vobjregionunmap(uintptr va)
+{
+	Segment *s;
+	int i;
+
+	if(va == 0 || va >= USTKTOP || (va & (BY2PG-1)) != 0)
+		error(Ebadarg);
+	qlock(&up->seglock);
+	if(waserror()){
+		qunlock(&up->seglock);
+		nexterror();
+	}
+	for(i = 0; i < NSEG; i++){
+		s = up->seg[i];
+		if(s != nil && (s->type&SG_TYPE) == SG_REGION &&
+		   va >= s->base && va < s->top)
+			break;
+	}
+	if(i == NSEG)
+		error(Ebadarg);
+	up->seg[i] = nil;
+	procmemdecommit(up, s->size);
+	putseg(s);
+	qunlock(&up->seglock);
+	poperror();
+	flushmmu();
+	return 0;
 }
 
 Vobj*
@@ -1623,18 +1909,37 @@ vobjfifoclose(Vobj *o)
     vfifoclose(o, 0);
 }
 
-/* GE/O capability revocation only.  A FIFO channel shutdown is explicitly
- * vobjfifoshutdown(); closing one Handle just releases its reference. */
+/*
+ * Capability revocation.  For GE/O this revokes the grant lineage; for a
+ * volatile region it permanently blocks new mappings through every existing
+ * Handle.  Already installed mappings survive until unmap/exit, and the
+ * pages remain until the last Handle/mapping reference.  Region revocation
+ * requires Vcontrol, so a read-only observer cannot revoke another party.
+ * A FIFO channel shutdown is explicitly vobjfifoshutdown(); closing one
+ * Handle just releases its reference.
+ */
 int
 vobjrevoke(int handle)
 {
     Vhand *h;
+    Vregion *r;
 
-    h = vlookup(handle, Vdelegate);
+    h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
-    if(h->obj->kind != VkindGe || h->obj->priv == nil)
+    if(h->obj->kind == VkindRegion){
+        r = h->obj->priv;
+        if(r == nil || (h->rights & Vcontrol) == 0)
+            error(Eperm);
+        qlock(&r->lk);
+        r->revoked = 1;
+        qunlock(&r->lk);
+    }else if(h->obj->kind == VkindGe && h->obj->priv != nil){
+        if((h->rights & Vdelegate) == 0)
+            error(Eperm);
+        osrevokehand(h->obj->priv);
+    }else{
         error(Ebadarg);
-    osrevokehand(h->obj->priv);
+    }
     poperror();
     vhandput(h);
     return 0;

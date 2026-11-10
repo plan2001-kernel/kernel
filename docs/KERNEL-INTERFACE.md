@@ -73,10 +73,38 @@ The AMD64 ABI currently includes object calls 136–140, `SPAWN(146)`,
 `RFORKEX(143)`, `PROCWAIT(142)`, `OTERMINATE`, `OEXECUTE`,
 `RENDEZVOUS(34)`, `SEMACQUIRE(37)`, `SEMRELEASE(38)` and
 `TSEMACQUIRE(52)`. `BRK_`, `SEGBRK`, `SEGATTACH/DETACH/FREE/FLUSH`
-provide existing VM operations. Existing `Segment`/`SG_SHARED`/
-`SG_RONLY` and `_globalsegattach` are not proof of arbitrary independent
-RW-writer/RO-reader capability mappings. Rendezvous/semaphore public calls
-currently require a writable segment. The target RO WAIT does not exist.
+provide existing VM operations. Rendezvous/semaphore public calls currently
+require a writable segment. The target RO WAIT does not exist.
+
+Volatile capability regions are `ObjKindRegion` objects reached through the
+same five-call object ABI. Creation takes a non-zero, page-multiple size up to
+16 MiB and returns a Handle with `Vread|Vwrite|Vmeta|Vdelegate|Vcontrol`; `OBJOPEN`
+attenuates it like any other Handle, and explicit delegation is the only way
+another process obtains authority. `ObjOpRegionMap` installs the region at a
+process-local address (arg0, 0 chooses) and returns that address.
+`ObjOpRegionUnmap` removes the caller's mapping by address and needs no live
+Handle. A writable mapping requires `Vwrite` and is unique for the region; it
+is rejected while any other writable mapping exists. Read-only mappings require
+`Vread` only. A mapping is independent of its Handle: closing the Handle does
+not unmap it, and process exit or explicit unmap releases the mapping
+reference. Writer exit releases the writer slot but not pages still referenced
+by reader Handles or mappings. The region and its eagerly zeroed pages are
+freed at the last reference. Phase 2 does not transfer the writer role
+automatically.
+
+`ObjOpRevoke` on a region Handle carrying `Vcontrol` is the explicit
+revocation operation. It permanently denies **new** mappings through every
+previously delegated region Handle, including the creator's, but leaves
+already installed mappings readable/writable until unmap or process exit.
+Those mappings and the pages then retain the region until the last relevant
+reference. A read-only Handle does not carry `Vcontrol` and cannot revoke
+other parties. There is no implicit TLB shootdown or forced unmap.
+
+The former named `shared` segment attach and `SG_SHARED` type are deleted;
+`SEGATTACH` now serves only the anonymous `memory` and physical device
+segments. `SG_RONLY` remains a per-mapping property of text, physical and
+region Segments; for regions the per-process `SG_REGION` Segment and PTE set
+carry the protection, not a property shared by all mappings.
 
 `SPAWN` establishes a direct child and fresh `Pgrp`; `RFORKEX` uses a
 bounded delegated Handle plan. `PROCWAIT` is child-only. Current

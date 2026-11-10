@@ -139,6 +139,9 @@ int	vobjlist(void *buf, long n);
  */
 int	vobjpipecreate(VobjId *id);
 int	vobjpipepeer(int handle);
+int	vobjregioncreate(uvlong size, VobjId *id);
+uintptr	vobjregionmap(int handle, uintptr va);
+int	vobjregionunmap(uintptr va);
 void	vobjpipeoutputset(Proc *p, int handle);
 long	vobjpipeoutputwrite(int handle, void *data, long n);
 int	vobjpipekernelinstall(Proc *proc, void *pipe, int end);

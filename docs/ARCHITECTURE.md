@@ -137,9 +137,22 @@ console paths also remain. The `-I` REPL directly claims PS/2 input;
 `micropython/p9console.c` decodes the scan codes and supplies the HAL.
 `ObjOpenConsole` and `stdoutpipe` route selected output;
 `kernel/core/fbconsole.c` is the kernel-owned framebuffer text sink. These are current
-facts, not target requirements. Independent RW-writer/RO-observer mappings,
-atomic publication, RO WAIT and free-process grants are not implemented as
-specified above.
+facts, not target requirements.
+
+AMD64 also has volatile capability regions: `ObjKindRegion` creation, an
+attenuable `Vread`/`Vwrite` Handle, and `ObjOpRegionMap`/`ObjOpRegionUnmap`
+over the existing object ABI. A region owns eagerly allocated, zeroed Page
+backing. Exactly one writable mapping may exist at a time; authorized reader
+Handles map the same pages read-only at process-local addresses, with PTERONLY
+enforced per `SG_REGION` Segment. A mapping survives Handle close and is
+released by unmap or process exit; the region and its pages are reclaimed at
+the last mapping/Handle reference. Writer transfer is rejected in this phase.
+An authorized `Vcontrol` revoke blocks all future mappings through existing
+Handles without invalidating installed mappings; readers cannot revoke.
+Atomic publication ordering, RO WAIT/WAKE and free-process grants are not
+implemented as specified above. The former named `shared` segment attach,
+`SG_SHARED` type and `_globalsegattach` hook were removed; `SEGATTACH`
+remains only for the anonymous `memory` and physical device segments.
 
 ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff, mappings,
 console, timer interrupts and physical-page allocation, not full-system

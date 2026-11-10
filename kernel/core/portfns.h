@@ -246,6 +246,7 @@ int		pushnote(Proc*, Note*);
 void		putmmu(uintptr, uintptr, Page*);
 void		putpage(Page*);
 void		putseg(Segment*);
+void		regionsegput(Segment*);
 void		putstrn(char*, int);
 int		iowriteok(int);
 long		iowritek(int, void*, long);

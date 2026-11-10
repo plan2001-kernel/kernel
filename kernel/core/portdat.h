@@ -253,15 +253,18 @@ struct Pte
 /* Segment types */
 enum
 {
-	SG_TYPE		= 07,		/* Mask type of segment */
+	SG_TYPE		= 017,		/* Mask type of segment */
 	SG_TEXT		= 00,
 	SG_DATA		= 01,
 	SG_BSS		= 02,
 	SG_STACK	= 03,
-	SG_SHARED	= 04,
+	/* 04 was SG_SHARED, the named anonymous shared segment.  Volatile
+	 * capability-protected regions use SG_REGION and are never attachable
+	 * by name. */
 	SG_PHYSICAL	= 05,
 	SG_FIXED	= 06,
 	SG_STICKY	= 07,
+	SG_REGION	= 010,		/* capability-region mapping (internal) */
 
 	SG_RONLY	= 0040,		/* Segment is read only */
 	SG_CEXEC	= 0100,		/* Detach at exec */
@@ -318,6 +321,14 @@ struct Segment
 	ulong	used;
 	Sema	sema;		/* pages in use */
 
+	/*
+	 * SG_REGION mappings hold one VkindRegion reference and record whether
+	 * this address space owns the single writable mapping.  The reference
+	 * keeps the region and its Page backing alive after the process closes
+	 * its Handles; regionsegput() drops it and releases the writer slot.
+	 */
+	void	*region;
+	int	regionwriter;
 };
 
 struct Segio

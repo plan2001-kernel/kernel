@@ -60,6 +60,23 @@ sysobjcreate(sysva_list list)
 			error(Ebadarg);
 		return vobjpipecreate((VobjId*)id);
 	}
+	if(kind == ObjKindRegion){
+		VobjId vid;
+		int h;
+
+		if(space != 0 || buf != nil)
+			error(Ebadarg);
+		if(n <= 0)
+			error(Ebadarg);
+		h = vobjregioncreate((uvlong)n, &vid);
+		if(id != nil){
+			validaddr((uintptr)id, sizeof(ObjId), 1);
+			((ObjId*)id)->incarnation = vid.incarnation;
+			((ObjId*)id)->space = vid.space;
+			((ObjId*)id)->oid = vid.oid;
+		}
+		return h;
+	}
 	if(kind == ObjKindGe){
   if(space > 0x7fffffffULL) error(Ebadarg);
 		VobjId vid;
@@ -371,6 +388,19 @@ sysobjinvoke(sysva_list list)
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
 			error(Ebadarg);
 		c.result = vobjpipepeer(handle);
+		break;
+	case ObjOpRegionMap:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg1 != 0)
+			error(Ebadarg);
+		c.result = (long long)vobjregionmap(handle, (uintptr)c.arg0);
+		break;
+	case ObjOpRegionUnmap:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg1 != 0)
+			error(Ebadarg);
+		vobjregionunmap((uintptr)c.arg0);
+		c.result = 0;
 		break;
 	case ObjOpPutOid:
 		/* Replace one explicitly named OID through the Space's Owrite
