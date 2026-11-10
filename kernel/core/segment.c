@@ -9,14 +9,11 @@
  * Attachable segment types
  */
 static Physseg physseg[10] = {
-	{ SG_SHARED,	"shared",	0,	SEGMAXSIZE	},
 	{ SG_BSS,	"memory",	0,	SEGMAXSIZE	},
 	{ 0,		0,		0,	0		},
 };
 
 static Lock physseglock;
-
-Segment* (*_globalsegattach)(char*);
 
 void
 initseg(void)
@@ -116,6 +113,9 @@ putseg(Segment *s)
 			free(s->map);
 	}
 
+	if(s->region != nil)
+		regionsegput(s);
+
 	if(s->profile != nil)
 		free(s->profile);
 
@@ -167,7 +167,6 @@ dupseg(Segment **seg, int segno, int share)
 	}
 	switch(s->type&SG_TYPE) {
 	case SG_TEXT:		/* New segment shares pte set */
-	case SG_SHARED:
 	case SG_PHYSICAL:
 	case SG_FIXED:
 	case SG_STICKY:
@@ -193,6 +192,16 @@ dupseg(Segment **seg, int segno, int share)
 			goto sameseg;
 		n = newseg(s->type, s->base, s->size);
 		break;
+
+	case SG_REGION:
+		/*
+		 * A region mapping is process-local authority, never an
+		 * inherited address-space range.  Fork skips region segments;
+		 * reaching here is an invariant violation.
+		 */
+		qunlock(&s->qlk);
+		poperror();
+		error(Ebadarg);
 	}
 	for(i = 0; i < s->mapsize; i++){
 		if(s->map[i] != nil){
@@ -391,6 +400,11 @@ mfreeseg(Segment *s, uintptr start, ulong pages)
 	case SG_FIXED:
 	case SG_STICKY:
 		return;
+	case SG_REGION:
+		/* Capability regions own a shared Page array; a partial free would
+		 * decrement backing references behind other mappings.  Unmap the
+		 * whole region instead. */
+		return;
 	}
 
 	/*
@@ -508,30 +522,6 @@ segattach(int attr, char *name, uintptr va, uintptr len)
 	if(sno == NSEG)
 		error(Enovmem);
 
-	/*
-	 *  first look for a global segment with the
-	 *  same name
-	 */
-	if(_globalsegattach != nil){
-		s = (*_globalsegattach)(name);
-		if(s != nil){
-			va = s->base;
-			len = s->top - va;
-			if(isoverlap(va, len) != nil){
-				putseg(s);
-				error(Esoverlap);
-			}
-			npages = len/BY2PG;
-			if(procmemcommit(up, npages) < 0){
-				putseg(s);
-				error(Enovmem);
-			}
-			charged = 1;
-			up->seg[sno] = s;
-			goto done;
-		}
-	}
-
 	/* round up va+len */
 	len += va & (BY2PG-1);
 	len = PGROUND(len);
@@ -583,7 +573,6 @@ segattach(int attr, char *name, uintptr va, uintptr len)
 	s = newseg(attr, va, npages);
 	s->pseg = ps;
 	up->seg[sno] = s;
-done:
 	charged = 0;
 	qunlock(&up->seglock);
 	poperror();

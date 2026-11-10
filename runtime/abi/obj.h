@@ -49,6 +49,7 @@ enum {
 	ObjKindFifo		= 1,
 	ObjKindGe		= 2,
 	ObjKindPipe		= 3,	/* create one pair; peer via ObjOpPipePeer */
+	ObjKindRegion		= 4,	/* volatile capability-mapped pages */
 	ObjCreateKindMask	= 0xff,
 };
 
@@ -113,6 +114,13 @@ enum {
 	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
 	ObjOpDeviceRx	= 45,	/* device: acquire the receive FIFO channel */
 	ObjOpFifoShutdown = 46,	/* FIFO handle: close the channel */
+	/* VkindRegion: install this region at arg0 (0 = choose) and return the
+	 * process-local virtual address.  A Handle carrying Vwrite requests the
+	 * single writable mapping; Vread alone requests a read-only mapping.
+	 * Unmap takes the process-local address in arg0 and affects only the
+	 * caller's address space. */
+	ObjOpRegionMap	= 47,
+	ObjOpRegionUnmap = 48,
 };
 
 /* Classification after the SYSCTL/IOCTL/object/scalar split:
@@ -470,6 +478,15 @@ long obj_list_count(void *records, unsigned long long count,
  * (UART configuration/status, KBD LEDs) is IOCTL(145), not OBJINVOKE. */
 long obj_pipe_create(ObjId *out);
 long obj_pipe_peer(int handle);
+
+/* Volatile capability regions.  Creation takes a page-multiple size and
+ * returns a Handle carrying Vread|Vwrite|Vmeta|Vdelegate.  A writer mapping
+ * is unique for the region; read-only mappings are shared.  The mapping
+ * survives closing the Handle and is released by obj_region_unmap() or
+ * process exit. */
+long obj_region_create(unsigned long long size, ObjId *out);
+long obj_region_map(int handle, unsigned long long addr);
+long obj_region_unmap(unsigned long long addr);
 long obj_uart_ctl(int handle, void *cfg);
 long obj_uart_status(int handle, void *buf, unsigned long long len);
 long obj_kbd_leds(int handle, unsigned int leds);

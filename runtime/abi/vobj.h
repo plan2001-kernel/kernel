@@ -49,6 +49,7 @@ enum {
 	VkindDevice = 14,
 	VkindNamespaceView = 15,	/* sealed role grants */
 	VkindNamespaceControl = 16,	/* caller's current namespace */
+	VkindRegion	= 17,	/* volatile capability-mapped memory region */
 	/* Kinds 2 (TCP), 5 (UDP6), 9 (USB service) and 12 (ProcessSelf) are
 	 * reserved historical identifiers and are never installed. */
 };

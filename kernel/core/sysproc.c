@@ -293,7 +293,14 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		nexterror();
 	}
 	for(i = 0; i < NSEG; i++)
-		if(up->seg[i] != nil)
+		/*
+		 * Capability-region mappings are process-local authority.  A
+		 * child receives a region only through explicit Handle
+		 * delegation and maps it itself; it never inherits a writable
+		 * address-space alias.
+		 */
+		if(up->seg[i] != nil &&
+		   (up->seg[i]->type & SG_TYPE) != SG_REGION)
 			p->seg[i] = dupseg(up->seg, i, n);
 	forkpages = 0;
 	for(i = 0; i < NSEG; i++)
@@ -1930,7 +1937,7 @@ found:
 	/*
 	 * Check we are not detaching the initial stack segment.
 	 */
-	if(s == up->seg[SSEG]){
+	if(s == up->seg[SSEG] || (s->type&SG_TYPE) == SG_REGION){
 		qunlock(&s->qlk);
 		error(Ebadarg);
 	}
@@ -1960,6 +1967,10 @@ syssegfree(sysva_list list)
 	s = seg(up, from, 1);
 	if(s == nil)
 		error(Ebadarg);
+	if((s->type&SG_TYPE) == SG_REGION){
+		qunlock(&s->qlk);
+		error(Ebadarg);
+	}
 	to &= ~(BY2PG-1);
 	from = PGROUND(from);
 	if(from >= to) {

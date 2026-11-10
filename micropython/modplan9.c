@@ -662,6 +662,46 @@ static mp_obj_t p9_objinvoke(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objinvoke_obj,2,5,p9_objinvoke);
 
+/* Volatile capability regions.  These helpers exercise the region mapping:
+ * create returns a writer-capable Handle, map returns a process-local virtual
+ * address, and unmap affects only the caller's address space.  region_read
+ * and region_write perform ordinary user-mode memory accesses, so writing an
+ * SG_RONLY region fails in the MMU and delivers the normal fault note. */
+static mp_obj_t p9_regioncreate(mp_obj_t size){
+ return check(obj_region_create((unsigned long long)mp_obj_get_uint(size),NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_regioncreate_obj,p9_regioncreate);
+
+static mp_obj_t p9_regionmap(size_t n,const mp_obj_t *a){
+ unsigned long long addr=n>1?(unsigned long long)mp_obj_get_uint(a[1]):0;
+ return check(obj_region_map(mp_obj_get_int(a[0]),addr));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_regionmap_obj,1,2,p9_regionmap);
+
+static mp_obj_t p9_regionunmap(mp_obj_t addr){
+ check(obj_region_unmap((unsigned long long)mp_obj_get_uint(addr)));
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_regionunmap_obj,p9_regionunmap);
+
+static mp_obj_t p9_regionread(mp_obj_t addr,mp_obj_t count){
+ long n=mp_obj_get_int(count);vstr_t v;
+ if(n<0||n>65536)mp_raise_ValueError(MP_ERROR_TEXT("region read limit"));
+ vstr_init_len(&v,n);
+ if(n>0)memmove(v.buf,(void*)(uintptr_t)mp_obj_get_uint(addr),(size_t)n);
+ return mp_obj_new_bytes_from_vstr(&v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionread_obj,p9_regionread);
+
+static mp_obj_t p9_regionwrite(mp_obj_t addr,mp_obj_t data){
+ mp_buffer_info_t b;
+ mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
+ if(b.len>65536)mp_raise_ValueError(MP_ERROR_TEXT("region write limit"));
+ if(b.len>0)memmove((void*)(uintptr_t)mp_obj_get_uint(addr),b.buf,(size_t)b.len);
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionwrite_obj,p9_regionwrite);
+
 /* Test-only callback address for ObjOpNotifyRegister: a real user text
  * address that accepts any note.  It is not installed by normal startup;
  * a script can pass it as arg0 of the new operation, remove it, and observe
@@ -1033,6 +1073,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_fifo_shutdown), MP_ROM_PTR(&p9_objfifoshutdown_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_list), MP_ROM_PTR(&p9_objlist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_invoke), MP_ROM_PTR(&p9_objinvoke_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_create), MP_ROM_PTR(&p9_regioncreate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_map), MP_ROM_PTR(&p9_regionmap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_unmap), MP_ROM_PTR(&p9_regionunmap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_read), MP_ROM_PTR(&p9_regionread_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_write), MP_ROM_PTR(&p9_regionwrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_addr), MP_ROM_PTR(&p9_notify_probe_addr_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_count), MP_ROM_PTR(&p9_notify_probe_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_reset), MP_ROM_PTR(&p9_notify_probe_reset_obj) },
@@ -1064,6 +1109,10 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_REGION), MP_ROM_INT(VkindRegion) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_REGION), MP_ROM_INT(ObjKindRegion) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_MAP), MP_ROM_INT(ObjOpRegionMap) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_UNMAP), MP_ROM_INT(ObjOpRegionUnmap) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_CONFIG), MP_ROM_INT(IoctlUartConfig) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_STATUS), MP_ROM_INT(IoctlUartStatus) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_KBD_LEDS), MP_ROM_INT(IoctlKbdLeds) },
