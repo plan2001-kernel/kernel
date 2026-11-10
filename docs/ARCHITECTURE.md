@@ -154,11 +154,16 @@ waiting over an installed mapping. The publication word is a naturally
 aligned 64-bit little-endian value compared only for equality; userspace uses
 release/acquire atoms, and the kernel never copies payload. Waiters are keyed
 by the live region plus region-relative offset in a per-region queue guarded
-by a spin lock; the compare and registration are atomic with respect to WAKE.
-Read-only mappings may wait, the mapping survives Handle close, and only the
-writable mapping may wake. Timeout, interruption, writer-slot release and
-process exit remove the waiter; return values distinguish changed, woken,
-timeout and writer-release so callers always recheck. The retired public
+by a spin lock; writer presence, word comparison and registration are
+linearizable with writer-slot acquisition and release. Read-only mappings may
+wait, the mapping survives Handle close, and only the writable mapping may
+wake. A changed word returns immediately even with no writer; an unchanged
+word with no active writer returns writer-released immediately, including for
+a late waiter after unmap or writer-process exit. Timeout, interruption,
+writer-slot release and process exit remove the waiter; return values
+distinguish changed, woken, timeout and writer-release so callers always
+recheck. A later writer may map and publish, so status 3 is temporal rather
+than destruction. The retired public
 `RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` ABI, its user
 wrappers, `RF*REND` resource and internal `Rgrp`/`Sema` waiting lists were
 deleted. Free-process grants remain Phase 5. The former named `shared`

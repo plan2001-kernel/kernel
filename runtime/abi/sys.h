@@ -216,17 +216,38 @@ struct Ospawn {
  * caller's installed mapping, so a read-only observer may WAIT and the
  * mapping remains usable after its Handle is closed or the region is revoked.
  *
- * REGIONWAIT(base, offset, expected, timeout) atomically compares the word
- * with expected and registers the caller before the region queue lock is
- * released.  timeout < 0 blocks until notified, timeout == 0 only checks, and
- * timeout > 0 is a bounded millisecond wait.  It returns one of:
+ * REGIONWAIT(base, offset, expected, timeout) applies this order:
+ *   1. Validate the installed mapping and aligned/in-bounds word.
+ *   2. Compare the word: if it differs from expected, return 0 immediately,
+ *      whether or not a writer is present.
+ *   3. If it still matches and no RW mapping is active, return 3 immediately,
+ *      even when timeout < 0.  This covers a region that never had a writer, a
+ *      writer that unmapped, and a writer process that exited or was killed
+ *      and whose mappings were released.  A process retained in the kernel's
+ *      broken/debug state still owns its mapping and remains the active
+ *      writer until that mapping is released.
+ *   4. If a writer is active and the word still matches, timeout == 0 returns
+ *      2; otherwise atomically enroll and sleep with the timeout/interrupt
+ *      rules below.
+ *   5. If the active writer mapping is released while enrolled, the waiter is
+ *      notified and returns 3.  A replacement writer mapping later cannot
+ *      erase that notification.  If a normal WAKE wins the race, returning 1
+ *      is permitted.
+ * Status 3 is "no active writer at check time / the previous writer mapping
+ * was released", not permanent region destruction: a new writer may map later
+ * unless Phase 2 revocation denies it.  The caller decides whether to retry,
+ * request a new grant or treat the stream as ended.  timeout < 0 blocks until
+ * notified, timeout == 0 only checks, and timeout > 0 is a bounded millisecond
+ * wait.  Other returns are:
  *   0  value already differed from expected; nothing was slept on
  *   1  woken (possibly spuriously); the caller must recheck the word
  *   2  timeout or a non-blocking check with the value still equal
- *   3  the writable mapping was released; the caller must recheck/retry
  * An invalid or unmapped mapping, a bad offset or an interruption raises the
  * usual error (an installed mapping remains usable after revocation, as noted
- * above).  Returned notification never proves a particular value.
+ * above).  Returned notification never proves a particular value.  Check of
+ * writer presence, word comparison and enrollment are one linearizable step
+ * with writer-slot acquisition/release; the kernel does not infer process
+ * ancestry or a permanent owner.
  *
  * REGIONWAKE(base, offset, count) requires the current writable mapping (the
  * single writer) and wakes at most count waiters registered for the same

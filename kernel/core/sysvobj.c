@@ -175,11 +175,20 @@ struct Wwait {
 	Wwait	*prev;
 };
 struct Vregion {
-	QLock	lk;		/* protects writer and revoked */
-	Lock	waitlk;		/* protects the wait queue */
+	/*
+	 * Lock order is lk -> waitlk.  lk may be held while waitlk is taken
+	 * (mapping admission); waitlk is never held while taking lk, and no
+	 * code sleeps while holding either.  writeractive, writergen and the
+	 * wait queue share waitlk so the writer-presence check, word compare
+	 * and waiter enrollment are one linearizable step with writer-slot
+	 * acquisition and release.
+	 */
+	QLock	lk;		/* protects revoked and mapping admission */
+	Lock	waitlk;		/* protects writeractive, writergen and waiters */
 	Page	**pages;	/* one reference per backing page */
 	ulong	npages;
-	int	writer;		/* a writable mapping is installed */
+	int	writeractive;	/* a writable mapping is installed */
+	unsigned writergen;	/* increments on every writer acquire/release */
 	int	revoked;	/* no further mappings through any Handle */
 	Wwait	*waiters;	/* FIFO of blocked publication waiters */
 	Wwait	*waittail;
@@ -713,24 +722,28 @@ vobjregioncreate(uvlong size, VobjId *id)
 }
 
 /*
- * Notify every waiter on a region.  A normal WAKE uses the same queue lock
- * and marks only the requested offset; this lifecycle path has no offset
- * filter and is used when the writable mapping disappears.  Wakeup never
- * sleeps, so holding the queue spinlock here cannot deadlock the sleeper:
- * the sleeper releases the queue before it sleeps.
+ * Clear the writer-active state and notify every registered waiter as one
+ * linearizable step.  This is the writer-slot release path: a waiter either
+ * enrolled before this critical section (and is marked writer/3 here) or
+ * checks writeractive after it (and returns 3 immediately).  A replacement
+ * writer acquiring the slot later cannot erase the notification because the
+ * woken/writer flags are already set.  Wakeup never sleeps, so holding the
+ * queue spinlock cannot deadlock the sleeper: the sleeper releases the queue
+ * before it sleeps.
  */
 static void
-regionwakeall(Vregion *r, int writer)
+regionwriterdown(Vregion *r)
 {
 	Wwait *w;
 
 	lock(&r->waitlk);
+	r->writeractive = 0;
+	r->writergen++;
 	for(w = r->waiters; w != nil; w = w->next){
 		if(w->woken)
 			continue;
 		w->woken = 1;
-		if(writer)
-			w->writer = 1;
+		w->writer = 1;
 		coherence();
 		wakeup(&w->rz);
 	}
@@ -749,13 +762,10 @@ regionsegput(Segment *s)
 	s->region = nil;
 	r = o->priv;
 	if(r != nil && s->regionwriter){
-		qlock(&r->lk);
-		r->writer = 0;
-		qunlock(&r->lk);
 		s->regionwriter = 0;
 		/* Writer death must not strand observers.  This is a lifecycle
 		 * notification, not a publication: callers still recheck. */
-		regionwakeall(r, 1);
+		regionwriterdown(r);
 	}else
 		s->regionwriter = 0;
 	vobjput(o);
@@ -828,11 +838,8 @@ vobjregionmap(int handle, uintptr va)
 	if(waserror()){
 		if(s != nil)
 			putseg(s);	/* also releases the writer slot */
-		else if(writerheld){
-			qlock(&r->lk);
-			r->writer = 0;
-			qunlock(&r->lk);
-		}
+		else if(writerheld)
+			regionwriterdown(r);
 		if(charged)
 			procmemdecommit(up, npages);
 		qunlock(&up->seglock);
@@ -869,21 +876,27 @@ vobjregionmap(int handle, uintptr va)
 	 * The revoked check, writer-slot reservation and Segment publication
 	 * are one critical section so a successful revoke can never race with
 	 * a new mapping.  Existing mappings are deliberately unaffected.
+	 * writeractive is changed under waitlk so WAIT's writer-presence
+	 * check and enrollment are linearizable with this acquisition.
 	 */
 	qlock(&r->lk);
 	if(r->revoked){
 		qunlock(&r->lk);
 		error(Eperm);
 	}
-	if(write && r->writer){
+	lock(&r->waitlk);
+	if(write && r->writeractive){
+		unlock(&r->waitlk);
 		qunlock(&r->lk);
 		error(Einuse);
 	}
 	if(write){
-		r->writer = 1;
+		r->writeractive = 1;
+		r->writergen++;
 		s->regionwriter = 1;
 		writerheld = 1;
 	}
+	unlock(&r->waitlk);
 	up->seg[sno] = s;
 	s = nil;
 	charged = 0;
@@ -935,13 +948,21 @@ vobjregionunmap(uintptr va)
  * conveys nothing.  A writable mapping is the unique writer slot and is
  * required for WAKE.
  *
+ * WAIT order is fixed.  Validate the mapping and word; compare the word and
+ * return 0 immediately if it differs (even with no writer).  If it still
+ * matches and no writer mapping is active, return 3 immediately even for an
+ * infinite timeout.  If a writer is active and timeout == 0, return 2;
+ * otherwise enroll and sleep.  Status 3 is "no active writer at check time or
+ * the previous writer was released", not permanent region destruction: a new
+ * writer may map later unless revocation denies new maps.
+ *
  * The queue is keyed by the live region object plus its region-relative
  * offset.  A mapping reference keeps the region alive for the whole wait, so
  * a Vregion address cannot be reused behind a registered waiter (no ABA).
- * The word is compared under the queue lock against WAKE and queue
- * registration, which makes the check/register/sleep and publish/WAKE orders
- * race-free: a WAKE that ran first either changed the word (so this check
- * returns "changed") or found the registered waiter.
+ * waitlk protects writeractive, writergen, the word compare and enrollment,
+ * so a writer acquisition or release cannot interleave between the check and
+ * the sleep.  lk may be held while taking waitlk (mapping admission); waitlk
+ * is never held while taking lk, and no path sleeps holding either.
  */
 static Segment*
 regionmaplookup(uintptr addr)
@@ -1068,6 +1089,12 @@ sysregionwait(sysva_list list)
 		putseg(s);
 		return 0;			/* value already changed */
 	}
+	if(!r->writeractive){
+		unlock(&r->waitlk);
+		kunmap(k);
+		putseg(s);
+		return 3;			/* no writer can WAKE this word */
+	}
 	if(timeout == 0){
 		unlock(&r->waitlk);
 		kunmap(k);
@@ -1135,6 +1162,11 @@ sysregionwake(sysva_list list)
 	}
 	n = 0;
 	lock(&r->waitlk);
+	if(!r->writeractive){
+		unlock(&r->waitlk);
+		putseg(s);
+		error(Eperm);
+	}
 	for(w = r->waiters; w != nil && n < count; w = w->next){
 		if(w->offset != off || w->woken)
 			continue;

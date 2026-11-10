@@ -38,6 +38,15 @@ def _recv(tag, timeout=10000):
             return h
         p.obj_close(h)
 
+def _region_handle():
+    for h in p.obj_list():
+        try:
+            if p.obj_info(h)[8] == p.VKIND_REGION:
+                return h
+        except OSError:
+            pass
+    raise AssertionError('no region handle')
+
 _send(b'READY')
 '''
 
@@ -161,6 +170,82 @@ p.exits('')
 '''
 
 
+WRITER = CHILD + r'''
+reg = p.region_create(8192)
+rw = p.region_map(reg, 0x30000000)
+p.region_atomic_store(rw, @WORD1@)
+p.region_write(rw + 8, b'WRITER!!')
+rd = p.obj_open_handle(reg, p.VREAD | p.VMETA | p.VDELEGATE)
+_send(b'HANDLE', rd)
+wr = p.obj_open_handle(reg, p.VREAD | p.VWRITE | p.VMETA | p.VDELEGATE)
+_send(b'WRITER', wr)
+_send(b'WREADY')
+@AFTER@
+p.exits('')
+'''
+
+
+OBSERVER_LATE = CHILD + r'''
+h = _region_handle()
+base = p.region_map(h, @BASE@)
+_send(b'MAPPED')
+t0 = p.time_ns()
+r = p.region_wait(base, 0, @WORD1@, 2000)
+ms = (p.time_ns() - t0) // 1000000
+if r == 2:
+    _send(b'LATE-TIMEOUT')
+    p.exits('late-timeout')
+if r != 3:
+    p.exits('late-status')
+if ms > 1000:
+    p.exits('late-slow')
+if p.region_read(base + 8, 8) != b'WRITER!!':
+    p.exits('late-data')
+_send(b'DONE')
+p.exits('')
+'''
+
+
+OBSERVER_SLEEP_EXIT = CHILD + r'''
+h = _region_handle()
+base = p.region_map(h, @BASE@)
+_send(b'MAPPED')
+r = p.region_wait(base, 0, @WORD1@, 5000)
+if r != 3:
+    p.exits('sleep-exit-status')
+if p.region_read(base + 8, 8) != b'WRITER!!':
+    p.exits('sleep-exit-data')
+_send(b'DONE')
+p.exits('')
+'''
+
+
+OBSERVER_REPLACE = CHILD + r'''
+h = _region_handle()
+base = p.region_map(h, @BASE@)
+_send(b'MAPPED')
+seen3 = 0
+for _ in range(1000):
+    v = p.region_atomic_load(base)
+    if v == @WORD2@:
+        break
+    r = p.region_wait(base, 0, v, 5000)
+    if r == 2:
+        p.exits('replace-timeout')
+    if r == 3:
+        seen3 = 1
+        p.sleep(5)
+    elif r not in (0, 1):
+        p.exits('replace-status')
+else:
+    p.exits('replace-loop')
+if p.region_read(base + 8, 8) != b'REPLACED':
+    p.exits('replace-data')
+_send(b'DONE3' if seen3 else b'DONE')
+p.exits('')
+'''
+
+
 class Counter:
     def __init__(self):
         self.n = 0
@@ -205,11 +290,14 @@ def run():
 
     sh = p.obj_open_space('init')
 
-    def spawn(code, fifo):
+    def spawn_handles(code, fifo, handles=()):
+        vh = ((fifo, p.VSEND | p.VSUBSCRIBE | p.VMETA | p.VDELEGATE),)
         return space.spawn(CID, handle=sh,
                            argv=('micropython', '-c', code),
-                           vhandles=((fifo, p.VSEND | p.VSUBSCRIBE |
-                                      p.VMETA | p.VDELEGATE),))
+                           vhandles=vh + tuple(handles))
+
+    def spawn(code, fifo):
+        return spawn_handles(code, fifo)
 
     def send(fifo, tag, obj=None):
         if obj is None:
@@ -223,6 +311,13 @@ def run():
             if env == tag:
                 return h
             p.obj_close(h)
+
+    def recv_any(sub, tags, timeout=10000):
+        while True:
+            h, env = p.obj_receive(sub, timeout, 64)
+            p.obj_close(h)
+            if env in tags:
+                return env
 
     def record(v, size):
         return struct.pack('<Q', v) + bytes([v & 0xff]) * (size - 8)
@@ -268,6 +363,43 @@ def run():
     p.region_unmap(ro)
     p.region_unmap(rw)
     ok(True, 'local validation leaves no mapped region')
+
+    # --- writer-presence ordering and late waiters ------------------------
+    reg = p.region_create(8192)
+    rd = p.obj_open_handle(reg, p.VREAD | p.VMETA | p.VDELEGATE)
+    ro = p.region_map(rd, 0x34000000)
+    ok(p.region_wait(ro, 0, 0, -1) == 3,
+       'unchanged word with no writer ever returns 3 immediately')
+    ok(p.region_wait(ro, 0, 0x55, -1) == 0,
+       'changed comparison wins even when no writer exists')
+    p.region_unmap(ro)
+    p.obj_close(rd)
+    p.obj_close(reg)
+
+    reg = p.region_create(8192)
+    rw = p.region_map(reg, 0x30000000)
+    p.region_atomic_store(rw, 0xabc)
+    rd = p.obj_open_handle(reg, p.VREAD | p.VMETA | p.VDELEGATE)
+    ro = p.region_map(rd, 0x31000000)
+    p.region_unmap(rw)
+    t0 = p.time_ns()
+    r = p.region_wait(ro, 0, 0xabc, -1)
+    ms = (p.time_ns() - t0) // 1000000
+    ok(r == 3 and ms < 1000,
+       'late waiter after explicit unmap returns 3 promptly')
+    ok(p.region_wait(ro, 0, 0x999, -1) == 0,
+       'changed comparison wins after the writer unmapped')
+    rw2 = p.region_map(reg, 0x32000000)
+    ok(p.region_wait(ro, 0, 0xabc, 0) == 2,
+       'a replacement writer makes the unchanged word waitable again')
+    p.region_atomic_store(rw2, 0xdef)
+    ok(p.region_wake(rw2, 0, 1) == 0,
+       'replacement writer can wake its word')
+    p.region_unmap(rw2)
+    p.region_unmap(ro)
+    p.obj_close(rd)
+    p.obj_close(reg)
+    ok(True, 'late-waiter replacement writer leaves no stale state')
 
     # --- revocation preserves installed wait/wake authority --------------
     reg = p.region_create(8192)
@@ -465,6 +597,107 @@ def run():
     ok(got[b] == '',
        'writer mapping release wakes a blocked RO observer and preserves data')
     p.obj_close(fifo)
+
+    # --- late waiter after a real writer process exit ---------------------
+    fifo = p.obj_fifocreate(64)
+    sub = p.obj_subscribe(fifo, p.VRECV | p.VMETA | p.VDELEGATE | p.VWRITE, 128)
+    w = spawn_handles(WRITER.replace('@WORD1@', '0x1111')
+                      .replace('@AFTER@', ''), fifo)
+    rh = recv(sub, b'HANDLE')
+    wh = recv(sub, b'WRITER')
+    p.obj_close(wh)
+    got = waitmap((w,))
+    ok(got[w] == '', 'writer process exits after delivering its reader Handle')
+    b = spawn_handles(OBSERVER_LATE.replace('@BASE@', '0x20000000')
+                      .replace('@WORD1@', '0x1111'), fifo,
+                      ((rh, p.VREAD | p.VMETA | p.VDELEGATE),))
+    p.obj_close(rh)
+    p.obj_close(recv(sub, b'MAPPED'))
+    tag = recv_any(sub, (b'DONE', b'LATE-TIMEOUT'))
+    if tag == b'LATE-TIMEOUT':
+        raise AssertionError('late waiter blocked despite no writer')
+    got = waitmap((b,))
+    ok(got[b] == '',
+       'late waiter after real writer exit returns 3 and reads the snapshot')
+    p.obj_close(fifo)
+
+    # --- sleeping observer + real writer process exit ---------------------
+    fifo = p.obj_fifocreate(64)
+    sub = p.obj_subscribe(fifo, p.VRECV | p.VMETA | p.VDELEGATE | p.VWRITE, 128)
+    w = spawn_handles(WRITER.replace('@WORD1@', '0x3333')
+                      .replace('@AFTER@', "_recv(b'DIE')"), fifo)
+    rh = recv(sub, b'HANDLE')
+    wh = recv(sub, b'WRITER')
+    p.obj_close(wh)
+    b = spawn_handles(OBSERVER_SLEEP_EXIT.replace('@BASE@', '0x22000000')
+                      .replace('@WORD1@', '0x3333'), fifo,
+                      ((rh, p.VREAD | p.VMETA | p.VDELEGATE),))
+    p.obj_close(rh)
+    p.obj_close(recv(sub, b'MAPPED'))
+    p.sleep(400)
+    send(fifo, b'DIE')
+    p.obj_close(recv(sub, b'DONE'))
+    got = waitmap((w, b))
+    ok(got[w] == '' and got[b] == '',
+       'sleeping RO observer wakes on real writer exit with snapshot intact')
+    p.obj_close(fifo)
+
+    # --- writer release versus rapid replacement (two vCPUs) --------------
+    rounds = 16
+    seen3 = 0
+    for i in range(rounds):
+        word1 = 0x1000 + i
+        word2 = 0x2000 + i
+        if i % 2:
+            after = ("_recv(b'GO')\np.region_unmap(rw)\n"
+                     "_send(b'UNMAPPED')\n_recv(b'DIE')")
+        else:
+            after = "_recv(b'GO')"
+        code = (WRITER.replace('@WORD1@', '0x%x' % word1)
+                .replace('@AFTER@', after))
+        fifo = p.obj_fifocreate(64)
+        sub = p.obj_subscribe(fifo, p.VRECV | p.VMETA | p.VDELEGATE | p.VWRITE, 128)
+        w = spawn_handles(code, fifo)
+        rh = recv(sub, b'HANDLE')
+        wh = recv(sub, b'WRITER')
+        bcode = (OBSERVER_REPLACE.replace('@BASE@', '0x20000000')
+                 .replace('@WORD2@', '0x%x' % word2))
+        b = spawn_handles(bcode, fifo,
+                          ((rh, p.VREAD | p.VMETA | p.VDELEGATE),))
+        p.obj_close(rh)
+        p.obj_close(recv(sub, b'MAPPED'))
+        p.sleep(400)
+        send(fifo, b'GO')
+        deadline = p.time_ns() + 5000000000
+        while True:
+            try:
+                rw = p.region_map(wh, 0x30000000)
+                break
+            except OSError:
+                if p.time_ns() > deadline:
+                    raise AssertionError('replacement writer map timed out')
+                p.sleep(10)
+        p.region_write(rw + 8, b'REPLACED')
+        p.region_atomic_store(rw, word2)
+        p.region_wake(rw, 0, 2)
+        send(fifo, b'DIE')
+        tag = None
+        while tag is None:
+            h, env = p.obj_receive(sub, 10000, 64)
+            p.obj_close(h)
+            if env in (b'DONE', b'DONE3'):
+                tag = env
+        if tag == b'DONE3':
+            seen3 += 1
+        got = waitmap((w, b))
+        if got[w] != '' or got[b] != '':
+            raise AssertionError('replacement round status: %r %r' %
+                                 (got[w], got[b]))
+        p.region_unmap(rw)
+        p.obj_close(wh)
+        p.obj_close(fifo)
+    ok(seen3 == rounds,
+       'writer release survives rapid replacement in %d rounds' % rounds)
 
     # --- wait/wake state does not leak physical pages --------------------
     free0 = p.system()[6]
