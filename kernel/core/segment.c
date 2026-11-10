@@ -38,8 +38,6 @@ newseg(int type, uintptr base, ulong size)
 	s->base = base;
 	s->top = base+(size*BY2PG);
 	s->used = 0;
-	s->sema.prev = &s->sema;
-	s->sema.next = &s->sema;
 
 	if((type & SG_TYPE) == SG_PHYSICAL){
 		s->map = nil;
@@ -71,8 +69,6 @@ putseg(Segment *s)
 		return;
 	if(decref(&s->ref) != 0)
 		return;
-	assert(s->sema.prev == &s->sema);
-	assert(s->sema.next == &s->sema);
 
 	if(s->mapsize > 0){
 		Pte **pte, **emap;

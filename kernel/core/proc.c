@@ -49,7 +49,6 @@ char *statename[] =
 	"Wakeme",
 	"Broken",
 	"Stopped",
-	"Rendez",
 	"Waitrelease",
 };
 
@@ -395,7 +394,6 @@ queueproc(Schedq *rq, Proc *p)
 	case Wakeme:
 	case Broken:
 	case Stopped:
-	case Rendezvous:
 		if(p != up)
 			break;
 		/* wet floor */
@@ -1137,26 +1135,7 @@ procinterrupt(Proc *p)
 			unlock(&q->use);
 		}
 		break;
-	case Rendezvous:
-		/* Try and pull out of a rendezvous */
-		lock(&p->rgrp->lk);
-		if(p->state == Rendezvous) {
-			Proc *d, **l;
-
-			l = &REND(p->rgrp, p->rendtag);
-			for(d = *l; d != nil; d = d->rendhash) {
-				if(d == p) {
-					*l = p->rendhash;
-					p->rendval = ~0;
-					unlock(&p->rgrp->lk);
-					/* hands off p->rgrp */
-					ready(p);
-					return;
-				}
-				l = &d->rendhash;
-			}
-		}
-		unlock(&p->rgrp->lk);
+	default:
 		break;
 	}
 }
@@ -1357,7 +1336,6 @@ pexit(char *exitstr, int freemem)
 	Waitq *wq;
 	Ref *fdgrp;
 	Egrp *egrp;
-	Rgrp *rgrp;
 	Pgrp *pgrp;
 	Segment *s;
 	int i;
@@ -1372,8 +1350,6 @@ pexit(char *exitstr, int freemem)
 	up->fdgrp = nil;
 	egrp = up->egrp;
 	up->egrp = nil;
-	rgrp = up->rgrp;
-	up->rgrp = nil;
 	pgrp = up->pgrp;
 	up->pgrp = nil;
 	qunlock(&up->debug);
@@ -1387,8 +1363,6 @@ pexit(char *exitstr, int freemem)
 		closefdgrp(fdgrp);
 	if(egrp != nil)
 		closeegrp(egrp);
-	if(rgrp != nil)
-		closergrp(rgrp);
 	if(pgrp != nil)
 		closepgrp(pgrp);
 
@@ -1519,7 +1493,6 @@ procdiscard(Proc *p)
 	Waitq *wq;
 	Ref *fdgrp;
 	Egrp *egrp;
-	Rgrp *rgrp;
 	Pgrp *pgrp;
 	int i;
 
@@ -1532,8 +1505,6 @@ procdiscard(Proc *p)
 	p->fdgrp = nil;
 	egrp = p->egrp;
 	p->egrp = nil;
-	rgrp = p->rgrp;
-	p->rgrp = nil;
 	pgrp = p->pgrp;
 	p->pgrp = nil;
 
@@ -1547,8 +1518,6 @@ procdiscard(Proc *p)
 		closefdgrp(fdgrp);
 	if(egrp != nil)
 		closeegrp(egrp);
-	if(rgrp != nil)
-		closergrp(rgrp);
 	if(pgrp != nil)
 		closepgrp(pgrp);
 

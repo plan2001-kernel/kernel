@@ -491,6 +491,18 @@ long obj_pipe_peer(int handle);
 long obj_region_create(unsigned long long size, ObjId *out);
 long obj_region_map(int handle, unsigned long long addr);
 long obj_region_unmap(unsigned long long addr);
+
+/* Region-scoped publication wait/wake over the direct REGIONWAIT(147) and
+ * REGIONWAKE(148) calls.  base is the mapping returned by obj_region_map,
+ * offset is region-relative and 8-byte aligned, and the 64-bit publication
+ * word is compared only for equality.  An RO mapping may wait; only the
+ * writable mapping may wake.  See runtime/abi/sys.h for status values and
+ * ordering rules.  Userland acquires/stores the word with its own native
+ * atomic operations; the kernel never copies the payload. */
+long region_wait(unsigned long long base, unsigned long long offset,
+		unsigned long long expected, long long timeout);
+long region_wake(unsigned long long base, unsigned long long offset,
+		unsigned long long count);
 long obj_uart_ctl(int handle, void *cfg);
 long obj_uart_status(int handle, void *buf, unsigned long long len);
 long obj_kbd_leds(int handle, unsigned int leds);

@@ -703,7 +703,6 @@ enum
 	RFCNAMEG	= (1<<10),
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),
-	RFREND		= (1<<13),
 	RFNOMNT		= (1<<14)
 };
 
@@ -782,16 +781,12 @@ extern	long	readn(int, void*, long);
 extern	long	readv(int, IOchunk*, int);
 extern	int	remove(char*);
 extern	void*	sbrk(usize);
-/* Direct user memory and synchronization services. */
+/* Direct user memory services. */
 extern	long	segattach(int, char*, uintptr, ulong);
 extern	long	segbrk(uintptr, uintptr);
 extern	long	segdetach(uintptr);
 extern	long	segfree(uintptr, ulong);
 extern	long	segflush(void*, ulong);
-extern	long	semacquire(long*, int);
-extern	long	semrelease(long*, long);
-extern	long	tsemacquire(long*, ulong);
-extern	long	rendezvous(void*, void*);
 extern	long	oseek(int, long, int);
 extern	vlong	seek(int, vlong, int);
 extern	int	sleep(long);
