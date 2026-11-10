@@ -20,7 +20,7 @@ qob_new_o_image() {
     "$T40_ROOT/tools/host/t40/phase4-micropython-ipc.py" >"$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --accel kvm:tcg --cpus 3 --ncpu 3 --obootcpu 0 \
-  --timeout 900 --obootexec 0x4f45584543000003 --output-dir "$T40_OUT" \
+  --mib 1024 --timeout 1200 --obootexec 0x4f45584543000003 --output-dir "$T40_OUT" \
   --expect '^T40-FINISH [0-9]+ PASS' "$@"
 python3 - "$T40_OUT/boot-boot.log" <<'PY'
 import re,sys
