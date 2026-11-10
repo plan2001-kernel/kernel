@@ -7,8 +7,11 @@
 Plan 2001-kernel is an **experimental object-oriented operating-system
 kernel** under development for AMD64 and ARM64. Persistent GE/O storage
 uses SpaceIDs and OIDs rather than a native hierarchical filesystem.
-Object handles and ObjectFIFO provide capability-aware runtime and device
-interfaces. MicroPython is the primary userspace proof of concept.
+Current object Handles and ObjectFIFO provide capability-aware runtime and
+device interfaces. The [target architecture](docs/ARCHITECTURE.md) replaces
+generic kernel FIFO IPC with capability-mapped memory publication and treats
+processes as independent contexts connected by explicit grants. Those target
+APIs are not implemented. MicroPython is the userspace proof of concept.
 
 The current **AMD64** kernel has a working full-system path, including GE/O
 and MicroPython. The **ARM64** implementation has an early UEFI/QEMU boot
@@ -44,7 +47,7 @@ early-boot PASS is not a claim of physical-hardware validation.
 
 - [Architecture and architecture maturity](docs/ARCHITECTURE.md)
 - [GE/O persistent object storage](docs/OBJECT-STORAGE.md)
-- [Kernel interface and ObjectFIFO principles](docs/KERNEL-INTERFACE.md)
+- [Kernel interface: target and current status](docs/KERNEL-INTERFACE.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
 - [Olio ja objekti: tietoteoreettinen manifesti (suomeksi)](docs/OLIO-OBJEKTI-MANIFESTI.md)
 
