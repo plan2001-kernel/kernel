@@ -66,7 +66,7 @@ enum {
 	Ko,	/* name[] => value[]: catalog and volume records */
 
 	/* Plan2001: immutable per-object owner metadata. */
-	Kowner,	/* store[8] oid[8] => magic[8] owner[8] */
+	Kowner,	/* store[8] oid[8] ~ver[8] => magic[8] owner[8] */
 };
 
 enum {

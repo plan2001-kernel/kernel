@@ -138,9 +138,11 @@ AMD64 has a functional full-system path with GE/O, MicroPython and device
 providers. It implements immutable process/object `OwnerID`, trusted
 boot/installation program registration, owner-checked direct object access,
 registered-program launch under the program's owner, and owner-offered data
-through the existing region publication IPC. Existing Handle rights remain
-an addressing/attenuation mechanism in the current ABI; they cannot authorize
-management of another owner's object. ARM64 has an early UEFI/QEMU boot
+through the existing region publication IPC. Stored owners survive restart;
+the name/program registry is volatile and is reconstructed by trusted boot
+before access. Existing Handle rights remain an addressing/attenuation
+mechanism in the current ABI; they cannot authorize management of another
+owner's object. ARM64 has an early UEFI/QEMU boot
 foundation with BootInfo handoff, mappings, console, timer interrupts and
 physical-page allocation, not a full-system scheduler, GE/O, syscalls,
 userspace or device parity. MicroPython is the proof-of-concept userspace.

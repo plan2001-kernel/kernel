@@ -109,6 +109,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(p9_processterminate_obj, p9_processterminate);
 
 extern long programregister(ProgramRegisterReq *, long);
 extern long programlaunch(char *, long, char **, int, struct Ospawn *);
+extern long owneridfault(int point);
+
+/* Test-only deterministic create/publication fault point. */
+static mp_obj_t p9_owneridfault(mp_obj_t point) {
+    return check(owneridfault(mp_obj_get_int(point)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_owneridfault_obj, p9_owneridfault);
 
 /* owner_info() -> (OwnerID, name).  The name is empty when this boot has
  * no trust-domain registration for the already-resolved identity. */
@@ -1106,6 +1113,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_owner), MP_ROM_PTR(&p9_objowner_obj) },
     { MP_ROM_QSTR(MP_QSTR_program_register), MP_ROM_PTR(&p9_programregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_program_launch), MP_ROM_PTR(&p9_programlaunch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ownerid_fault), MP_ROM_PTR(&p9_owneridfault_obj) },
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
     { MP_ROM_QSTR(MP_QSTR_rforkex), MP_ROM_PTR(&p9_rforkex_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },

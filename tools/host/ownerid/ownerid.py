@@ -6,6 +6,9 @@ processes report only an exit status; the parent prints the result.
 """
 
 MPY = 0x4f45584543000003
+STATE = 0x4f45584543000100
+AOBJ = 0x4f45584543000101
+BOBJ = 0x4f45584543000102
 
 COMMON = r'''
 def fail(s):
@@ -34,6 +37,8 @@ import space
 AOWN = @AOWN@
 BOWN = @BOWN@
 AOID = @AOID@
+AOBJ = @AOBJ@
+BOBJ = @BOBJ@
 PUB = @PUB@
 ''' + COMMON + r'''
 stage = 'start'
@@ -48,6 +53,13 @@ try:
     ctl = findproc(p.VCONTROL)
     if not sh or not reg or not ctl:
         fail('b-handles')
+    stage = 'persist'
+    p.obj_put_oid(sh, BOBJ, b'B-persist')
+    p.obj_commit(sh)
+    ph = p.obj_open_ge_space(sh, BOBJ)
+    if p.obj_owner(ph)[0] != BOWN or p.obj_read(ph, 16) != b'B-persist':
+        fail('b-persist')
+    p.obj_close(ph)
     # A's non-published GEO object: knowing SpaceID/OID is not authority.
     stage = 'open-a'
     try:
@@ -192,6 +204,90 @@ except BaseException as e:
     p.exits('ERR:' + repr(e))
 '''
 
+A_RB_CODE = r'''
+import plan9 as p
+AOWN = @AOWN@
+AOBJ = @AOBJ@
+BOBJ = @BOBJ@
+def findspace():
+    for h in p.obj_list():
+        try:
+            i = p.obj_info(h)
+        except OSError:
+            continue
+        if i[8] == p.VKIND_SPACE and (i[10] & p.VEXECUTE):
+            return h
+    return 0
+try:
+    if p.owner_info()[0] != AOWN:
+        p.exits('ERR:a-rb-owner')
+    sh = findspace()
+    if not sh:
+        p.exits('ERR:a-rb-space')
+    h = p.obj_open_ge_space(sh, AOBJ)
+    if p.obj_owner(h)[0] != AOWN or p.obj_read(h, 16) != b'A-persist':
+        p.exits('ERR:a-rb-own')
+    p.obj_close(h)
+    try:
+        p.obj_open_ge_space(sh, BOBJ)
+    except OSError:
+        pass
+    else:
+        p.exits('ERR:a-rb-cross-open')
+    try:
+        p.obj_put_oid(sh, BOBJ, b'A-rewrite')
+    except OSError:
+        pass
+    else:
+        p.exits('ERR:a-rb-cross-write')
+    p.exits('ARBOK')
+except BaseException as e:
+    import plan9 as p
+    p.exits('ERR:' + repr(e))
+'''
+
+B_RB_CODE = r'''
+import plan9 as p
+BOWN = @BOWN@
+AOBJ = @AOBJ@
+BOBJ = @BOBJ@
+def findspace():
+    for h in p.obj_list():
+        try:
+            i = p.obj_info(h)
+        except OSError:
+            continue
+        if i[8] == p.VKIND_SPACE and (i[10] & p.VEXECUTE):
+            return h
+    return 0
+try:
+    if p.owner_info()[0] != BOWN:
+        p.exits('ERR:b-rb-owner')
+    sh = findspace()
+    if not sh:
+        p.exits('ERR:b-rb-space')
+    h = p.obj_open_ge_space(sh, BOBJ)
+    if p.obj_owner(h)[0] != BOWN or p.obj_read(h, 16) != b'B-persist':
+        p.exits('ERR:b-rb-own')
+    p.obj_close(h)
+    try:
+        p.obj_open_ge_space(sh, AOBJ)
+    except OSError:
+        pass
+    else:
+        p.exits('ERR:b-rb-cross-open')
+    try:
+        p.obj_put_oid(sh, AOBJ, b'B-rewrite')
+    except OSError:
+        pass
+    else:
+        p.exits('ERR:b-rb-cross-write')
+    p.exits('BRBOK')
+except BaseException as e:
+    import plan9 as p
+    p.exits('ERR:' + repr(e))
+'''
+
 EXEC_CODE = r'''
 import plan9 as p
 o = p.owner_info()
@@ -204,6 +300,8 @@ import space
 AOWN = @AOWN@
 BOWN = @BOWN@
 AID = @AOID@
+AOBJ = @AOBJ@
+BOBJ = @BOBJ@
 MPY = @MPY@
 PUB = @PUB@
 ''' + COMMON + r'''
@@ -217,6 +315,15 @@ try:
     stage = 'space'
     if not sh:
         fail('a-space')
+    # Fixed OID persistence: first publication assigns this process owner
+    # atomically; the object survives reboot for the two-boot check.
+    stage = 'persist'
+    p.obj_put_oid(sh, AOBJ, b'A-persist')
+    p.obj_commit(sh)
+    ph = p.obj_open_ge_space(sh, AOBJ)
+    if p.obj_owner(ph)[0] != AOWN or p.obj_read(ph, 16) != b'A-persist':
+        fail('a-persist')
+    p.obj_close(ph)
     # Direct object ownership: create, write, commit, close and reopen.
     stage = 'create'
     gh, oid = p.obj_create_ge(sh, b'alpha')
@@ -372,6 +479,95 @@ def run():
        'boot process runs under the named ordinary owner root')
     ok(root[0] != 0, 'user-visible owner identity is separate from kernel 0')
 
+    def readstate():
+        h = 0
+        try:
+            h = p.obj_open_ge_space(sh, STATE)
+            d = p.obj_read(h, 64)
+        except OSError:
+            return None
+        finally:
+            if h:
+                p.obj_close(h)
+        f = d.split()
+        if len(f) != 3 or f[0] != b'OWNERID-RB1':
+            return None
+        return int(f[1]), int(f[2])
+
+    saved = readstate()
+    if saved is not None:
+        aown, bown = saved
+        ra, _ = p.program_register('A', 'ownerA', sh, MPY,
+                                   p.OWNER_PROGRAM_LAUNCHABLE)
+        rb, _ = p.program_register('B', 'ownerB', sh, MPY,
+                                   p.OWNER_PROGRAM_LAUNCHABLE)
+        ok(ra == aown and rb == bown,
+           'reboot re-registration resolves the stored OwnerIDs deterministically')
+        sth = p.obj_open_ge_space(sh, STATE)
+        sok = p.obj_owner(sth)[0] == root[0]
+        p.obj_close(sth)
+        ok(sok, 'persisted state object keeps its boot owner across reboot')
+        denied(lambda: p.obj_open_ge_space(sh, AOBJ),
+               'root cannot open the rebooted owner-A object by knowing its OID')
+        denied(lambda: p.obj_open_ge_space(sh, BOBJ),
+               'root cannot open the rebooted owner-B object by knowing its OID')
+        denied(lambda: p.obj_put_oid(sh, AOBJ, b'root-rewrite'),
+               'root cannot rewrite the rebooted owner-A object')
+        rights = (sh, p.VEXECUTE | p.VREAD | p.VWRITE | p.VCREATE |
+                  p.VCOMMIT | p.VMETA | p.VDELEGATE)
+        ar = waitok(p.program_launch('A',
+                    ('micropython', '-c',
+                     build(A_RB_CODE, AOWN=aown, AOBJ=AOBJ, BOBJ=BOBJ)),
+                    (rights,)), 'A-reboot')
+        br = waitok(p.program_launch('B',
+                    ('micropython', '-c',
+                     build(B_RB_CODE, BOWN=bown, AOBJ=AOBJ, BOBJ=BOBJ)),
+                    (rights,)), 'B-reboot')
+        ok(ar[1] == 'ARBOK', 'owner A reopens only its rebooted object: ' + ar[1])
+        ok(br[1] == 'BRBOK', 'owner B reopens only its rebooted object: ' + br[1])
+        p.obj_close(sh)
+        print('T49-REBOOT-FINISH', n[0], 'PASS')
+        return 1
+
+    # Before the first owner-aware creation the seeded objects have no
+    # owner record; the documented legacy rule resolves them to root.  The
+    # first creation migrates them explicitly, after which they still do.
+    lh = p.obj_open_ge_space(sh, MPY)
+    ok(p.obj_owner(lh)[0] == root[0],
+       'seeded object has no owner record and resolves to legacy root')
+    p.obj_close(lh)
+
+    # Deterministic storage failure points.  A pre-publication abort must
+    # leave the candidate reusable with no stale OwnerID; a post-publish
+    # fault leaves a fully owner-assigned published object and advances the
+    # allocator.
+    g, baseoid = p.obj_create_ge(sh, b'fault-base')
+    p.obj_close(g)
+    p.ownerid_fault(1)
+    denied(lambda: p.obj_create_ge(sh, b'fault-1'), 'create fault before owner staging')
+    g, f1 = p.obj_create_ge(sh, b'fault-1-retry')
+    ok(f1 == baseoid + 1 and p.obj_owner(g)[0] == root[0],
+       'aborted pre-owner create reuses the OID with the caller owner')
+    p.obj_close(g)
+    p.ownerid_fault(2)
+    denied(lambda: p.obj_create_ge(sh, b'fault-2'), 'create fault after owner staging')
+    g, f2 = p.obj_create_ge(sh, b'fault-2-retry')
+    ok(f2 == f1 + 1 and p.obj_owner(g)[0] == root[0],
+       'aborted owner-staged create does not leak ownership onto reuse')
+    p.obj_close(g)
+    p.ownerid_fault(3)
+    denied(lambda: p.obj_create_ge(sh, b'fault-3'), 'create fault after publication')
+    g, f3 = p.obj_create_ge(sh, b'fault-3-retry')
+    ok(f3 == f2 + 2 and p.obj_owner(g)[0] == root[0],
+       'post-publication fault leaves a fully owner-assigned object')
+    p.obj_close(g)
+    denied(lambda: p.program_register('Z', '', sh, MPY),
+           'empty owner name cannot select the kernel OwnerID')
+    lh = p.obj_open_ge_space(sh, MPY)
+    ok(p.obj_owner(lh)[0] == root[0],
+       'legacy seeded object still resolves to root after migration')
+    p.obj_close(lh)
+
     aown, aoid = p.program_register('A', 'ownerA', sh, MPY,
                                     p.OWNER_PROGRAM_LAUNCHABLE)
     bown, boid = p.program_register('B', 'ownerB', sh, MPY,
@@ -388,8 +584,9 @@ def run():
 
     pub = b'A-PUBLIC-49'
     a_code = build(A_CODE, AOWN=aown, BOWN=bown, AOID=aoid, MPY=MPY,
-                   PUB=pub, SLEEP=SLEEP_CODE,
+                   AOBJ=AOBJ, BOBJ=BOBJ, PUB=pub, SLEEP=SLEEP_CODE,
                    B_CODE=build(B_CODE, AOWN=aown, BOWN=bown, AOID=aoid,
+                                AOBJ=AOBJ, BOBJ=BOBJ,
                                 PUB=pub, MPY=MPY),
                    EXEC=build(EXEC_CODE, AOWN=aown))
     ah = p.program_launch('A', ('micropython', '-c', a_code),
@@ -451,6 +648,9 @@ def run():
     denied(lambda: p.program_launch('evil-root', ('micropython', '-c', ''), ()),
            'unregistered launch cannot create a process')
 
+    state = ('OWNERID-RB1 %d %d' % (aown, bown)).encode()
+    p.obj_put_oid(sh, STATE, state)
+    p.obj_commit(sh)
     p.obj_close(sh)
     print('T49-FINISH', n[0], 'PASS')
     return 1

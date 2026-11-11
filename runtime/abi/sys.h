@@ -278,6 +278,10 @@ struct Ospawn {
  * explicit IPC/CPU/budget declaration used by SPAWN. */
 #define	PROGRAMREGISTER	149
 #define	PROGRAMLAUNCH	150
+/* Deterministic create/publication fault point for the owner-metadata
+ * acceptance tests.  Only the explicit boot process may arm it. */
+#define	OWNERIDFAULT	151
+long	owneridfault(int point);
 enum {
 	OWNER_PROGRAM_ABI_VERSION = 1,
 	OWNER_PROGRAM_AUTOSTART = 1<<0,

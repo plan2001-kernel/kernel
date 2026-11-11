@@ -37,7 +37,23 @@ enum {
 #define Objexeclast	0x4f45584543000003ULL
 #define Objalloclegacy	72
 #define Objallocstate	88	/* 72 + magic[8] + next[8] */
+#define Objownerstate	104	/* 88 + magic[8] + mode[8] */
 static char objallocmagic[8] = "OALLOC01";
+static char objownermagic[8] = "OOWNER01";
+static char objownermode[8] = "OOWNMODE";
+
+/*
+ * Immutable per-object owner metadata.  The key is versioned like Kobj, so
+ * an owner record is published only with the transaction that created the
+ * object; unpublished records are ignored and swept like unpublished
+ * chunks.  The value keeps the payload format opaque.
+ */
+enum {
+	Objownerksz	= 1+8+8+8,	/* Kowner store oid ~ver */
+	Objownerpfx	= 1+8,		/* Kowner store */
+	Objowneroidpfx	= 1+8+8,	/* Kowner store oid */
+	Objownervallen	= 8+8,		/* magic owner */
+};
 
 /*
  * Plan2001 Stage 3: the engine's tree.  A native O transaction writes
@@ -58,6 +74,8 @@ txupsert(Otx *tx, Msg *m, int nm)
 }
 
 /* Plan2001: a volume's stores with a transaction, under its mutlk (Gefs.otxs) */
+
+static void	packownerkey(char*, vlong, uvlong, uvlong);
 
 static void
 packkey(char *k, vlong store, uvlong oid, uvlong ver, u32int idx)
@@ -235,7 +253,8 @@ keyver(char *k)
 static int
 dropunpub(char *k, int nk, void *a)
 {
-	return nk == Objksz && keyver(k) > *(uvlong*)a;
+	return (nk == Objksz || nk == Objownerksz) &&
+		keyver(k) > *(uvlong*)a;
 }
 
 typedef struct Oold Oold;
@@ -264,6 +283,7 @@ dropold(char *k, int nk, void *a)
 }
 
 int	objfail;	/* the next commit's history sweep fails */
+int	ownerfault;	/* test-only create/publication fault point */
 
 /*
  * Plan2001 V7 (the V7 store-header format (see objpin below)): the user part's recovery pin.
@@ -302,10 +322,12 @@ objtxbegin(Otx *tx)
 	gethdr(txroot(tx), tx->store, &h);
 	if(h.w > h.n){
 		/* a transaction cut short: its keys out */
-		char pfx[Objhdrksz];
+		char pfx[Objownerpfx];
 
 		pfx[0] = Kobj;
 		PACK64(pfx+1, tx->store);
+		objtxsweep(tx, pfx, sizeof(pfx), dropunpub, &h.n);
+		pfx[0] = Kowner;
 		objtxsweep(tx, pfx, sizeof(pfx), dropunpub, &h.n);
 	}
 	h.w = h.n + 1;
@@ -358,7 +380,7 @@ objtxaddent(Otx *tx, uvlong oid, u32int nidx)
 void
 objtxabort(Otx *tx)
 {
-	char k[Objksz];
+	char k[Objksz], ok[Objownerksz];
 	Ohdr h;
 	Oent *e;
 	u32int i;
@@ -371,11 +393,14 @@ objtxabort(Otx *tx)
 		nexterror();
 	}
 	tx->nm = 0;
-	for(e = tx->ent; e < tx->ent+tx->nent; e++)
+	for(e = tx->ent; e < tx->ent+tx->nent; e++){
 		for(i = 0; i < e->nidx; i++){
 			packkey(k, tx->store, e->oid, tx->ver, i);
 			objtxaddmsg(tx, Oclobber, k, Objksz, nil, 0);
 		}
+		packownerkey(ok, tx->store, e->oid, tx->ver);
+		objtxaddmsg(tx, Oclobber, ok, Objownerksz, nil, 0);
+	}
 	objtxflush(tx);
 	gethdr(txroot(tx), tx->store, &h);
 	h.w = h.n;
@@ -469,6 +494,10 @@ objtxcommit(Otx *tx)
 
 static Otx*	ospacetx(Ospace*);
 static void	ospaceputdata(Otx*, uvlong, void*, long);
+static void	ownerensure(Otx*, Ohdr*);
+static void	ownerassign(Otx*, Ohdr*, uvlong, uvlong);
+static void	setuserstate(Otx*, Ohdr*, uvlong, int);
+static void	packownerkey(char*, vlong, uvlong, uvlong);
 
 /* serializes a whole create (or commit) with its sync across handles */
 static QLock	oalloclk;
@@ -548,8 +577,9 @@ getalloc(Ohdr *h, uvlong *next)
 		*next = Objallocbase;
 		return;
 	}
-	if(h->nuser == Objallocstate && memcmp(h->user+Objalloclegacy,
-	    objallocmagic, sizeof objallocmagic) == 0){
+	if((h->nuser == Objallocstate || h->nuser == Objownerstate) &&
+	   memcmp(h->user+Objalloclegacy, objallocmagic,
+	    sizeof objallocmagic) == 0){
 		*next = UNPACK64(h->user+Objalloclegacy+sizeof objallocmagic);
 		if(*next < Objallocbase || *next > Objalloclimit)
 			error("O: corrupt allocator state");
@@ -565,7 +595,7 @@ getalloc(Ohdr *h, uvlong *next)
  * with one commit; the caller sees the OID only after gesync succeeds.
  */
 long
-ospacecreate(Ospace *sp, void *data, long n, uvlong *oid)
+ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 {
 	Gefs *fs;
 	Otx *tx;
@@ -574,6 +604,8 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid)
 
 	if(oid == nil)
 		error("O: no OID result pointer");
+	if(owner == 0)
+		error(Ebadarg);
 	fs = sp->fs;
 	qlock(&oalloclk);
 	if(waserror()){
@@ -614,17 +646,28 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid)
 	next++;
 	if(next >= Objalloclimit)
 		next = Objalloclimit;	/* the next call fails, never wraps */
-	memset(tx->user, 0, sizeof tx->user);
-	if(h.nuser >= Objalloclegacy)
-		memmove(tx->user, h.user, Objalloclegacy);
-	memmove(tx->user+Objalloclegacy, objallocmagic, sizeof objallocmagic);
-	PACK64(tx->user+Objalloclegacy+sizeof objallocmagic, next);
-	tx->nuser = Objallocstate;
-	tx->newuser = 1;
 
+	/* Payload and immutable owner are staged in the same version and
+	 * become visible with the one header commit. */
 	ospaceputdata(tx, cand, data, n);
+	if(ownerfault == 1){
+		ownerfault = 0;
+		error("ownerfault: before owner staging");
+	}
+	ownerensure(tx, &h);
+	objtxflush(tx);
+	setuserstate(tx, &h, next, 1);
+	ownerassign(tx, &h, cand, owner);
+	if(ownerfault == 2){
+		ownerfault = 0;
+		error("ownerfault: after owner staging");
+	}
 	objtxflush(tx);
 	objtxcommit(tx);
+	if(ownerfault == 3){
+		ownerfault = 0;
+		error("ownerfault: after publication");
+	}
 	qunlock(&fs->mutlk);
 	poperror();
 	gesync(fs, 0);
@@ -667,97 +710,290 @@ ospacetx(Ospace *sp)
 	return tx;
 }
 
-enum {
-	Objownerksz	= 1+8+8,
-	Objownerlen	= 1+8+8,
-	Objownervallen	= 8+8,
-};
-static char objownermagic[8] = "OOWNER01";
+static uvlong objlegacyowner;
+
+void
+ospaceownersetlegacy(uvlong owner)
+{
+	objlegacyowner = owner;
+}
+
+static void
+packownerkey(char *k, vlong store, uvlong oid, uvlong ver)
+{
+	k[0] = Kowner;
+	PACK64(k+1, store);
+	PACK64(k+9, oid);
+	PACK64(k+17, ~ver);
+}
+
+static int
+headerownermode(Ohdr *h)
+{
+	if(h->nuser < Objownerstate)
+		return 0;
+	if(memcmp(h->user+Objallocstate, objownermode,
+	    sizeof objownermode) != 0)
+		error("O: corrupt owner-mode state");
+	return 1;
+}
+
+static int
+txownermode(Otx *tx)
+{
+	return tx->newuser && tx->nuser >= Objownerstate &&
+		memcmp(tx->user+Objallocstate, objownermode,
+		    sizeof objownermode) == 0;
+}
 
 /*
- * Immutable per-object OwnerID.  The record is a separate Kowner key so the
- * object payload remains opaque bytes.  A missing record is the seeded
- * volume owner (root); boot/installation records one for every object it
- * creates for a named program owner.  Owner metadata is never rewritten.
+ * The newest owner record at or below the published version, or none.
+ * Unpublished records are not authority: they appear only after a crashed
+ * or aborted creation and are ignored until the next transaction sweeps
+ * them.
  */
-void
-ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner)
+static int
+ownerlookup(Otx *tx, uvlong oid, uvlong upto, uvlong *owner)
 {
-	char kb[Objownerksz], buf[Kvmax];
-	Key k;
-	Kvp kv;
+	char pfx[Objowneroidpfx];
+	Scan *s;
+	uvlong v, best;
+	int found;
+
+	s = emalloc(sizeof(Scan), 1);
+	if(waserror()){
+		free(s);
+		nexterror();
+	}
+	pfx[0] = Kowner;
+	PACK64(pfx+1, tx->store);
+	PACK64(pfx+9, oid);
+	btnewscan(tx->fs, s, pfx, sizeof pfx);
+	btenter(tx->tree, s);
+	if(waserror()){
+		btexit(s);
+		nexterror();
+	}
+	found = 0;
+	best = 0;
+	while(btnext(s, &s->kv)){
+		if(s->kv.key.nk != Objownerksz)
+			continue;
+		v = keyver(s->kv.key.k);
+		if(v > upto || (found && v <= best))
+			continue;
+		if(s->kv.val.nv != Objownervallen ||
+		   memcmp(s->kv.val.v, objownermagic,
+		    sizeof objownermagic) != 0)
+			error(Ecorrupt);
+		best = v;
+		*owner = UNPACK64(s->kv.val.v+8);
+		found = 1;
+	}
+	btexit(s);
+	poperror();
+	free(s);
+	poperror();
+	return found;
+}
+
+static int
+objectlive(Otx *tx, uvlong oid, uvlong upto)
+{
+	char pfx[Objoidksz];
+	Scan *s;
+	uvlong v;
+	u32int idx, len;
+	int live;
+
+	s = emalloc(sizeof(Scan), 1);
+	if(waserror()){
+		free(s);
+		nexterror();
+	}
+	pfx[0] = Kobj;
+	PACK64(pfx+1, tx->store);
+	PACK64(pfx+9, oid);
+	btnewscan(tx->fs, s, pfx, sizeof pfx);
+	btenter(tx->tree, s);
+	if(waserror()){
+		btexit(s);
+		nexterror();
+	}
+	live = 0;
+	while(btnext(s, &s->kv)){
+		if(s->kv.key.nk != Objksz)
+			continue;
+		v = keyver(s->kv.key.k);
+		if(v > upto)
+			continue;
+		idx = UNPACK32(s->kv.key.k+25);
+		if(idx == 0 && s->kv.val.nv >= 4){
+			len = UNPACK32(s->kv.val.v);
+			live = len != Objtomb;
+		}
+		break;
+	}
+	btexit(s);
+	poperror();
+	free(s);
+	poperror();
+	return live;
+}
+
+static void
+owneradd(Otx *tx, uvlong oid, uvlong ver, uvlong owner)
+{
+	char k[Objownerksz], v[Objownervallen];
+
+	packownerkey(k, tx->store, oid, ver);
+	memmove(v, objownermagic, sizeof objownermagic);
+	PACK64(v+8, owner);
+	objtxaddmsg(tx, Oinsert, k, sizeof k, v, sizeof v);
+}
+
+/*
+ * One-time upgrade of a Space that predates owner metadata.  Every object
+ * published at the current version belonged to the seeded volume owner;
+ * recording that explicitly means a later missing record is corruption,
+ * never an implicit root grant.  New objects are assigned at creation.
+ */
+static void
+ownermigrate(Otx *tx, uvlong upto, uvlong owner)
+{
+	char pfx[Objhdrksz];
+	Scan *s;
+	uvlong oid, last, v;
+	int seen, live;
+
+	if(owner == 0)
+		error("O: no legacy owner registered");
+	s = emalloc(sizeof(Scan), 1);
+	if(waserror()){
+		free(s);
+		nexterror();
+	}
+	pfx[0] = Kobj;
+	PACK64(pfx+1, tx->store);
+	btnewscan(tx->fs, s, pfx, sizeof pfx);
+	btenter(tx->tree, s);
+	if(waserror()){
+		btexit(s);
+		nexterror();
+	}
+	last = 0;
+	seen = 0;
+	live = 0;
+	while(btnext(s, &s->kv)){
+		if(s->kv.key.nk != Objksz)
+			continue;
+		oid = UNPACK64(s->kv.key.k+9);
+		if(oid != last){
+			if(last != 0 && live)
+				owneradd(tx, last, upto, owner);
+			last = oid;
+			seen = 0;
+			live = 0;
+		}
+		v = keyver(s->kv.key.k);
+		if(seen || v > upto)
+			continue;
+		seen = 1;
+		if(UNPACK32(s->kv.key.k+25) == 0 && s->kv.val.nv >= 4)
+			live = UNPACK32(s->kv.val.v) != Objtomb;
+	}
+	if(last != 0 && live)
+		owneradd(tx, last, upto, owner);
+	btexit(s);
+	poperror();
+	free(s);
+	poperror();
+}
+
+static void
+setuserstate(Otx *tx, Ohdr *h, uvlong next, int ownermode)
+{
+	memset(tx->user, 0, sizeof tx->user);
+	if(h->nuser >= Objalloclegacy)
+		memmove(tx->user, h->user, Objalloclegacy);
+	memmove(tx->user+Objalloclegacy, objallocmagic,
+		sizeof objallocmagic);
+	PACK64(tx->user+Objalloclegacy+sizeof objallocmagic, next);
+	tx->nuser = Objallocstate;
+	if(ownermode){
+		memmove(tx->user+Objallocstate, objownermode,
+			sizeof objownermode);
+		PACK64(tx->user+Objallocstate+sizeof objownermode, tx->ver);
+		tx->nuser = Objownerstate;
+	}
+	tx->newuser = 1;
+}
+
+static void
+ownerensure(Otx *tx, Ohdr *h)
+{
+	uvlong next;
+
+	if(headerownermode(h) || txownermode(tx))
+		return;
+	ownermigrate(tx, h->n, objlegacyowner);
+	getalloc(h, &next);
+	setuserstate(tx, h, next, 1);
+}
+
+static void
+ownerassign(Otx *tx, Ohdr *h, uvlong oid, uvlong owner)
+{
+	uvlong stored;
+
+	if(owner == 0 || oid == 0)
+		error(Ebadarg);
+	if(ownerlookup(tx, oid, tx->ver, &stored)){
+		if(stored != owner)
+			error(Eperm);
+		return;
+	}
+	if(objectlive(tx, oid, h->n))
+		error(Ecorrupt);
+	owneradd(tx, oid, tx->ver, owner);
+}
+
+/*
+ * Report the immutable owner record.  Returns 1 and the owner when one is
+ * published, 0 when none is.  *required says this Space has owner metadata,
+ * so a missing record is corruption, not a legacy root object.
+ */
+int
+ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner, int *required)
+{
+	Otx *tx;
+	Ohdr h;
 
 	if(sp == nil || owner == nil)
 		error(Ebadarg);
-	qlock(&sp->lk);
-	if(waserror()){
-		qunlock(&sp->lk);
-		nexterror();
-	}
-	kb[0] = Kowner;
-	PACK64(kb+1, sp->sid);
-	PACK64(kb+9, oid);
-	k.k = kb;
-	k.nk = sizeof kb;
-	if(!btlookup(&sp->fs->snap, &k, &kv, buf, sizeof buf)){
-		poperror();
-		qunlock(&sp->lk);
-		return;
-	}
-	if(kv.val.nv != Objownervallen ||
-	   memcmp(kv.val.v, objownermagic, sizeof objownermagic) != 0)
-		error(Ecorrupt);
-	*owner = UNPACK64(kv.val.v+8);
-	poperror();
-	qunlock(&sp->lk);
-}
-
-void
-ospaceownerput(Ospace *sp, uvlong oid, uvlong owner)
-{
-	char kb[Objownerksz], vb[Objownervallen];
-	Otx *tx;
-	Msg m;
-	Gefs *fs;
-
-	if(sp == nil)
-		error(Ebadarg);
-	fs = sp->fs;
+	if(required != nil)
+		*required = 0;
 	qlock(&sp->lk);
 	if(waserror()){
 		qunlock(&sp->lk);
 		nexterror();
 	}
 	tx = ospacetx(sp);
-	if(tx->ver != 0)
-		error("O: owner metadata with a pending transaction");
-	qlock(&fs->mutlk);
-	if(waserror()){
-		if(!waserror()){
-			objtxabort(tx);
-			poperror();
-		}
-		qunlock(&fs->mutlk);
-		nexterror();
+	if(!gethdr(tx->tree, tx->store, &h)){
+		poperror();
+		qunlock(&sp->lk);
+		return 0;
 	}
-	kb[0] = Kowner;
-	PACK64(kb+1, sp->sid);
-	PACK64(kb+9, oid);
-	memmove(vb, objownermagic, sizeof objownermagic);
-	PACK64(vb+8, owner);
-	m.op = Oinsert;
-	m.kv.key.k = kb;
-	m.kv.key.nk = sizeof kb;
-	m.kv.val.v = vb;
-	m.kv.val.nv = sizeof vb;
-	objtxbegin(tx);
-	txupsert(tx, &m, 1);
-	objtxcommit(tx);
-	qunlock(&fs->mutlk);
+	if(required != nil)
+		*required = headerownermode(&h);
+	if(ownerlookup(tx, oid, h.n, owner)){
+		poperror();
+		qunlock(&sp->lk);
+		return 1;
+	}
 	poperror();
-	gesync(fs, 0);
 	qunlock(&sp->lk);
-	poperror();
+	return 0;
 }
 
 static void
@@ -794,10 +1030,13 @@ ospaceputdata(Otx *tx, uvlong oid, void *data, long n)
 }
 
 void
-ospaceput(Ospace *sp, uvlong oid, void *data, long n)
+ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
 {
 	Otx *tx;
+	Ohdr h;
 
+	if(oid == 0)
+		error(Ebadarg);
 	qlock(&sp->lk);
 	if(waserror()){
 		qunlock(&sp->lk);
@@ -813,6 +1052,12 @@ ospaceput(Ospace *sp, uvlong oid, void *data, long n)
 		qunlock(&sp->fs->mutlk);
 		nexterror();
 	}
+	objtxbegin(tx);
+	if(!gethdr(tx->tree, tx->store, &h))
+		error("O: no Space header");
+	ownerensure(tx, &h);
+	objtxflush(tx);
+	ownerassign(tx, &h, oid, owner);
 	ospaceputdata(tx, oid, data, n);
 	objtxflush(tx);
 	qunlock(&sp->fs->mutlk);

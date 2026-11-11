@@ -197,6 +197,7 @@ long	oscreatehand(Ohand*, void *buf, long n, uvlong *oid);
 long	oscreatehandowner(Ohand*, void *buf, long n, uvlong *oid, uvlong owner);
 void	osownercheck(Ohand*, uvlong oid);
 uvlong	osownerof(Ohand*, uvlong oid);
+int	osownerfault(int point);
 long	oscommithand(Ohand*, uvlong *ver);
 Ohand*	oscopycap(Ohand*, uvlong oid);
 Ohand*	oscopycapdelegate(Ohand*, int rights);

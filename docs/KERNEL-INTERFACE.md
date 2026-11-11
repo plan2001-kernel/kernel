@@ -98,6 +98,24 @@ Unregistered names, non-boot registration and cross-owner termination are
 rejected. The optional `Ospawn`/`Oinherit`/`Oinheritv` layout is unchanged and
 is an explicit IPC-reference/CPU/budget declaration, not an ownership grant.
 
+The named-owner and registered-program tables are volatile RAM. Stored object
+OwnerIDs survive restart, but the names and program records do not. Trusted
+boot/installation must therefore re-register every needed named owner and
+program on each boot **before** launching programs or accessing objects owned
+by those identities. Registration of the same trusted name deterministically
+resolves to the same 64-bit OwnerID, so stored owners continue to match.
+Existing stored OwnerIDs are never reassigned or inferred from a requesting
+process. If a stored object's OwnerID has no current name in the registry, the
+numeric owner is reported as unresolved (empty name); it is not mapped to
+`root`, rewritten, or granted to the requester, and direct access remains
+owner-gated. A two-boot test restores the same O volume, reconstructs the
+trusted registrations, and verifies the original owners and bidirectional
+cross-owner denials.
+
+`OWNERIDFAULT(151)` is a boot-only, test-only deterministic fault point for
+creation/publication recovery tests. It does not grant ownership or expose a
+production configuration interface.
+
 The AMD64 ABI currently includes object calls 136–140, `SPAWN(146)`,
 `RFORKEX(143)`, `OEXECUTE`, `SYSCTL(144)`, `IOCTL(145)`, `REGIONWAIT(147)`,
 `REGIONWAKE(148)`, `PROGRAMREGISTER(149)` and `PROGRAMLAUNCH(150)`.

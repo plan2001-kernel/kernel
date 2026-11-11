@@ -87,15 +87,15 @@ onativeget(void *sp, uvlong oid, void *buf, long n, uvlong *ver)
 }
 
 void
-onativeput(void *sp, uvlong oid, void *buf, long n)
+onativeput(void *sp, uvlong oid, void *buf, long n, uvlong owner)
 {
-	ospaceput(sp, oid, buf, n);
+	ospaceput(sp, oid, buf, n, owner);
 }
 
 long
-onativecreate(void *sp, void *buf, long n, uvlong *oid)
+onativecreate(void *sp, void *buf, long n, uvlong *oid, uvlong owner)
 {
-	return ospacecreate(sp, buf, n, oid);
+	return ospacecreate(sp, buf, n, oid, owner);
 }
 
 uvlong

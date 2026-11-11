@@ -306,6 +306,17 @@ sysprogramregister(sysva_list list)
 }
 
 uintptr
+sysowneridfault(sysva_list list)
+{
+	int point;
+
+	if(up == nil || !up->boot)
+		error(Eperm);
+	point = (int)sysva_arg(list, int);
+	return (uintptr)osownerfault(point);
+}
+
+uintptr
 sysprogramlaunch(sysva_list list)
 {
 	char *name;

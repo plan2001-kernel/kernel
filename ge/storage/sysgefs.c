@@ -36,12 +36,14 @@ struct Oblock {
 void*	onativeopen(void*, char*);
 uvlong onativesid(void*);
 long	onativeget(void*, uvlong, void*, long, uvlong*);
-void	onativeput(void*, uvlong, void*, long);
-long	onativecreate(void*, void*, long, uvlong*);
+void	onativeput(void*, uvlong, void*, long, uvlong);
+long	onativecreate(void*, void*, long, uvlong*, uvlong);
+long	ospaceget(void*, uvlong, void*, long, uvlong*);
 uvlong	onativecommit(void*);
 void	onativeclose(void*);
-void	ospaceownerget(void*, uvlong, uvlong*);
-void	ospaceownerput(void*, uvlong, uvlong);
+int	ospaceownerget(void*, uvlong, uvlong*, int*);
+void	ospaceownersetlegacy(uvlong);
+extern int ownerfault;
 extern uvlong ownerroot(void);
 extern void ownerprogrambootregister(void);
 void	osownercheck(Ohand*, uvlong oid);
@@ -309,6 +311,7 @@ osvolumeopen(char *p, int n)
    }
    if(k!=16 || half) error(Ebadarg);
  }
+	ospaceownersetlegacy(ownerroot());
 	bootowner = up;
 	bootpid = up->pid;
 	/* Trusted boot registration: the actual autostart action remains the
@@ -338,6 +341,7 @@ okernelvol(char *spec)
 	v = ovolopenblk(spec, dev, sizeof dev, &off, &size, 0);
 	print("o: O volume %s@%lld, %lld MiB, opened read-only (kernel-only)\n",
 		dev, off, size/MiB);
+	ospaceownersetlegacy(ownerroot());
 	gestart(v);
 	addvol(v);
 	ovolbytes = size;
@@ -700,28 +704,77 @@ oscheckhand(Ohand *h)
 }
 
 /*
- * The persistent object's immutable owner.  A missing Kowner record is a
- * seeded object owned by root.  Knowing a SpaceID/OID never selects or
- * changes this value.
+ * The persistent object's immutable owner.  Before a Space is upgraded to
+ * owner metadata, a missing Kowner record is a seeded object owned by
+ * root.  After the upgrade every live object has a record, so a missing
+ * one is corruption.  Knowing a SpaceID/OID never selects or changes it.
  */
 uvlong
 osownerof(Ohand *oh, uvlong oid)
 {
 	uvlong owner;
+	int required;
 
-	owner = ownerroot();
-	if(oh != nil && oh->sp != nil && oid != 0)
-		ospaceownerget(oh->sp, oid, &owner);
-	return owner;
+	if(oh == nil || oh->sp == nil || oid == 0)
+		return ownerroot();
+	if(ospaceownerget(oh->sp, oid, &owner, &required))
+		return owner;
+	if(required)
+		error("O: corrupt object owner metadata");
+	return ownerroot();
+}
+
+/*
+ * An existing object's recorded owner is authoritative.  A write may also
+ * be the first publication of an OID; that creation is assigned from the
+ * caller's trust domain by the atomic create/put path, never from a
+ * caller-supplied number.  A missing record for a live object in an
+ * owner-aware Space is corruption.
+ */
+static void
+osownercheckcore(Ohand *oh, uvlong oid)
+{
+	uvlong owner;
+	int required;
+
+	if(oid == 0 || up == nil || up->kp)
+		return;
+	if(ospaceownerget(oh->sp, oid, &owner, &required)){
+		if(up->owner != owner)
+			error(Eperm);
+		return;
+	}
+	/* No object yet: a write may create it; later reads report absence.
+	 * A write that does create it records the caller's trust domain in
+	 * the same transaction. */
+	if(ospaceget(oh->sp, oid, nil, 0, nil) < 0)
+		return;
+	if(required)
+		error("O: corrupt object owner metadata");
+	if(up->owner != ownerroot())
+		error(Eperm);
 }
 
 void
 osownercheck(Ohand *oh, uvlong oid)
 {
-	if(oid == 0 || up == nil || up->kp)
-		return;
-	if(up->owner != osownerof(oh, oid))
-		error(Eperm);
+	osownercheckcore(oh, oid);
+}
+
+static void
+osownercheckcreate(Ohand *oh, uvlong oid)
+{
+	osownercheckcore(oh, oid);
+}
+
+/* Deterministic test-only create/publication fault point. */
+int
+osownerfault(int point)
+{
+	if(point < 0 || point > 3)
+		error(Ebadarg);
+	ownerfault = point;
+	return 0;
 }
 
 long
@@ -768,8 +821,9 @@ oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
 		nexterror();
 	}
 	oauthorize(oh, oid, Owrite);
-	osownercheck(oh, oid);
-	onativeput(oh->sp, oid, buf, n);
+	osownercheckcreate(oh, oid);
+	onativeput(oh->sp, oid, buf, n,
+		up != nil && up->owner != 0 ? up->owner : ownerroot());
 	poperror();
 	qunlock(ohgate(oh));
 }
@@ -795,8 +849,7 @@ oscreatehandcore(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
 	}
 	oauthorize(oh, oh->oid, Ocreate);
 	v = 0;
-	onativecreate(oh->sp, buf, n, &v);
-	ospaceownerput(oh->sp, v, owner);
+	onativecreate(oh->sp, buf, n, &v, owner);
 	poperror();
 	qunlock(ohgate(oh));
 	*oid = v;
@@ -816,7 +869,7 @@ oscreatehand(Ohand *oh, void *buf, long n, uvlong *oid)
 	if(n > 0)
 		validaddr((uintptr)buf, n, 0);
 	return oscreatehandcore(oh, buf, n, oid,
-		up != nil ? up->owner : ownerroot());
+		up != nil && up->owner != 0 ? up->owner : ownerroot());
 }
 
 long
