@@ -248,7 +248,14 @@ struct Ospawn {
  * region and region-relative offset.  count must be greater than zero; a
  * value greater than the number of waiters wakes those present.  It returns
  * the number actually woken.  Wait keys use the kernel region identity plus
- * offset, never a virtual address.  A wake carries no payload. */
+ * offset, never a virtual address.  A wake carries no payload.
+ *
+ * For an Ethernet transmit ring the authorized publisher is the writable
+ * writer: it WAKEs OBJ_RING_PUBOFF after publishing a frame and may WAIT on
+ * OBJ_RING_ACKOFF for ring space.  The kernel consumer reads slots and
+ * publishes ack_seq; its trusted internal notification wakes waiters blocked
+ * on that cursor.  It never exposes a writable kernel mapping and never
+ * copies a frame through a syscall. */
 #define	REGIONWAIT	147
 #define	REGIONWAKE	148
 /* flags=1 opts into this bounded extension immediately after Ospawn.

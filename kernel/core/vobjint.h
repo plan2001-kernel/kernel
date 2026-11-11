@@ -140,6 +140,11 @@ int	vobjregionwriterhold(Vobj *o);
 int	vobjregionringinit(Vobj *o);
 void	vobjregionwriterrelease(Vobj *o);
 int	vobjregionringpublish(Vobj *o, uvlong *seq, void *data, ulong len);
+uvlong	vobjregionringload(Vobj *o, uvlong off);
+int	vobjregionringconsume(Vobj *o, uvlong seq, void *buf, ulong max,
+		ulong *len);
+int	vobjregionringack(Vobj *o, uvlong seq);
+int	vobjregionwaitkern(Vobj *o, uvlong off, uvlong expected, int timeout);
 
 int	vobjuartctl(int handle, void *cfg);
 long	vobjuartstatus(int handle, void *buf, long n);
@@ -151,16 +156,17 @@ int	vobjkbdleds(int handle, int leds);
 int vobjdevicesopen(uvlong rights, VobjId *id);
 long vobjdevicelist(int handle, void *out, long bytes);
 int vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id);
-long vobjdevicesend(int handle, void *in, long len, unsigned int *kind);
+long vobjdevicesend(int handle, void *in, long len);
 int vobjdevicerecv(int handle, void *out);
 int vobjdevicerx(int handle);
+int vobjdevicetx(int handle);
 long vobjioctl(int handle, uvlong op, void *data, long len, uvlong arg0);
 int vetherlist(ObjDeviceEntry *out, int capacity);
 Veth *vetheropen(int controller);
 void vetherclose(Veth*);
 void vetherdetach(Veth*);
-Vobj *vetherregion(Veth*);
-long vethersend(Veth*, void*, long);
+Vobj *vetherrxregion(Veth*);
+Vobj *vethertxregion(Veth*);
 void vetherstatus(Veth*, ObjEtherStatus*);
 
 /* CLOSE only when the Handle still names the expected provider kind. */

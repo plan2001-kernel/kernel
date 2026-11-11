@@ -267,19 +267,11 @@ sysobjinvoke(sysva_list list)
             bounded(c.outlen, OBJ_DEVICE_LISTMAX*sizeof(ObjDeviceEntry), Ebadarg));
         break;
     case ObjOpDeviceSend:
-    {
-        unsigned int kind;
-
         if(c.out != nil || c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
-        kind = 0;
         c.result = vobjdevicesend(handle, c.in,
-            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg), &kind);
-        /* Accepted L2 bytes and a USB completion sequence are different
-         * typed results even though both fit in the I/O return slot. */
-        c.aux = kind;
+            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg));
         break;
-    }
     case ObjOpDeviceRecv:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0
         || c.out == nil || c.outlen != sizeof(ObjDeviceResult))
@@ -291,6 +283,12 @@ sysobjinvoke(sysva_list list)
            c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
         c.result = vobjdevicerx(handle);
+        break;
+    case ObjOpDeviceTx:
+        if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+           c.arg0 != 0 || c.arg1 != 0)
+            error(Ebadarg);
+        c.result = vobjdevicetx(handle);
         break;
     case ObjOpInfo:
 		if(c.out == nil || c.outlen != sizeof(VobjInfo))

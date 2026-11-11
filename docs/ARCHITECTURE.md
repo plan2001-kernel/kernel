@@ -135,7 +135,9 @@ completion is an immutable multi-reader record, and no parent/child wait
 state or ancestral control path exists. `Pgrp/OContext` sharing/copying/
 sealing and namespace views remain independent resource mechanisms.
 Ethernet receive and console sessions use capability-region rings with
-`REGIONWAIT`/`REGIONWAKE`; USB control has distinct synchronous completion.
+`REGIONWAIT`/`REGIONWAKE`; the authorized Ethernet transmit publisher uses the
+same mechanism with the kernel as reader. USB control has distinct synchronous
+completion.
 An authorized userspace console owner claims the PS/2 keyboard, decodes scan
 codes and routes input/output through per-session region grants. The `-I`
 native REPL may instead claim the keyboard directly for a single session.

@@ -99,7 +99,7 @@ enum {
 	ObjOpOspawn	= 33,	/* RETIRED: direct SPAWN(146) is used */
 	ObjOpOterminate	= 34,	/* RETIRED: direct OTERMINATE(93) is used */
 	ObjOpDeviceList = 37,	/* catalog: bounded discovery records */
-	ObjOpDeviceSend = 38,	/* device: one complete provider message */
+	ObjOpDeviceSend = 38,	/* USB device: one complete provider message */
 	ObjOpDeviceRecv = 39,	/* device: one USB completion Handle */
 	/* 40 is reserved: device control moved to IOCTL(145). */
 	ObjOpExit	= 36,	/* RETIRED: direct EXITS(8) is used */
@@ -108,6 +108,7 @@ enum {
 	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
 	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
 	ObjOpDeviceRx	= 45,	/* device: acquire the receive region Handle */
+	ObjOpDeviceTx	= 46,	/* device: acquire the transmit region Handle */
 	/* VkindRegion: install this region at arg0 (0 = choose) and return the
 	 * process-local virtual address.  A Handle carrying Vwrite requests the
 	 * single writable mapping; Vread alone requests a read-only mapping.
@@ -174,7 +175,7 @@ enum {
 
 enum {
     ObjDeviceUsbControl = 1,       /* synchronous control session (SEND/RECV) */
-    ObjDeviceEthernet = 2,         /* raw L2 SEND + region-ring RECV */
+    ObjDeviceEthernet = 2,         /* raw L2 region-ring TX and RX */
     ObjDeviceUart = 3,             /* authorized bounded byte stream */
     ObjDeviceKbd = 4,              /* exclusive PS/2 scan-code stream */
     ObjDeviceUsbEndpoint = 5,      /* referenced DATA or CTL endpoint */
@@ -194,11 +195,13 @@ typedef struct ObjDeviceOpenOptions {
 } ObjDeviceOpenOptions;
 
 /* Ethernet: complete L2 octets, including MACs/EtherType, excluding FCS.
- * SEND returns accepted/enqueued bytes, not wire/DMA completion. RX
- * (ObjOpDeviceRx) returns one read-only VkindRegion Handle carrying an
+ * RX (ObjOpDeviceRx) returns one read-only VkindRegion Handle carrying an
  * ObjRingHeader and fixed slots; the kernel is the only writer mapping.
- * Receiving the region channel is distinct from retrieving one completed USB
- * message.  No USB setup or synchronous USB completion is implied. */
+ * TX (ObjOpDeviceTx) returns one VkindRegion Handle whose unique writable
+ * mapping is the authorized userspace publisher; the kernel consumes complete
+ * published frames and advances header.ack_seq.  Neither direction is a
+ * completed-message receive and no USB setup or synchronous USB completion is
+ * implied. */
 typedef struct ObjEtherRxMeta {
     unsigned int version;
     unsigned int controller;
@@ -224,25 +227,39 @@ typedef struct ObjEtherStatus {
     unsigned long long highwater;
     unsigned int handoff_capacity;
     unsigned int handoff_queued;
+    unsigned long long tx_dropped;
+    unsigned long long tx_errors;
 } ObjEtherStatus;
 
 long obj_device_ether_status(int device, ObjEtherStatus *status);
 
-/* Capability-region ring transport (device receive channels and console
- * session streams).  One writer owns the unique writable mapping; any number
- * of authorized readers map the region read-only.  The writer stores a
+/* Capability-region ring transport (device receive/transmit channels and
+ * console session streams).  One writer owns the unique writable mapping; any
+ * number of authorized readers map the region read-only.  The writer stores a
  * complete immutable record into slot (seq-1)%slots, publishes the slot with
  * the even value 2*seq, then publishes header.write_seq = seq with release
  * ordering and calls REGIONWAKE(base, OBJ_RING_PUBOFF, ...).  Readers load
  * header.write_seq with acquire ordering and treat a slot whose sequence is
  * not the expected even value as overwritten and therefore dropped.
  *
+ * For kernel-published receive/console rings the kernel owns the writer
+ * mapping.  For an Ethernet transmit ring the authorized publisher owns the
+ * unique writable mapping and the kernel is the read-only consumer: it loads
+ * write_seq, copies complete frames into NIC-owned Blocks and publishes
+ * header.ack_seq = consumed sequence with release ordering, then wakes
+ * REGIONWAIT observers of OBJ_RING_ACKOFF.  A publisher must not reuse a slot
+ * before it is acknowledged; the ring is full when
+ * write_seq - ack_seq == slots.  A publisher that overruns the acknowledgement
+ * loses the older slots, which the kernel skips.
+ *
  * Publication word: byte offset OBJ_RING_PUBOFF (8-byte aligned) in the
- * region.  Slot data starts at OBJ_RING_HEADER + index*OBJ_RING_SLOT + 16.
+ * region.  Consumed-sequence word: byte offset OBJ_RING_ACKOFF (8-byte
+ * aligned).  Slot data starts at OBJ_RING_HEADER + index*OBJ_RING_SLOT + 16.
  * The header is zeroed and preinitialized by the kernel. */
 #define OBJ_RING_VERSION 1u
 #define OBJ_RING_MAGIC   0x5250324fu /* "RP2O" little-endian */
 #define OBJ_RING_PUBOFF  16u
+#define OBJ_RING_ACKOFF  32u
 #define OBJ_RING_HEADER  4096u
 #define OBJ_RING_SLOTS   64u
 #define OBJ_RING_SLOT    2048u
@@ -256,7 +273,7 @@ typedef struct ObjRingHeader {
     unsigned int slots;
     unsigned long long write_seq;   /* publication word at OBJ_RING_PUBOFF */
     unsigned long long drops;
-    unsigned long long reserved;
+    unsigned long long ack_seq;     /* consumed sequence at OBJ_RING_ACKOFF */
 } ObjRingHeader;
 
 typedef struct ObjRingSlot {
@@ -292,9 +309,8 @@ typedef struct ObjOpenDeviceReq {
 /* USB control RECV (ObjOpDeviceRecv) installs one Vread|Vmeta|Vdelegate
  * bytes Handle as result, and copies this completion into out.  A failed
  * install leaves the completion pending.  A USB SEND completes
- * synchronously and returns a positive session-local sequence; an Ethernet
- * SEND returns accepted bytes.  ObjCall.aux carries the ObjDeviceSend*
- * discriminator so the two meanings are never silently interchangeable.
+ * synchronously and returns a positive session-local sequence.  Ethernet
+ * frames use the transmit region, never SEND.
  * Exactly one unreceived USB completion is permitted; another SEND is Einuse.
  * USB input is the original 8-byte setup followed by exactly wLength OUT
  * bytes (none for IN).  IN response may be shorter than wLength.  OUT's
@@ -582,22 +598,18 @@ long obj_catalog_device_open(unsigned int family, int selector0,
 		int selector1, unsigned long long rights, void *options,
 		unsigned long long optlen);
 
-/* Device SEND result kinds.  An Ethernet SEND reports accepted/enqueued L2
- * bytes; a USB control SEND reports a session-local completion sequence.
- * They are never silently interchangeable. */
-enum {
-	ObjDeviceSendAcceptedBytes	= 1,
-	ObjDeviceSendSequence		= 2,
-};
-
+/* Device SEND: one complete USB control request.  Ethernet frames use the
+ * transmit region instead, so a SEND return is always a session-local USB
+ * completion sequence. */
 long obj_device_send(int device, void *message, unsigned long long length);
-long obj_device_send_kind(int device, void *message, unsigned long long length,
-		unsigned int *kind);
 /* USB control completion retrieval: one completed immutable bytes Handle. */
 long obj_device_recv(int device, ObjDeviceResult *completion);
 /* Ethernet receive-channel acquisition: one read-only region Handle carrying
  * an ObjRingHeader.  This is not a completed-message receive. */
 long obj_device_rx(int device);
+/* Ethernet transmit-channel acquisition: one VkindRegion Handle whose unique
+ * writable mapping is the frame publisher.  Not a per-frame syscall. */
+long obj_device_tx(int device);
 /* Typed device control over IOCTL(145). */
 long obj_device_ioctl(int device, unsigned int operation, void *data,
 		unsigned long long len, unsigned long long arg0);

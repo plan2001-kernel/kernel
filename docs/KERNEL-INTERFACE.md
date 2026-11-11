@@ -173,10 +173,12 @@ origin, not independently opened grants to the same OID.
 
 Ethernet receive and console sessions use the `ObjRingHeader` capability-ring
 layout in `runtime/abi/obj.h`: one writer, authorized read-only mappings,
-release/acquire publication and `REGIONWAIT`/`REGIONWAKE`. USB control
-completion is synchronous and distinct. `ObjectFIFO`, Pipe and the `SPAWN`
-stdout route are deleted; no generic kernel message queue replaces them. See
-[device ABI](DEVICE-ABI.md).
+release/acquire publication and `REGIONWAIT`/`REGIONWAKE`. Ethernet transmit
+uses the same layout in the opposite direction: the authorized publisher owns
+the unique writable mapping and the kernel consumes complete frames and
+publishes `ack_seq`. USB control completion is synchronous and distinct.
+`ObjectFIFO`, Pipe and the `SPAWN` stdout route are deleted; no generic kernel
+message queue replaces them. See [device ABI](DEVICE-ABI.md).
 
 Current `SYSCTL(144)` covers system/own-process inspection and configuration;
 `IOCTL(145)` covers authorized device control/status. Device payload uses

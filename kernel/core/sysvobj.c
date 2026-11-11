@@ -1049,19 +1049,20 @@ sysregionwait(sysva_list list)
 	return ret;
 }
 
-/* Wake waiters on one region-relative publication word.  The caller must
- * hold the writer authority: either the installed writable mapping (the
- * userspace REGIONWAKE path) or the kernel writer slot.  The queue lock makes
- * each wake and the enrollment check linearizable; no payload is copied. */
+/* Wake waiters on one region-relative publication word.  The userspace
+ * REGIONWAKE path and kernel publication require an active writer; the kernel
+ * consumer acknowledgement is trusted to wake its own cursor even when the
+ * userspace writer has unmapped.  The queue lock makes each wake and the
+ * enrollment check linearizable; no payload is copied. */
 static uvlong
-regionwakego(Vregion *r, uvlong off, uvlong count)
+regionwakeq(Vregion *r, uvlong off, uvlong count, int needwriter)
 {
 	Wwait *w;
 	uvlong n;
 
 	n = 0;
 	lock(&r->waitlk);
-	if(!r->writeractive){
+	if(needwriter && !r->writeractive){
 		unlock(&r->waitlk);
 		error(Eperm);
 	}
@@ -1075,6 +1076,12 @@ regionwakego(Vregion *r, uvlong off, uvlong count)
 	}
 	unlock(&r->waitlk);
 	return n;
+}
+
+static uvlong
+regionwakego(Vregion *r, uvlong off, uvlong count)
+{
+	return regionwakeq(r, off, count, 1);
 }
 
 uintptr
@@ -1197,15 +1204,37 @@ regionkstore64(Vregion *r, uvlong off, uvlong v)
 	kunmap(k);
 }
 
+static uvlong
+regionkload64(Vregion *r, uvlong off)
+{
+	KMap *k;
+	uvlong v;
 
-/* Initialize the kernel-owned ring header.  Pages are already zeroed and the
- * caller must hold the writer slot. */
+	if((off & 7) != 0 || off + 8 > (uvlong)r->npages*BY2PG)
+		error(Ebadarg);
+	k = kmap(r->pages[off/BY2PG]);
+	v = *(uvlong*)((uchar*)k + (off & (BY2PG-1)));
+	coherence();
+	kunmap(k);
+	return v;
+}
+
+
+/* Initialize the kernel-owned ring header.  Pages are already zeroed and no
+ * mapping may exist yet: a receive/console region is initialized before the
+ * kernel takes the writer slot, and a transmit region before its Handle is
+ * installed. */
 int
 vobjregionringinit(Vobj *o)
 {
 	Vregion *r;
 	char hdr[OBJ_RING_HEADER];
 
+	_Static_assert(sizeof(ObjRingHeader) == 40, "ring header ABI");
+	_Static_assert(__builtin_offsetof(ObjRingHeader, write_seq) ==
+		OBJ_RING_PUBOFF, "ring publication offset");
+	_Static_assert(__builtin_offsetof(ObjRingHeader, ack_seq) ==
+		OBJ_RING_ACKOFF, "ring acknowledgement offset");
 	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
 	|| o->size < OBJ_RING_BYTES)
 		return -1;
@@ -1248,6 +1277,135 @@ vobjregionringpublish(Vobj *o, uvlong *seqp, void *data, ulong len)
 	regionkstore64(rr, OBJ_RING_PUBOFF, seq);
 	regionwakego(rr, OBJ_RING_PUBOFF, ~0ULL);
 	return 0;
+}
+
+/* Kernel consumer side of a userspace-published ring.  These helpers never
+ * expose a user pointer: the kernel maps its own reference to the region and
+ * validates every slot before any frame reaches the L2 driver. */
+
+uvlong
+vobjregionringload(Vobj *o, uvlong off)
+{
+	Vregion *r;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| regionbadoffset(o, off))
+		return 0;
+	return regionkload64(r, off);
+}
+
+/* Consume one published slot.  Returns 1 with *lenp on a complete, untorn
+ * record, and 0 for an empty, overwritten, torn or invalid record.  The
+ * caller acknowledges the sequence either way so the producer cannot stall. */
+int
+vobjregionringconsume(Vobj *o, uvlong seq, void *buf, ulong max, ulong *lenp)
+{
+	Vregion *r;
+	uvlong off, want;
+	unsigned int hdr[2];
+	ulong len;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| buf == nil || lenp == nil || seq == 0 || seq > 0x7fffffffffffffffULL)
+		return 0;
+	off = OBJ_RING_HEADER + ((seq-1) % OBJ_RING_SLOTS)*OBJ_RING_SLOT;
+	if(off + OBJ_RING_SLOT > o->size)
+		return 0;
+	want = seq << 1;
+	if(regionkload64(r, off) != want)
+		return 0;
+	regionkio(r, off+8, hdr, sizeof hdr, 0);
+	len = hdr[0];
+	if(len > OBJ_RING_DATA || len > max)
+		return 0;
+	regionkio(r, off+16, buf, len, 0);
+	coherence();
+	if(regionkload64(r, off) != want)
+		return 0;			/* overwritten while copying */
+	*lenp = len;
+	return 1;
+}
+
+/* Publish the consumed sequence and wake a producer blocked on the ring-full
+ * condition.  This is a kernel-side cursor update, not frame data and not a
+ * userspace writer authority grant. */
+int
+vobjregionringack(Vobj *o, uvlong seq)
+{
+	Vregion *r;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| seq > 0x7fffffffffffffffULL)
+		return -1;
+	regionkstore64(r, OBJ_RING_ACKOFF, seq);
+	coherence();
+	regionwakeq(r, OBJ_RING_ACKOFF, ~0ULL, 0);
+	return 0;
+}
+
+/* Blocking publication wait for a kernel consumer.  The userspace path uses
+ * REGIONWAIT(147); this is the same enrollment and lost-wakeup ordering for a
+ * kernel context that has no SG_REGION mapping of its own.  The caller holds
+ * a strong Vobj reference for the whole call. */
+int
+vobjregionwaitkern(Vobj *o, uvlong off, uvlong expected, int timeout)
+{
+	Vregion *r;
+	Wwait w;
+	KMap *k;
+	volatile uvlong *wp;
+	int ret;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| regionbadoffset(o, off))
+		return -1;
+	memset(&w, 0, sizeof w);
+	w.r = r;
+	w.offset = off;
+	wp = regionmapword(r, off, &k);
+
+	lock(&r->waitlk);
+	coherence();
+	if(*wp != expected){
+		unlock(&r->waitlk);
+		kunmap(k);
+		return 0;
+	}
+	if(!r->writeractive){
+		unlock(&r->waitlk);
+		kunmap(k);
+		return 3;
+	}
+	waitadd(r, &w);
+	unlock(&r->waitlk);
+	kunmap(k);
+
+	if(waserror()){
+		lock(&r->waitlk);
+		if(w.onlist)
+			waitdel(r, &w);
+		unlock(&r->waitlk);
+		nexterror();
+	}
+	if(timeout < 0)
+		sleep(&w.rz, regionwoke, &w);
+	else
+		tsleep(&w.rz, regionwoke, &w,
+			timeout > 0x7fffffff ? 0x7fffffff : (ulong)timeout);
+	poperror();
+
+	lock(&r->waitlk);
+	if(w.onlist)
+		waitdel(r, &w);
+	unlock(&r->waitlk);
+
+	if(w.woken == 0)
+		ret = 2;			/* timeout */
+	else if(w.writer)
+		ret = 3;			/* writer mapping released */
+	else
+		ret = 1;			/* woken, possibly spurious */
+	return ret;
 }
 
 Vobj*
@@ -2677,7 +2835,7 @@ vusbreadonly(Ep *ep, uchar *m)
 }
 
 long
-vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
+vobjdevicesend(int handle, void *in, long len)
 {
 	Vhand *h;
 	Vdevice *d;
@@ -2687,19 +2845,11 @@ vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
 	long got;
 	uvlong seq;
 
-    if(kind != nil)
-        *kind = 0;
     h = vlookup(handle, Vsend);
     if(waserror()){vhandput(h);nexterror();}
     d = vdevice(h);
-    if(d->family == ObjDeviceEthernet){
-        got = vethersend(d->ether, in, len);
-        poperror();
-        vhandput(h);
-        if(kind != nil)
-            *kind = ObjDeviceSendAcceptedBytes;
-        return got;
-    }
+    if(d->family == ObjDeviceEthernet)
+        error("ether: frame send uses the transmit region");
     poperror();
     vhandput(h);
 
@@ -2783,8 +2933,6 @@ vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
 	vhandput(h);
 	poperror();
 	free(message);
-	if(kind != nil)
-		*kind = ObjDeviceSendSequence;
 	return (long)seq;
 }
 
@@ -2809,7 +2957,33 @@ vobjdevicerx(int handle)
 		error(Eperm);
 	rights = Vread|Vmeta;
 	rights |= h->rights & Vdelegate;
-	result = vobjinstallobj(vetherregion(d->ether), rights);
+	result = vobjinstallobj(vetherrxregion(d->ether), rights);
+	poperror();
+	vhandput(h);
+	return result;
+}
+
+/* Ethernet transmit-channel acquisition: return the region Handle whose
+ * unique writable mapping is the frame publisher.  Vsend is the device
+ * authority; the region's writer slot enforces one publisher at a time. */
+int
+vobjdevicetx(int handle)
+{
+	Vhand *h;
+	Vdevice *d;
+	int rights, result;
+
+	h = vlookup(handle, Vsend);
+	if(waserror()){
+		vhandput(h);
+		nexterror();
+	}
+	d = vdevice(h);
+	if(d->family != ObjDeviceEthernet)
+		error(Ebadarg);
+	rights = Vread|Vwrite|Vmeta;
+	rights |= h->rights & Vdelegate;
+	result = vobjinstallobj(vethertxregion(d->ether), rights);
 	poperror();
 	vhandput(h);
 	return result;

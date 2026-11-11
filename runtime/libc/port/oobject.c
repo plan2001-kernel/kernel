@@ -443,25 +443,14 @@ obj_catalog_device_open(unsigned int family, int selector0, int selector1,
 }
 
 long
-obj_device_send_kind(int device, void *message, unsigned long long length,
-		unsigned int *kind)
+obj_device_send(int device, void *message, unsigned long long length)
 {
 	ObjCall c;
-	long r;
 
 	callinit(&c, ObjOpDeviceSend);
 	c.in = message;
 	c.inlen = length;
-	r = obj_invoke(device, &c, sizeof c);
-	if(kind != nil)
-		*kind = (unsigned int)c.aux;
-	return r;
-}
-
-long
-obj_device_send(int device, void *message, unsigned long long length)
-{
-	return obj_device_send_kind(device, message, length, nil);
+	return obj_invoke(device, &c, sizeof c);
 }
 
 /* One completed USB control message. */
@@ -476,13 +465,24 @@ obj_device_recv(int device, ObjDeviceResult *completion)
 	return obj_invoke(device, &c, sizeof c);
 }
 
-/* Acquire the Ethernet receive FIFO channel (not a completed message). */
+/* Acquire the Ethernet receive region channel (not a completed message). */
 long
 obj_device_rx(int device)
 {
 	ObjCall c;
 
 	callinit(&c, ObjOpDeviceRx);
+	return obj_invoke(device, &c, sizeof c);
+}
+
+/* Acquire the Ethernet transmit region channel; the unique writable mapping
+ * is the frame publisher. */
+long
+obj_device_tx(int device)
+{
+	ObjCall c;
+
+	callinit(&c, ObjOpDeviceTx);
 	return obj_invoke(device, &c, sizeof c);
 }
 

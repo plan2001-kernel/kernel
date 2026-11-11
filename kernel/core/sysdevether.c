@@ -1,7 +1,10 @@
 /* T13 raw Ethernet device provider.  The only IRQ-side state is a bounded
- * array of owned Blocks.  A capability-mapped region ring is the sole receive
- * transport; the kernel holds the only writer mapping and publishes complete
- * L2 frames with release ordering plus REGIONWAKE notification. */
+ * array of owned Blocks.  Capability-mapped region rings are the sole
+ * transport in both directions: the kernel is the only receive writer and
+ * publishes complete L2 frames, while the authorized userspace transmit
+ * publisher owns the unique transmit writer mapping and the kernel consumes
+ * complete frames as a read-only reader.  Neither direction copies a frame
+ * through a per-frame syscall. */
 #include "u.h"
 #include "../core/lib.h"
 #include "mem.h"
@@ -22,23 +25,27 @@ struct Rxslot {
 };
 
 struct Veth {
-    Ref ref;                 /* owner + worker until its last access */
+    Ref ref;                 /* owner + workers until their last access */
     QLock gate;              /* serialize TX with detach, process only */
     Lock lk;                 /* IRQ-safe handoff/counters */
     Rendez rxready;
+    Rendez txsleep;          /* bounded recheck when no TX writer exists */
     Rendez workerexit;
     Ether *ether;            /* ethercore registry has boot lifetime */
     Vobj *rxregion;          /* strong reference to the receive region */
     uvlong rxseq;            /* published frame sequence */
+    Vobj *txregion;          /* strong reference to the transmit region */
+    uvlong txack;            /* last consumed transmit sequence */
     Rxslot slot[HandoffCapacity];
     int head, tail, queued;
-    int registered, started, closed, done;
-    uvlong arrivals, published, handoffdrops, publishdrops, txaccepted;
+    int registered, started, txstarted, closed, done, txdone;
+    uvlong arrivals, published, handoffdrops, publishdrops;
+    uvlong txaccepted, txdropped, txerrors;
     uvlong highwater;
 };
 
 _Static_assert(sizeof(ObjEtherRxMeta) == 24, "Ethernet metadata ABI");
-_Static_assert(sizeof(ObjEtherStatus) == 88, "Ethernet status ABI");
+_Static_assert(sizeof(ObjEtherStatus) == 104, "Ethernet status ABI");
 
 static void
 vetherput(Veth *v)
@@ -47,6 +54,8 @@ vetherput(Veth *v)
         return;
     if(v->rxregion != nil)
         vobjput(v->rxregion);
+    if(v->txregion != nil)
+        vobjput(v->txregion);
     free(v);
 }
 
@@ -96,6 +105,17 @@ vetherdone(void *arg)
     int done;
     ilock(&v->lk);
     done = v->done;
+    iunlock(&v->lk);
+    return done;
+}
+
+static int
+vethertxdone(void *arg)
+{
+    Veth *v = arg;
+    int done;
+    ilock(&v->lk);
+    done = v->txdone;
     iunlock(&v->lk);
     return done;
 }
@@ -157,6 +177,112 @@ vetherworker(void *arg)
     vetherput(v);
 }
 
+static int
+vethertxclosed(void *arg)
+{
+    Veth *v = arg;
+    int closed;
+
+    ilock(&v->lk);
+    closed = v->closed;
+    iunlock(&v->lk);
+    return closed;
+}
+
+/* Consume complete frames published by the authorized userspace writer.  The
+ * region slot is the only frame transport: there is no per-frame send syscall
+ * and no user pointer validation here.  A bounded internal copy into a
+ * NIC-owned Block is the only copy. */
+static void
+vethertxworker(void *arg)
+{
+    Veth *v = arg;
+    Block *bp;
+    uvlong pub;
+    ulong len;
+    int closed, rc;
+
+    for(;;){
+        ilock(&v->lk);
+        closed = v->closed;
+        iunlock(&v->lk);
+        if(closed)
+            break;
+
+        pub = vobjregionringload(v->txregion, OBJ_RING_PUBOFF);
+        if(pub > v->txack){
+            /* One pass is bounded by the ring capacity.  Older sequences
+             * cannot still be live if the producer overran the ring. */
+            if(pub - v->txack > OBJ_RING_SLOTS){
+                uvlong skip = pub - OBJ_RING_SLOTS - v->txack;
+
+                ilock(&v->lk);
+                v->txdropped += skip;
+                iunlock(&v->lk);
+                v->txack += skip;
+            }
+            while(v->txack < pub){
+                v->txack++;
+                bp = allocb(OBJ_RING_DATA);
+                if(bp == nil){
+                    v->txack--;
+                    ilock(&v->lk);
+                    v->txerrors++;
+                    iunlock(&v->lk);
+                    tsleep(&v->txsleep, vethertxclosed, v, 100);
+                    break;
+                }
+                len = 0;
+                rc = vobjregionringconsume(v->txregion, v->txack,
+                    bp->wp, OBJ_RING_DATA, &len);
+                if(rc == 1 && len >= v->ether->minmtu
+                && len <= v->ether->maxmtu){
+                    bp->wp += len;
+                    rc = ethercore_tx(v->ether, bp);
+                    ilock(&v->lk);
+                    if(rc == EtherErrOk)
+                        v->txaccepted++;
+                    else
+                        v->txerrors++;
+                    iunlock(&v->lk);
+                    if(rc != EtherErrOk)
+                        freeb(bp);
+                }else{
+                    freeb(bp);
+                    ilock(&v->lk);
+                    v->txdropped++;
+                    iunlock(&v->lk);
+                }
+                vobjregionringack(v->txregion, v->txack);
+                ilock(&v->lk);
+                closed = v->closed;
+                iunlock(&v->lk);
+                if(closed)
+                    break;
+            }
+            continue;
+        }
+        /* Enroll without losing a publication that races the load above.
+         * A missing or released writer cannot wake this word, so recheck at a
+         * bounded interval instead of spinning. */
+        if(waserror()){
+            if(vethertxclosed(v))
+                break;
+            tsleep(&v->txsleep, vethertxclosed, v, 100);
+            continue;
+        }
+        rc = vobjregionwaitkern(v->txregion, OBJ_RING_PUBOFF, pub, 100);
+        poperror();
+        if(rc == 3 || rc < 0)
+            tsleep(&v->txsleep, vethertxclosed, v, 100);
+    }
+    ilock(&v->lk);
+    v->txdone = 1;
+    iunlock(&v->lk);
+    wakeup(&v->workerexit);
+    vetherput(v);
+}
+
 int
 vetherlist(ObjDeviceEntry *out, int capacity)
 {
@@ -206,6 +332,10 @@ vetheropen(int controller)
     if(vobjregionwriterhold(v->rxregion) < 0)
         error(Einuse);
     vobjregionringinit(v->rxregion);
+    v->txregion = vobjregionalloc(OBJ_RING_BYTES);
+    if(v->txregion == nil)
+        error(Enomem);
+    vobjregionringinit(v->txregion);
     rc = ethercore_attach(v->ether);
     if(rc != EtherErrOk)
         error("ether: attach failed");
@@ -220,6 +350,14 @@ vetheropen(int controller)
     }
     kproc("device-ether-rx", vetherworker, v);
     v->started = 1;
+    poperror();
+    incref(&v->ref);
+    if(waserror()){
+        vetherput(v); /* kproc did not start */
+        nexterror();
+    }
+    kproc("device-ether-tx", vethertxworker, v);
+    v->txstarted = 1;
     poperror();
     poperror();
     return v;
@@ -242,6 +380,7 @@ vetherdetach(Veth *v)
         v->registered = 0;
     }
     wakeup(&v->rxready);
+    wakeup(&v->txsleep);
     if(v->started){
         while(!vetherdone(v))
             tsleep(&v->workerexit, vetherdone, v, 10);
@@ -254,6 +393,10 @@ vetherdetach(Veth *v)
             v->queued--;
             freeb(bp);
         }
+    }
+    if(v->txstarted){
+        while(!vethertxdone(v))
+            tsleep(&v->workerexit, vethertxdone, v, 10);
     }
     if(v->rxregion != nil)
         vobjregionwriterrelease(v->rxregion);
@@ -271,7 +414,7 @@ vetherclose(Veth *v)
 }
 
 Vobj*
-vetherregion(Veth *v)
+vetherrxregion(Veth *v)
 {
     int closed;
     ilock(&v->lk);
@@ -282,57 +425,16 @@ vetherregion(Veth *v)
     return v->rxregion; /* borrowed; caller holds a live device Vhand */
 }
 
-static char*
-vethererror(int rc)
+Vobj*
+vethertxregion(Veth *v)
 {
-    switch(rc){
-    case EtherErrDown: return "ether: link down";
-    case EtherErrQueue: return "ether: TX queue full";
-    case EtherErrClosed: return "ether: TX queue closed";
-    case EtherErrBadLen: return "ether: invalid frame length";
-    case EtherErrNoMem: return Enomem;
-    case EtherErrNotReady: return "ether: not attached";
-    default: return "ether: transmit failed";
-    }
-}
-
-long
-vethersend(Veth *v, void *data, long len)
-{
-    Block *bp;
-    int rc;
-
-    if(data == nil || len < v->ether->minmtu || len > v->ether->maxmtu
-    || len > OBJ_DEVICE_MAXMESSAGE)
-        error(Ebadarg);
-    validaddr((uintptr)data, len, 0);
-    bp = allocb(len);
-    if(bp == nil)
-        error(Enomem);
-    if(waserror()){
-        if(bp != nil) freeb(bp);
-        nexterror();
-    }
-    memmove(bp->wp, data, len);
-    bp->wp += len;
-    qlock(&v->gate);
-    if(waserror()){
-        qunlock(&v->gate);
-        nexterror();
-    }
-    if(v->closed)
-        error(Ehungup);
-    rc = ethercore_tx(v->ether, bp);
-    if(rc != EtherErrOk)
-        error(vethererror(rc));
-    bp = nil; /* the core consumed it only on success */
+    int closed;
     ilock(&v->lk);
-    v->txaccepted++;
+    closed = v->closed;
     iunlock(&v->lk);
-    poperror();
-    qunlock(&v->gate);
-    poperror();
-    return len;
+    if(closed)
+        error(Ehungup);
+    return v->txregion; /* borrowed; caller holds a live device Vhand */
 }
 
 void
@@ -357,5 +459,7 @@ vetherstatus(Veth *v, ObjEtherStatus *out)
     out->highwater = v->highwater;
     out->handoff_capacity = HandoffCapacity;
     out->handoff_queued = v->queued;
+    out->tx_dropped = v->txdropped;
+    out->tx_errors = v->txerrors;
     iunlock(&v->lk);
 }

@@ -836,6 +836,13 @@ static mp_obj_t p9_devicerx(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicerx_obj,p9_devicerx);
 
+/* Ethernet transmit-channel acquisition; the returned region's unique
+ * writable mapping is the frame publisher. */
+static mp_obj_t p9_devicetx(mp_obj_t h){
+ return check(obj_device_tx(mp_obj_get_int(h)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicetx_obj,p9_devicetx);
+
 /* Device control is IOCTL(145).  Each adapter names its own typed operation
  * and passes the real Python buffer length, so choosing a provider never
  * requires a metadata (Vmeta) lookup. */
@@ -886,7 +893,7 @@ static mp_obj_t p9_devedetach(mp_obj_t h){
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devedetach_obj,p9_devedetach);
 
 static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
- ObjEtherStatus i;mp_obj_t a[15];
+ ObjEtherStatus i;mp_obj_t a[17];
  if(obj_device_ether_status(mp_obj_get_int(handle),&i)<0)raise_err();
  a[0]=mp_obj_new_int(i.version);a[1]=mp_obj_new_int(i.controller);
  a[2]=mp_obj_new_int(i.minframe);a[3]=mp_obj_new_int(i.maxframe);
@@ -895,8 +902,9 @@ static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
  a[8]=mp_obj_new_int_from_ull(i.published);a[9]=mp_obj_new_int_from_ull(i.handoff_drops);
  a[10]=mp_obj_new_int_from_ull(i.publish_drops);a[11]=mp_obj_new_int_from_ull(i.tx_accepted);
  a[12]=mp_obj_new_int_from_ull(i.highwater);a[13]=mp_obj_new_int(i.handoff_capacity);
- a[14]=mp_obj_new_int(i.handoff_queued);
- return mp_obj_new_tuple(15,a);
+ a[14]=mp_obj_new_int(i.handoff_queued);a[15]=mp_obj_new_int_from_ull(i.tx_dropped);
+ a[16]=mp_obj_new_int_from_ull(i.tx_errors);
+ return mp_obj_new_tuple(17,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_deviceetherinfo_obj,p9_deviceetherinfo);
 
@@ -980,6 +988,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_send), MP_ROM_PTR(&p9_devicesend_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_recv), MP_ROM_PTR(&p9_devicerecv_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_rx), MP_ROM_PTR(&p9_devicerx_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_tx), MP_ROM_PTR(&p9_devicetx_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ioctl), MP_ROM_PTR(&p9_deviceioctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_global_ctl), MP_ROM_PTR(&p9_devusbglobal_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
