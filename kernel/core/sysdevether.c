@@ -39,6 +39,7 @@ struct Veth {
     Rxslot slot[HandoffCapacity];
     int head, tail, queued;
     int registered, started, txstarted, closed, done, txdone;
+    int rxwriter;            /* this Veth holds the RX region writer slot */
     uvlong arrivals, published, handoffdrops, publishdrops;
     uvlong txaccepted, txdropped, txerrors;
     uvlong highwater;
@@ -331,6 +332,7 @@ vetheropen(int controller)
         error(Enomem);
     if(vobjregionwriterhold(v->rxregion) < 0)
         error(Einuse);
+    v->rxwriter = 1;
     vobjregionringinit(v->rxregion);
     v->txregion = vobjregionalloc(OBJ_RING_BYTES);
     if(v->txregion == nil)
@@ -398,8 +400,10 @@ vetherdetach(Veth *v)
         while(!vethertxdone(v))
             tsleep(&v->workerexit, vethertxdone, v, 10);
     }
-    if(v->rxregion != nil)
+    if(v->rxregion != nil && v->rxwriter){
+        v->rxwriter = 0;
         vobjregionwriterrelease(v->rxregion);
+    }
     poperror();
     qunlock(&v->gate);
 }

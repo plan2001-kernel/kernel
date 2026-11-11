@@ -298,7 +298,14 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			p->seg[i] = dupseg(up->seg, i, n);
 	forkpages = 0;
 	for(i = 0; i < NSEG; i++)
-		if(p->seg[i] != nil) forkpages += p->seg[i]->size;
+		/*
+		 * SG_REGION backing is charged once to the region creator and a
+		 * mapping does not add a per-process commitment; do not charge
+		 * an RFMEM child for the shared mapping either.
+		 */
+		if(p->seg[i] != nil &&
+		   (p->seg[i]->type & SG_TYPE) != SG_REGION)
+			forkpages += p->seg[i]->size;
 	if(procmemreplace(p, forkpages) < 0) error(Enovmem);
 	qunlock(&p->seglock);
 	poperror();

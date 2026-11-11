@@ -381,6 +381,24 @@ if rv not in (0, 1):
 p.exits('')
 '''
 
+# Region backing is charged at creation, so a bounded child must reject a
+# region that does not fit its remaining budget instead of allocating it.
+# At least one 16 MiB region fits beside the runtime; a later one must fail.
+CREATE_OVER_BUDGET = PRELUDE + r'''
+made = 0
+try:
+    while made < 4:
+        p.region_create(16*1024*1024)
+        made += 1
+except OSError as e:
+    if 'memory' not in str(e).lower():
+        fail('budget-error:' + str(e))
+    if made == 0:
+        fail('budget-rejected-first-region')
+    p.exits('')
+p.exits('region-created-over-budget')
+'''
+
 
 class Counter:
     def __init__(self):
@@ -1050,6 +1068,14 @@ p.exits('handled-note-exit')
     p.obj_close(reg)
     ok(True, 'WAIT blocks for a first writer instead of returning '
        'writer-release status')
+
+    # --- creation charges the creator's memory budget -------------------
+    child = space.spawn(CID, handle=sh, cpu=1,
+                        membudget=48*1024*1024,
+                        argv=('micropython', '-c', CREATE_OVER_BUDGET))
+    rec_ok(child, p.OBJ_PROC_CAUSE_EXIT, 'over-budget-region')
+    p.obj_close(child)
+    ok(True, 'region backing is charged to the creating process budget')
 
     p.obj_close(sh)
     print('T41-FINISH', n[0], 'PASS')
