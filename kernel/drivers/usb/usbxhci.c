@@ -710,7 +710,7 @@ recover(void *arg)
 	qunlock(&ctlr->cmdlock);
 	qunlock(&ctlr->slotlock);
 
-	pexit("", 1);
+	pexit("");
 }
 
 static void

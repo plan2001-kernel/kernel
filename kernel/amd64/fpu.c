@@ -188,7 +188,7 @@ mathover(Ureg *ureg, void*)
 	if(!userureg(ureg))
 		panic("math overrun");
 
-	pexit("math overrun", 0);
+	pexit("math overrun");
 }
 
 void

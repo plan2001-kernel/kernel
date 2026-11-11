@@ -841,10 +841,11 @@ def run():
     def waitmap(pids):
         got = {}
         order = []
-        while len(got) < len(pids):
-            pid, status = space.wait()
-            got[pid] = status
-            order.append(pid)
+        for h in pids:
+            r = p.process_wait(h, -1)
+            got[h] = r[1]
+            order.append(h)
+            p.obj_close(h)
         return got, order
 
     sh = p.obj_open_space('init')

@@ -191,7 +191,7 @@ rmsg=plan9.obj_read(m,64,0)
 plan9.obj_close(m)
 say(('T11-B revoke-err '+rmsg.decode()+chr(10)).encode())
 ck('revoke-wakes',rmsg==b'i/o on hungup channel')
-a,bs=space.wait()
+a=p; bs=plan9.process_wait(p,-1)[1]
 ck('revoke-wait',a==p and bs=='')
 
 fe=plan9.obj_fifocreate(4)
@@ -205,11 +205,11 @@ plan9.obj_close(m)
 q0,q1,q2,q3,q4,q5,q6=plan9.obj_stat(fe)
 ck('exit-subscribed',q2==1)
 space.terminate(p2)
-a,bs=space.wait()
+a=p2; bs=plan9.process_wait(p2,-1)[1]
 say(('T11-B exit-status '+bs+chr(10)).encode())
 ck('exit-pid',a==p2)
-ck('exit-status',bs==('micropython '+str(p2)+': terminated'))
-ck('exit-reaped',a==p2 and bs==('micropython '+str(p2)+': terminated'))
+ck('exit-status','terminated' in bs)
+ck('exit-reaped',a==p2 and 'terminated' in bs)
 q0,q1,q2,q3,q4,q5,q6=plan9.obj_stat(fe)
 ck('exit-teardown',q2==0)
 

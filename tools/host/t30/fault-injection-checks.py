@@ -52,17 +52,32 @@ def run():
             return
         raise AssertionError('expected rejection: ' + name)
 
+    def reap(h):
+        r = p.process_wait(h, -1)
+        p.obj_close(h)
+        return h, r[1]
+
     def nochild(name, call=None):
-        try:
-            (call if call is not None else space.wait)()
-        except OSError as e:
-            msg = str(e.args[0]) if e.args else ''
-            if msg != 'no living children':
-                raise AssertionError('%s: unexpected OSError %r'
-                                     % (name, msg))
-            ok(True, name)
-            return
-        raise AssertionError(name)
+        if call is not None:
+            try:
+                call()
+            except OSError as e:
+                msg = str(e.args[0]) if e.args else ''
+                if msg != 'no child':
+                    raise AssertionError('%s: unexpected OSError %r'
+                                         % (name, msg))
+                ok(True, name)
+                return
+            raise AssertionError(name)
+        procs = []
+        for h in p.obj_list():
+            try:
+                i = p.obj_info(h)
+            except OSError:
+                continue
+            if i[8] == p.VKIND_PROCESS:
+                procs.append(h)
+        ok(not procs, name)
 
     def expect_error(call, expected, name):
         try:
@@ -137,7 +152,7 @@ def run():
     pid, _ch = p.rforkex(p.RFPROC, ())
     if pid == 0:
         p.exits('')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'ordinary RFORKEX after early failures reaps exactly once '
        'status=%r' % (status,))
@@ -146,7 +161,7 @@ def run():
     pid, _ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
     if pid == 0:
         p.exits('')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'planned RFORKEX after early failures reaps exactly once '
        'status=%r' % (status,))
@@ -190,7 +205,7 @@ def run():
             except OSError:
                 p.exits('switch-os-' + name + ':' + p.errstr())
             p.exits('')
-        waited, status = p.wait()
+        waited, status = reap(pid)
         ok(waited == pid and status == '',
            'injected %s failure rolls the caller back to its original Pgrp '
            'status=%r' % (name, status))
@@ -224,7 +239,7 @@ def run():
     p.obj_bind(0, 'fault_after', 0, p.OBJ_BIND_REMOVE)
     # A successful SPAWN after the failure still produces one wait record.
     pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', 'pass'))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'ordinary SPAWN after a prepublication failure reaps exactly once '
        'status=%r' % (status,))
@@ -272,7 +287,7 @@ def run():
     pid, _ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
     if pid == 0:
         p.exits('')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'a valid RFORKEX after the injected failures still publishes one child '
        'status=%r' % (status,))
@@ -314,7 +329,7 @@ def run():
     pid, _ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
     if pid == 0:
         p.exits('')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'a valid RFORKEX after post-procfork failures publishes one child '
        'status=%r' % (status,))

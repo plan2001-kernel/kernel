@@ -234,7 +234,7 @@ txproc(void *v)
 		vqnotify(ctlr, Vtxq);
 	}
 
-	pexit("ether out queue closed", 1);
+	pexit("ether out queue closed");
 }
 
 static void

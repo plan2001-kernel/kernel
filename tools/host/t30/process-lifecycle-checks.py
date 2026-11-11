@@ -110,6 +110,11 @@ def run():
         n[0] += 1
         print('T30-PASS', n[0], name)
 
+    def reap(h):
+        r = p.process_wait(h, -1)
+        p.obj_close(h)
+        return h, r[1]
+
     def mark(name):
         print('T30-LIFE', name)
 
@@ -241,7 +246,7 @@ def run():
         except OSError:
             p.exits('t30-detach:' + p.errstr())
         p.exits('' if n == 0 else 't30-detach-result')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFPROC shares the exact Pgrp (inherited NamespaceControl operates) '
        'status=%r' % (status,))
@@ -261,7 +266,7 @@ def run():
             except OSError:
                 good = True
         p.exits('' if good else 't30-copied-control')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFNAMEG copies the Pgrp (parent NamespaceControl rejected) '
        'status=%r' % (status,))
@@ -300,7 +305,7 @@ def run():
     bind_role(later_oid, 'laterrole')
     p.pipewrite(w, b'G')
     p.pipeclose(w)
-    waited, status = p.wait()
+    waited, status = reap(pid)
     p.pipeclose(a)
     ok(waited == pid and status == '',
        'RFPROC child observes a later parent role mutation status=%r' % (status,))
@@ -328,7 +333,7 @@ def run():
         p.exits('' if good else 't30-iso')
     unbind('iso')
     bind_role(later_oid, 'iso_parent_only')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFNAMEG child starts with equivalent authorized role bindings')
     ok(openable('iso_parent_only') and not openable('iso_child'),
@@ -349,7 +354,7 @@ def run():
                 not openable('empty_seed') and
                 not openable('life'))
         p.exits('' if good else 't30-empty')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFCNAMEG child starts with an empty role view')
     ok(visible(later_oid),
@@ -367,8 +372,6 @@ def run():
         try:
             denied(lambda: p.rfork(p.RFNAMEG | p.RFCNAMEG),
                    'RFNAMEG together with RFCNAMEG')
-            denied(lambda: p.rfork(p.RFNOWAIT),
-                   'RFNOWAIT without RFPROC')
             assert visible(base_oid) and openable('rollback')
             control0 = p.obj_open_namespace_current()
             probe = space.view(('rollback',))
@@ -400,7 +403,7 @@ def run():
         except AssertionError as e:
             p.exits('nonrfork-assert:' + str(e))
         p.exits('')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFNAMEG/RFCNAMEG without RFPROC switch only the caller Pgrp and '
        'release it on exit status=%r' % (status,))
@@ -409,7 +412,7 @@ def run():
 
     # --- Ordinary SPAWN has no ambient roles or inherited Handles ----------
     pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', PLAIN))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'ordinary SPAWN starts with no roles and no object Handles status=%r'
        % (status,))
@@ -427,7 +430,7 @@ def run():
     out = read_all(out_r)
     ok(b'T30-COPY-OK' in out,
        'SPAWN COPY roles are independent of later parent unbinding')
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'SPAWN COPY child exits cleanly and reaps')
     p.pipeclose(ready_r)
@@ -463,14 +466,15 @@ def run():
     ok(len(space.visible()) == 0, 'cleared role view for the SHARE scenario')
     bind_role(base_oid, 'share_base')
     bind_role(later_oid, 'share_two')
+    hbase = len(p.obj_list())
     denied(lambda: space.spawn(OID, handle=sh,
                                argv=('micropython', '-c', 'pass'),
                                view=2, roles=('share_base',)),
            'SHARE without every effective role')
     ok(openable('share_base') and openable('share_two'),
        'rejected SHARE leaves the parent roles intact')
-    denied(lambda: space.wait(),
-           'rejected SHARE leaves no live child')
+    ok(len(p.obj_list()) == hbase,
+       'rejected SHARE leaves no process Handle behind')
     unbind('share_two')
 
     pid, ready_r, go_w, out_r = handshake_spawn(SHARE, ('share_base',), 2)
@@ -483,7 +487,7 @@ def run():
     out = read_all(out_r)
     ok(b'T30-SHARE-OK' in out,
        'SPAWN SHARE observes later parent role bind and unbind')
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'SPAWN SHARE child exits cleanly and reaps')
     p.pipeclose(ready_r)
@@ -492,6 +496,7 @@ def run():
     # The child's fresh Pgrp is already replaced when the ambiguous stdout
     # mapping fails.  The abort path must release exactly the acquired share.
     a, w = p.pipenew()
+    hbase = len(p.obj_list())
     denied(lambda: space.spawn(OID, handle=sh,
                                argv=('micropython', '-c', 'pass'),
                                view=2, roles=('share_later',),
@@ -499,8 +504,8 @@ def run():
            'late SHARE failure after the Pgrp transfer')
     ok(openable('share_later'),
        'late SHARE failure restores the parent Pgrp reference')
-    denied(lambda: space.wait(),
-           'late SHARE failure leaves no live child')
+    ok(len(p.obj_list()) == hbase,
+       'late SHARE failure leaves no process Handle behind')
     p.pipeclose(a)
     p.pipeclose(w)
     mark('spawn-share')
@@ -530,7 +535,7 @@ def run():
             p.exits('A-bind:' + p.errstr())
         try:
             pid_b, chb = p.rforkex(
-                p.RFPROC | p.RFNOWAIT,
+                p.RFPROC,
                 ((cgo, p.VREAD | p.VMETA | p.VDELEGATE, 1),
                  (cres, p.VWRITE | p.VMETA | p.VDELEGATE, 2)))
         except OSError:
@@ -557,7 +562,7 @@ def run():
         p.exits('')       # the intermediate parent exits while B is live
     p.pipeclose(go_r)
     p.pipeclose(res_w)
-    waited, status = p.wait()
+    waited, status = reap(pid_a)
     ok(waited == pid_a and status == '',
        'nested parent exits cleanly while its child keeps the Pgrp status=%r'
        % (status,))
@@ -580,7 +585,7 @@ def run():
         if pid == 0:
             good = visible(base_oid) and openable('cycle')
             p.exits('' if good else 't30-cycle-copy')
-        waited, status = p.wait()
+        waited, status = reap(pid)
         if not (waited == pid and status == ''):
             raise AssertionError('copy cycle %d waited=%r status=%r' %
                                  (i, waited, status))
@@ -588,7 +593,7 @@ def run():
         pid = p.rfork(p.RFPROC)
         if pid == 0:
             p.exits('' if visible(base_oid) else 't30-cycle-share')
-        waited, status = p.wait()
+        waited, status = reap(pid)
         if not (waited == pid and status == ''):
             raise AssertionError('share cycle %d waited=%r status=%r' %
                                  (i, waited, status))
@@ -605,7 +610,7 @@ def run():
     if pid == 0:
         h = find_slot(1, p.VKIND_NAMESPACE_CONTROL)
         p.exits('' if h else 't30-control-noslot')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'child holding an inherited NamespaceControl exits cleanly status=%r'
        % (status,))
@@ -684,6 +689,7 @@ def run():
         " out.append(b'EXC='+str(e).encode())\n"
         "flush()\n"
         "p.exits('')\n")
+    hbase = len(p.obj_list())
     pid, ch = p.rforkex(p.RFPROC, ((sh, 8192 | p.VMETA, 1),))
     if pid == 0:
         handles = p.obj_list()
@@ -697,21 +703,23 @@ def run():
         except OSError:
             p.exits('exec-exec:' + p.errstr())
         p.exits('exec-child-returned')
-    waited, status = p.wait()
+    realpid = p.process_info(pid)[0]
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'OEXECUTE replaces the image in place with the same PID/Pgrp '
        'status=%r' % (status,))
     m, env = p.obj_receive(report_sub, 1000, 64)
     rec = p.obj_read(m, 64)
     p.obj_close(m)
-    ok((b'PID=' + str(pid).encode()) in rec and b'STALE=C' in rec and
+    ok((b'PID=' + str(realpid).encode()) in rec and b'STALE=C' in rec and
        b'KEEP=' + BASE in rec and b'MARKER=ok' in rec,
        'post-exec PID is unchanged, old Handle numbers are stale and the '
        'authorized role still reads: %r' % (rec,))
     ok(openable('exec_marker'),
        'a role bound by the post-exec image lands in the same shared Pgrp')
     unbind('exec_marker')
-    denied(lambda: p.wait(), 'successful OEXECUTE leaves no extra wait record')
+    ok(len(p.obj_list()) == hbase,
+       'successful OEXECUTE leaves no extra process Handle or wait record')
     p.obj_close(report_sub)
     p.obj_close(report_fifo)
     mark('exec-shared')
@@ -792,7 +800,7 @@ def run():
         except OSError:
             p.exits('seal-exec-child:' + p.errstr())
         p.exits('seal-exec-child-returned')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'OEXECUTE of a sealed Pgrp exits cleanly status=%r' % (status,))
     m, env = p.obj_receive(report2_sub, 1000, 64)
@@ -814,6 +822,7 @@ def run():
     ok(len(space.visible()) == 0, 'cleared role view for the failed exec')
     bind_role(base_oid, 'exec_fail_keep')
     bad_oid = make_ge(b'not an executable image')
+    hbase = len(p.obj_list())
     pid, ch = p.rforkex(p.RFPROC | p.RFNAMEG,
                         ((sh, 8192 | p.VMETA, 1),))
     if pid == 0:
@@ -847,13 +856,14 @@ def run():
         except OSError:
             p.exits('exec-fail-os:' + p.errstr())
         p.exits('exec-fail-fell')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'invalid OEXECUTE before commit leaves the caller and its roles usable '
        'status=%r' % (status,))
     ok(openable('exec_fail_keep') and not openable('exec_fail_new'),
        'the failed exec Pgrp copy stays isolated from the parent')
-    denied(lambda: p.wait(), 'failed OEXECUTE leaves no child or wait record')
+    ok(len(p.obj_list()) == hbase,
+       'failed OEXECUTE leaves no extra process Handle or wait record')
     unbind('exec_fail_keep')
     mark('exec-failed')
 
@@ -920,7 +930,7 @@ def run():
             pid_b = p.rfork(p.RFPROC)
             if pid_b == 0:
                 p.exits('' if p.rfork(p.RFNOMNT) == 0 else 'seal-shared-b')
-            waited, status = p.wait()
+            waited, status = reap(pid_b)
             if not (waited == pid_b and status == ''):
                 p.exits('seal-shared-wait:' + status)
 
@@ -950,7 +960,7 @@ def run():
             # The pre-seal copy can still extend: the seal is per group.
             p.pipewrite(gw, b'G')
             p.pipeclose(gw)
-            waited, status = p.wait()
+            waited, status = reap(pid_e)
             if not (waited == pid_e and status == ''):
                 p.exits('seal-precopy-wait:' + status)
 
@@ -978,7 +988,7 @@ def run():
                 except OSError:
                     p.exits('seal-copy-denied')
                 p.exits('')
-            waited, status = p.wait()
+            waited, status = reap(pid_c)
             if not (waited == pid_c and status == ''):
                 p.exits('seal-copy-wait:' + status)
             if not openable('seal_seed'):
@@ -1002,7 +1012,7 @@ def run():
                 except AssertionError:
                     p.exits('seal-empty-bind')
                 p.exits('')
-            waited, status = p.wait()
+            waited, status = reap(pid_d)
             if not (waited == pid_d and status == ''):
                 p.exits('seal-empty-wait:' + status)
 
@@ -1026,7 +1036,7 @@ def run():
         except AssertionError as e:
             p.exits('seal-assert:' + str(e))
         p.exits('')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'namespace seal is group-scoped, monotonic and copy-preserving '
        'status=%r' % (status,))
@@ -1083,13 +1093,13 @@ def run():
     # SPAWN default and SHARE retain their distinct group policies.
     pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', SHARE_SEAL),
                       view=2, roles=('seal_share',))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'SPAWN SHARE joins and observes the sealed group status=%r' % (status,))
     fresh_gh = geh(later_oid)
     pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', FRESH_SEAL),
                       vhandles=((fresh_gh, p.VREAD | p.VMETA | p.VDELEGATE),))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'default SPAWN keeps a fresh unsealed group with only delegated '
        'authority status=%r' % (status,))

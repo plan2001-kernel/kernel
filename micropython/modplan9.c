@@ -52,21 +52,58 @@ static mp_obj_t p9_alarm(mp_obj_t ms) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_alarm_obj, p9_alarm);
 
-// wait() -> (pid, status): status '' if the child succeeded
-static mp_obj_t p9_wait(void) {
-    Waitmsg *w;
-    mp_obj_t t[2];
 
-    p9_space_rest();
-    if ((w = wait()) == nil) {
-        raise_err();
-    }
-    t[0] = mp_obj_new_int(w->pid);
-    t[1] = mp_obj_new_str(w->msg, strlen(w->msg));
-    free(w);
-    return mp_obj_new_tuple(2, t);
+static mp_obj_t
+p9_proctuple(ObjProcessInfo *p, long result)
+{
+    mp_obj_t t[10];
+
+    t[0] = mp_obj_new_int_from_ll(p->pid);
+    t[1] = mp_obj_new_str(p->msg, p->msglen);
+    t[2] = mp_obj_new_int(p->cause);
+    t[3] = mp_obj_new_int(p->state);
+    t[4] = mp_obj_new_int_from_ull(p->generation);
+    t[5] = mp_obj_new_int_from_ull(p->time[0]);
+    t[6] = mp_obj_new_int_from_ull(p->time[1]);
+    t[7] = mp_obj_new_int_from_ull(p->time[2]);
+    t[8] = mp_obj_new_int(result);
+    t[9] = mp_obj_new_int_from_ull(p->waiters);
+    return mp_obj_new_tuple(10, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_wait_obj, p9_wait);
+
+// process_wait(handle, timeout=-1) -> typed completion tuple.  Repeatable.
+static mp_obj_t p9_processwait(size_t n, const mp_obj_t *a) {
+    ObjProcessInfo p;
+    long long timeout = n > 1 ? (long long)mp_obj_get_ll(a[1]) : -1;
+
+    if(n < 1 || n > 2)
+        mp_raise_TypeError(MP_ERROR_TEXT("process_wait: 1 or 2 arguments"));
+    memset(&p, 0, sizeof p);
+    long r = obj_process_wait(mp_obj_get_int(a[0]), &p, timeout);
+    if(r < 0)
+        raise_err();
+    return p9_proctuple(&p, r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_processwait_obj, 1, 2, p9_processwait);
+
+// process_info(handle) -> current typed process record without blocking.
+static mp_obj_t p9_processinfo(mp_obj_t handle) {
+    ObjProcessInfo p;
+
+    memset(&p, 0, sizeof p);
+    if(obj_process_info(mp_obj_get_int(handle), &p) < 0)
+        raise_err();
+    return p9_proctuple(&p, 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_processinfo_obj, p9_processinfo);
+
+// process_terminate(handle): Vcontrol-authorized lifecycle action.
+static mp_obj_t p9_processterminate(mp_obj_t handle) {
+    if(obj_process_terminate(mp_obj_get_int(handle)) < 0)
+        raise_err();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_processterminate_obj, p9_processterminate);
 
 // rfork(flags) -> pid: name space, environment, note group and the
 // like; with RFPROC the child runs on in Python (a copy of everything)
@@ -1020,7 +1057,9 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipeclose), MP_ROM_PTR(&p9_pipeclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&p9_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_process_wait), MP_ROM_PTR(&p9_processwait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_process_info), MP_ROM_PTR(&p9_processinfo_obj) },
+    { MP_ROM_QSTR(MP_QSTR_process_terminate), MP_ROM_PTR(&p9_processterminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
     { MP_ROM_QSTR(MP_QSTR_rforkex), MP_ROM_PTR(&p9_rforkex_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },
@@ -1133,6 +1172,17 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_REGION), MP_ROM_INT(VkindRegion) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_PROCESS), MP_ROM_INT(VkindProcess) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_INFO), MP_ROM_INT(ObjOpProcessInfo) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_WAIT), MP_ROM_INT(ObjOpProcessWait) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_TERMINATE), MP_ROM_INT(ObjOpProcessTerminate) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CREATED), MP_ROM_INT(ObjProcCreated) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_RUNNING), MP_ROM_INT(ObjProcRunning) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_COMPLETED), MP_ROM_INT(ObjProcCompleted) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_NONE), MP_ROM_INT(ObjProcCauseNone) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_EXIT), MP_ROM_INT(ObjProcCauseExit) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_TERMINATED), MP_ROM_INT(ObjProcCauseTerminated) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_FAULT), MP_ROM_INT(ObjProcCauseFault) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_REGION), MP_ROM_INT(ObjKindRegion) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_MAP), MP_ROM_INT(ObjOpRegionMap) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_UNMAP), MP_ROM_INT(ObjOpRegionUnmap) },
@@ -1172,6 +1222,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VRECV), MP_ROM_INT(Vrecv) },
     { MP_ROM_QSTR(MP_QSTR_VMETA), MP_ROM_INT(Vmeta) },
     { MP_ROM_QSTR(MP_QSTR_VSUBSCRIBE), MP_ROM_INT(Vsubscribe) },
+    { MP_ROM_QSTR(MP_QSTR_VOBSERVE), MP_ROM_INT(Vobserve) },
     { MP_ROM_QSTR(MP_QSTR_VCONTROL), MP_ROM_INT(Vcontrol) },
     { MP_ROM_QSTR(MP_QSTR_VDELEGATE), MP_ROM_INT(Vdelegate) },
     { MP_ROM_QSTR(MP_QSTR_VWRITE), MP_ROM_INT(Vwrite) },
@@ -1179,6 +1230,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VCONNECT), MP_ROM_INT(Vconnect) },
     { MP_ROM_QSTR(MP_QSTR_VCREATE), MP_ROM_INT(Vcreate) },
     { MP_ROM_QSTR(MP_QSTR_VCOMMIT), MP_ROM_INT(Vcommit) },
+    { MP_ROM_QSTR(MP_QSTR_VEXECUTE), MP_ROM_INT(Vexecute) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_BYTES), MP_ROM_INT(VkindBytes) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_FIFO), MP_ROM_INT(VkindFifo) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_GE), MP_ROM_INT(VkindGe) },
@@ -1196,7 +1248,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_RFFDG), MP_ROM_INT(RFFDG) },
     { MP_ROM_QSTR(MP_QSTR_RFNOTEG), MP_ROM_INT(RFNOTEG) },
     { MP_ROM_QSTR(MP_QSTR_RFPROC), MP_ROM_INT(RFPROC) },
-    { MP_ROM_QSTR(MP_QSTR_RFNOWAIT), MP_ROM_INT(RFNOWAIT) },
     { MP_ROM_QSTR(MP_QSTR_RFCNAMEG), MP_ROM_INT(RFCNAMEG) },
     { MP_ROM_QSTR(MP_QSTR_RFCENVG), MP_ROM_INT(RFCENVG) },
     { MP_ROM_QSTR(MP_QSTR_RFCFDG), MP_ROM_INT(RFCFDG) },

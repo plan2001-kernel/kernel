@@ -30,6 +30,10 @@ def run():
         n[0] += 1
         print('T21-PASS', n[0], name)
 
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
+
     def denied(call, name):
         try:
             call()
@@ -79,7 +83,7 @@ def run():
             else:
                 good = False
         p.exits('' if good else 't21-one')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '' and len(ch) == 1,
        'RFORKEX inherits one Handle and child exits cleanly '
        '(status=%r)' % (status,))
@@ -104,7 +108,7 @@ def run():
                 p.obj_info(f1)[10] == (p.VREAD | p.VMETA) and
                 p.obj_info(f2)[10] == (p.VREAD | p.VMETA | p.VSEND))
         p.exits('' if good else 't21-multi')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFORKEX child sees multiple Handles with attenuated rights')
     ok(len(ch) == 2 and (ch[0] & 0xff) == 1 and (ch[1] & 0xff) == 2 and
@@ -139,7 +143,7 @@ def run():
             wide = p.obj_open_handle(h2, p.VREAD | p.VMETA | p.VSEND)
             p.obj_close(wide)
         p.exits('' if good else 't21-dup')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFORKEX duplicate source yields independent child Handles')
     ok(len(ch) == 2 and ch[0] != ch[1] and
@@ -152,7 +156,7 @@ def run():
     pid = p.rfork(p.RFPROC)
     if pid == 0:
         p.exits('' if len(p.obj_list()) == 0 else 't21-rfork')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'ordinary RFORK inherits no object Handles')
 
@@ -255,14 +259,14 @@ def run():
     first = p.piperead(rsp_r, 4)
     second = p.piperead(rsp_r, 4)
     if first != b'pong' or second != b'pung':
-        waited, status = p.wait()
+        waited, status = reap(pid)
         raise AssertionError('Pipe responses %r/%r waited=%r status=%r' %
                              (first, second, waited, status))
     ok(first == b'pong',
        'RFORKEX Pipe carries parent-to-child bytes')
     ok(second == b'pung',
        'RFORKEX Pipe carries child-to-parent bytes')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '', 'RFORKEX Pipe child exits cleanly')
     p.pipeclose(req_w)
     p.pipeclose(rsp_r)
@@ -293,7 +297,7 @@ def run():
             else:
                 good = False
         p.exits('' if good else 't21-piperights')
-    waited, status = p.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'RFORKEX refuses read/write outside the inherited Pipe rights')
     p.pipeclose(a)
@@ -320,7 +324,7 @@ def run():
     pid = space.spawn(OID, handle=sh, argv=('micropython', '-c', child),
                       vhandles=((ba, p.VREAD | p.VMETA),
                                 (bb, p.VREAD | p.VMETA | p.VSEND)))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'OSPAWN inherits multiple Handles with attenuated rights')
 
@@ -377,7 +381,7 @@ def run():
         out += part
     ok(b'T21-STDOUT-OK' in out,
        'OSPAWN remaps stdoutpipe to the assigned child Handle')
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '', 'OSPAWN stdout child exits cleanly')
     p.pipeclose(a)
 
@@ -391,7 +395,7 @@ def run():
     ok(p.obj_info(w)[4] == base + 1,
        'OSPAWN child holds the inherited Pipe reference')
     space.terminate(pid)
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid, 'terminated child is reaped')
     ok(p.obj_info(w)[4] == base,
        'terminated child releases its inherited Pipe reference')

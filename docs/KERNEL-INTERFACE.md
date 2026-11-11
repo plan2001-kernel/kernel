@@ -70,8 +70,9 @@ than inherited parent/child policy.
 ## CURRENT IMPLEMENTATION
 
 The AMD64 ABI currently includes object calls 136–140, `SPAWN(146)`,
-`RFORKEX(143)`, `PROCWAIT(142)`, `OTERMINATE`, `OEXECUTE`, `SYSCTL(144)`,
-`IOCTL(145)`, `REGIONWAIT(147)` and `REGIONWAKE(148)`. `BRK_`, `SEGBRK`,
+`RFORKEX(143)`, `OEXECUTE`, `SYSCTL(144)`, `IOCTL(145)`, `REGIONWAIT(147)`
+and `REGIONWAKE(148)`. `PROCWAIT(142)` and `OTERMINATE(93)` are reserved and
+have no handler. `BRK_`, `SEGBRK`,
 `SEGATTACH/DETACH/FREE/FLUSH` provide existing VM operations. The retired
 public `RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` calls and
 their user wrappers are gone; no old number is kept as a compatibility
@@ -125,10 +126,10 @@ event, which a rapid replacement writer cannot hide. Normal returns also
 include woken (1) and timeout/non-blocking (2); interruption or an invalid
 mapping raises the ordinary error. Waiters always recheck; a wake carries no
 data and proves no particular value. The kernel does not copy payload bytes.
-An NDebug-terminated or faulting process that the kernel retains in its
-broken/debug state still owns its mapping, so it remains the active writer
-until that mapping is released; that retention is current Phase 5 lifecycle
-behavior, not a completed writer death.
+A faulting or NDebug-terminated user process no longer parks in a Broken
+state that retains its mappings. Final termination releases the writable
+mapping slot and notifies REGIONWAIT readers with status 3, while read-only
+snapshots remain readable through their own mapping references.
 
 The Phase 4 three-process MicroPython path grants two regions with explicit
 `SPAWN` vhandles: A writes only the task region, B writes only the answer
@@ -142,12 +143,25 @@ segments. `SG_RONLY` remains a per-mapping property of text, physical and
 region Segments; for regions the per-process `SG_REGION` Segment and PTE set
 carry the protection, not a property shared by all mappings.
 
-`SPAWN` establishes a direct child and fresh `Pgrp`; `RFORKEX` uses a
-bounded delegated Handle plan. `PROCWAIT` is child-only. Current
-`Proc.parent/parentpid/nchild/waitq`, exit notification and special
-`parentpid == 0` behavior are ancestry dependent. `OTERMINATE` has a
-direct-child restriction. These are slated for Phase 5 deletion/replacement,
-not future interface requirements.
+`SPAWN` creates a fresh `Pgrp` and returns a process-local `VkindProcess`
+Handle carrying `Vobserve|Vcontrol|Vmeta|Vdelegate`; `RFORKEX` uses the same
+delegation plan and also returns a process Handle (the child sees 0).
+`OBJOPProcessInfo` (`Vmeta`) reads the current lifecycle record;
+`OBJOPProcessWait` (`Vobserve`) blocks until `ObjProcCompleted` or returns a
+bounded timeout and never consumes the result; `OBJOPProcessTerminate`
+(`Vcontrol`) requests termination. Observation returns PID, generation,
+state, cause, status and accounting, so a PID or process-table index grants
+no authority. Multiple observers may hold independently attenuated Handles,
+including after the launcher exits. The completion record is reference
+counted and outlives execution; the scheduler `Proc` and address space are
+reclaimed independently. Voluntary exit, authorized termination and unhandled
+fault are distinct causes. `OEXECUTE` preserves the same process identity and
+existing observer authority. The boot process has an explicit `Proc.boot`
+role; no ancestry-dependent process wait or control path remains. The
+historical no-argument libc `wait()`/`await()` adapters are deleted: callers
+use `obj_process_wait()` with an explicit Process Handle, close it when
+finished, and need no global tracking table. A process Handle has no explicit
+revoke operation; completion is immutable and control is a separate grant.
 
 `Pgrp/OContext` currently owns volatile role bindings with share/copy/empty
 and sealing behavior. `OBJBIND`, `NamespaceView`, role opening and

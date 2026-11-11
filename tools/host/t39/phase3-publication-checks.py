@@ -280,13 +280,15 @@ def run():
 
     def waitmap(pids):
         got = {}
-        while len(got) < len(pids):
-            pid, status = space.wait()
-            got[pid] = status
-        for pid in pids:
-            if pid not in got:
-                raise AssertionError('child did not report')
+        for h in pids:
+            r = p.process_wait(h, -1)
+            got[h] = r[1]
+            p.obj_close(h)
         return got
+
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
 
     sh = p.obj_open_space('init')
 

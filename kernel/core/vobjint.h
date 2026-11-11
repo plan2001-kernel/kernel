@@ -6,6 +6,7 @@
 
 typedef struct Ohand Ohand;
 typedef struct Vhand Vhand;
+typedef struct Procstat Procstat;
 
 /* Shared, bounded object/ABI limits. */
 enum {
@@ -104,15 +105,16 @@ int	vobjinheritchildhandle(Vinherit*, int);
 int	vobjinheritsrchandle(Vinherit*, int);
 void	vobjinheritrelease(Vinherit*);
 
-/* Process-lifecycle providers.  SPAWN resolves an explicit Space Handle to
- * the shared spawn core; the direct OEXECUTE/OTERMINATE/PROCWAIT/EXITS calls
- * use the same kernel semantics.  Keeping one core preserves forkchild,
- * spawn layout, parent/child checks and pexit semantics. */
+/* Process-lifecycle providers.  SPAWN and RFORKEX resolve an explicit
+ * Space/Handle plan and return a VkindProcess capability.  Observation,
+ * termination and pexit completion all use the one Procstat resource. */
 ulong	kernrforkex(ulong flag, Vinhand*, int, uvlong*);
 long	kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc,
 		struct Ospawn *uopt);
-int	kernoterminate(int pid);
-long	vobjprocwait(ProcWait *out);
+int	vobjprocinstall(Procstat*);
+int	vobjprocinfo(int, ObjProcessInfo*);
+long	vobjprocesswait(int, ObjProcessInfo*, long);
+int	vobjprocterminate(int);
 
 int	vobjopenstream(uvlong provider, void *req, long len, uvlong rights,
 		VobjId *id);

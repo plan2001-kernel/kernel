@@ -75,7 +75,7 @@ randomseed(void*)
 
 	secfree(s);
 
-	pexit("", 1);
+	pexit("");
 }
 
 void

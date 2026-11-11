@@ -11,9 +11,8 @@
  * Historical VOBJ* syscall numbers are reserved and have no handlers.  The
  * TCP6/UDP6 object providers are gone: the permitted network boundary is raw
  * device frames/ObjectFIFO plus userspace protocol handling.  Process handle
- * introspection is SYSCTL SysctlHandleList; child wait is the direct typed
- * PROCWAIT call; device control is IOCTL.  None is a synthetic object
- * operation.
+ * introspection is SYSCTL SysctlHandleList; process completion observation
+ * and control are VkindProcess INIT operations; device control is IOCTL.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -179,20 +178,6 @@ sysobjbind(sysva_list list)
 	mode = sysva_arg(list, uvlong);
 	if(rolelen <= 0 || rolelen >= 32 || mode > 0x1ff) error(Ebadarg);
 	return vobjbind(handle, role, (int)rolelen, rights, (uint)mode);
-}
-
-/* Direct typed child wait.  The caller waits on its own children; no
- * synthetic ProcessSelf Handle is created or delegated. */
-uintptr
-sysprocwait(sysva_list list)
-{
-	ProcWait *w;
-
-	w = sysva_arg(list, ProcWait*);
-	if(w == nil)
-		error(Ebadarg);
-	validaddr((uintptr)w, sizeof *w, 1);
-	return vobjprocwait(w);
 }
 
 /* IOCTL(145): device configuration, control and device-specific status.
@@ -401,6 +386,31 @@ sysobjinvoke(sysva_list list)
 			error(Ebadarg);
 		vobjregionunmap((uintptr)c.arg0);
 		c.result = 0;
+		break;
+	case ObjOpProcessInfo:
+		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
+		   c.out == nil || c.outlen != sizeof(ObjProcessInfo))
+			error(Ebadarg);
+		c.result = vobjprocinfo(handle, (ObjProcessInfo*)c.out);
+		break;
+	case ObjOpProcessWait:
+		if(c.in != nil || c.inlen != 0 || c.arg1 != 0 ||
+		   c.out == nil || c.outlen != sizeof(ObjProcessInfo))
+			error(Ebadarg);
+		if(c.arg0 == PROCESS_WAIT_INFINITE)
+			tmo = -1;
+		else if(c.arg0 > 0x7fffffffULL)
+			error(Ebadarg);
+		else
+			tmo = (int)c.arg0;
+		validaddr((uintptr)c.out, sizeof(ObjProcessInfo), 1);
+		c.result = vobjprocesswait(handle, (ObjProcessInfo*)c.out, tmo);
+		break;
+	case ObjOpProcessTerminate:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg0 != 0 || c.arg1 != 0)
+			error(Ebadarg);
+		c.result = vobjprocterminate(handle);
 		break;
 	case ObjOpPutOid:
 		/* Replace one explicitly named OID through the Space's Owrite

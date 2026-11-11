@@ -8,6 +8,7 @@
 #include	"edf.h"
 #include	"tos.h"
 #include	"ureg.h"
+#include	"../../runtime/abi/obj.h"
 
 enum {
 	Scaling = 2,
@@ -47,7 +48,6 @@ char *statename[] =
 	"QueueingR",
 	"QueueingW",
 	"Wakeme",
-	"Broken",
 	"Stopped",
 	"Waitrelease",
 };
@@ -392,7 +392,6 @@ queueproc(Schedq *rq, Proc *p)
 	case QueueingR:
 	case QueueingW:
 	case Wakeme:
-	case Broken:
 	case Stopped:
 		if(p != up)
 			break;
@@ -718,12 +717,15 @@ newproc(void)
 	p->stdoutpipe = 0;
 	p->iomask = 0;
 	p->psstate = nil;
+	p->stat = nil;
+	p->boot = 0;
 	p->state = New;
 		p->pfpu.fpstate = FPinit;
 #ifdef KFPSTATE
 		p->pfpu.kfpstate = FPinit;
 #endif
 	p->procctl = 0;
+	p->terminate = 0;
 	p->noteureg = nil;
 	p->dbgreg = nil;
 	p->nerrlab = 0;
@@ -1176,7 +1178,7 @@ popnote(Ureg *u)
 		qunlock(&up->debug);
 		if(up->lastnote->flag == NDebug)
 			pprint("suicide: %s\n", up->lastnote->msg);
-		pexit(up->lastnote->msg, up->lastnote->flag!=NDebug);
+		pexit(up->lastnote->msg);
 	}
 	up->notified = 1;
 
@@ -1198,7 +1200,7 @@ mknote(char *msg, int flag)
 int
 pushnote(Proc *p, Note *n)
 {
-	if(p->state <= New || p->state == Broken || p->pid == 0){
+	if(p->state <= New || p->pid == 0){
 		freenote(n);
 		return 0;
 	}
@@ -1254,61 +1256,309 @@ postnotepg(ulong noteid, char *msg, int flag)
 	freenote(n);
 }
 
-/* keep some broken processes around */
-static struct {
-	Lock	lk;	/* compile-only name; keeps the 6c field offsets */
-	int	n;
-	Proc	*p[4];
-} broken;
-#define BLOCKLK	(&broken.lk)
+/*
+ * Process completion resource.  It is allocated before publication, owned by
+ * the Proc while it lives and by every VkindProcess Handle afterwards.  The
+ * transition to completed happens exactly once, after the address space and
+ * writable mappings are released.  Observers block on their own Rendez nodes
+ * linked under the record lock, so any number of independent readers can
+ * wait without consuming the result.
+ */
+static Lock pstatgendoor;
+static uvlong pstatgen;
+static int pstatlive;
 
-static void
-addbroken(void)
+struct Pwait
 {
-	lock(BLOCKLK);
-	if(broken.n == nelem(broken.p)) {
-		ready(broken.p[0]);
-		memmove(&broken.p[0], &broken.p[1], sizeof(Proc*)*(--broken.n));
-	}
-	broken.p[broken.n++] = up;
-	up->state = Broken;
-	up->psstate = nil;
-	unlock(BLOCKLK);
-	sched();
+	Rendez	r;
+	int	done;
+	Pwait	*next;
+};
+
+Procstat*
+procstatnew(ulong pid)
+{
+	Procstat *st;
+
+	st = smalloc(sizeof *st);
+	st->ref.ref = 1;
+	st->state = PstatCreated;
+	st->pid = pid;
+	lock(&pstatgendoor);
+	st->generation = ++pstatgen;
+	pstatlive++;
+	unlock(&pstatgendoor);
+	return st;
 }
 
 void
-unbreak(Proc *p)
+procstatref(Procstat *st)
 {
-	int i;
+	if(st != nil)
+		incref(&st->ref);
+}
 
-	lock(BLOCKLK);
-	for(i=0; i < broken.n; i++){
-		if(broken.p[i] == p) {
-			memmove(&broken.p[i], &broken.p[i+1], sizeof(Proc*)*(broken.n-(i+1)));
-			broken.p[--broken.n] = nil;
-			ready(p);
-			break;
-		}
-	}
-	unlock(BLOCKLK);
+void
+procstatput(Procstat *st)
+{
+	if(st == nil || decref(&st->ref) != 0)
+		return;
+	lock(&pstatgendoor);
+	pstatlive--;
+	unlock(&pstatgendoor);
+	free(st);
 }
 
 int
-freebroken(void)
+procstatlive(void)
 {
-	int i, n;
+	int n;
 
-	lock(BLOCKLK);
-	n = broken.n;
-	broken.n = 0;
-	for(i=0; i<n; i++){
-		Proc *p = broken.p[i];
-		broken.p[i] = nil;
-		ready(p);
-	}
-	unlock(BLOCKLK);
+	lock(&pstatgendoor);
+	n = pstatlive;
+	unlock(&pstatgendoor);
 	return n;
+}
+
+void
+procstatstart(Procstat *st)
+{
+	if(st == nil)
+		return;
+	lock(&st->lk);
+	if(st->state == PstatCreated)
+		st->state = PstatRunning;
+	unlock(&st->lk);
+}
+
+void
+procstatcomplete(Procstat *st, int cause, char *msg, ulong *time)
+{
+	Pwait *w;
+
+	if(st == nil)
+		return;
+	lock(&st->lk);
+	if(st->state == PstatCompleted){
+		unlock(&st->lk);
+		return;
+	}
+	st->state = PstatCompleted;
+	st->cause = cause;
+	st->time[0] = time[0];
+	st->time[1] = time[1];
+	st->time[2] = time[2];
+	st->msg[0] = '\0';
+	if(msg != nil)
+		snprint(st->msg, sizeof st->msg, "%s", msg);
+	st->proc = nil;
+	for(w = st->wait; w != nil; w = w->next){
+		w->done = 1;
+		wakeup(&w->r);
+	}
+	unlock(&st->lk);
+}
+
+static int
+pstatdone(void *a)
+{
+	return ((Pwait*)a)->done;
+}
+
+static void
+pstatunlink(Procstat *st, Pwait *w)
+{
+	Pwait **l;
+
+	for(l = &st->wait; *l != nil; l = &(*l)->next)
+		if(*l == w){
+			*l = w->next;
+			w->next = nil;
+			break;
+		}
+}
+
+static int
+pstatwaiters(Procstat *st)
+{
+	Pwait *w;
+	int n;
+
+	n = 0;
+	for(w = st->wait; w != nil; w = w->next)
+		n++;
+	return n;
+}
+
+/* st->lk held; out must point to kernel-owned storage. */
+static void
+procstatcopylocked(Procstat *st, ObjProcessInfo *out)
+{
+	memset(out, 0, sizeof *out);
+	out->version = OBJ_ABI_VERSION;
+	out->state = st->state;
+	out->cause = st->cause;
+	out->pid = (long long)st->pid;
+	out->generation = st->generation;
+	out->time[0] = st->time[0];
+	out->time[1] = st->time[1];
+	out->time[2] = st->time[2];
+	out->msglen = strlen(st->msg);
+	if(out->msglen > OBJ_PROCESS_MSG_MAX)
+		out->msglen = OBJ_PROCESS_MSG_MAX;
+	memmove(out->msg, st->msg, out->msglen);
+	out->waiters = (unsigned int)pstatwaiters(st);
+}
+
+/*
+ * Wait for completion, without consuming it.  Timeout is -1 for an infinite
+ * wait, otherwise milliseconds.  Returns 0 when completed and 1 on timeout.
+ *
+ * Linearization point: after the optional sleep, the wait node is unlinked,
+ * the completed/timeout decision is made and the entire ObjProcessInfo
+ * snapshot is captured in kernel storage under the same st->lk critical
+ * section; copying to faultable user pages happens after unlocking. A completion
+ * that wins that lock is therefore reported as result 0 with COMPLETED;
+ * result 1 always describes a non-completed snapshot, even if completion
+ * happens immediately after the lock is released.  Completion itself takes
+ * the same lock for its one-time state transition and wake-all.
+ *
+ * A pending interrupted note surfaces as the ordinary Eintr error.  The
+ * error path unlinks the enrolled node under st->lk, so no wait node or
+ * reference can leak.
+ */
+int
+procstatwait(Procstat *st, ObjProcessInfo *out, long timeout)
+{
+	Pwait w;
+	ObjProcessInfo snapshot;
+	int completed;
+
+	if(st == nil || out == nil)
+		error(Ebadarg);
+	memset(&w, 0, sizeof w);
+	if(waserror()){
+		lock(&st->lk);
+		pstatunlink(st, &w);
+		unlock(&st->lk);
+		nexterror();
+	}
+	lock(&st->lk);
+	if(st->state != PstatCompleted && timeout != 0){
+		w.next = st->wait;
+		st->wait = &w;
+		unlock(&st->lk);
+		if(timeout < 0)
+			sleep(&w.r, pstatdone, &w);
+		else
+			tsleep(&w.r, pstatdone, &w, timeout);
+		lock(&st->lk);
+	}
+	pstatunlink(st, &w);
+	completed = st->state == PstatCompleted;
+	procstatcopylocked(st, &snapshot);
+	unlock(&st->lk);
+	poperror();
+	memmove(out, &snapshot, sizeof snapshot);
+	return completed ? 0 : 1;
+}
+
+void
+procstatinfo(Procstat *st, ObjProcessInfo *out)
+{
+	ObjProcessInfo snapshot;
+
+	if(st == nil || out == nil)
+		error(Ebadarg);
+	lock(&st->lk);
+	procstatcopylocked(st, &snapshot);
+	unlock(&st->lk);
+	memmove(out, &snapshot, sizeof snapshot);
+}
+
+/*
+ * Authorized termination through the process capability.  Identity is the
+ * live Proc pointer recorded in the Procstat, its PID and the record
+ * generation, never a numeric PID supplied by userspace.  Proc allocations
+ * are recycled, so the pointer alone is not identity; every check below is
+ * made while holding p->debug.
+ *
+ * Acceptance protocol and lock order:
+ *
+ *	st->lk		authoritative run/completed transition and Proc pointer
+ *	p->debug	pexit()'s exiting transition and process-local identity
+ *	p->rlock	only inside procinterrupt()
+ *	Rendez.lk / q->use
+ *	runq.lk		inside ready()
+ *
+ * No path acquires p->debug while holding st->lk, a Rendez lock, a QLock
+ * queue lock or runq.lk, so this order is acyclic.  procinterrupt() may
+ * retry a contended Rendez lock by calling sched(); p->debug is a sleepable
+ * QLock, procinterrupt() drops p->rlock before sleeping, and no Rendez or
+ * queue-lock holder waits for p->debug, so the retry cannot deadlock.
+ *
+ * p->debug is deliberately held from revalidation through the wakeup.
+ * pexit() sets p->exiting under that same lock before it releases mappings
+ * or publishes completion.  Therefore, if revalidation sees exiting == 0,
+ * the target cannot begin exiting, complete, be recycled or be replaced
+ * until this function has delivered the interrupt and released the lock.
+ * The wakeup can never reach a replacement Proc, and there is no gap in
+ * which the target could complete before the wakeup.
+ *
+ * Concurrent requests accepted before pexit marks exiting are idempotent:
+ * terminate and Proc_exitme are sticky latches, and termination happens
+ * exactly once in the target's own exit path.  Requests that lose the race
+ * with pexit's exiting transition, or arrive after the record completed,
+ * deterministically fail with Eprocdied.  The boot/kernel process protection
+ * is checked under the same identity validation.
+ */
+int
+procstatterminate(Procstat *st)
+{
+	Proc *p;
+	char *e;
+	int live;
+
+	if(st == nil)
+		error(Ebadarg);
+	e = nil;
+	lock(&st->lk);
+	p = st->proc;
+	live = st->state == PstatRunning && p != nil;
+	unlock(&st->lk);
+	if(!live)
+		error(Eprocdied);
+
+	qlock(&p->debug);
+	/*
+	 * Revalidate under the record lock.  st->proc and the run/completed
+	 * state are the authoritative liveness token; completion clears
+	 * st->proc, so a recycled Proc with a stale pointer can never pass.
+	 * p->pid is written only under p->debug (pidalloc/pidfree), and
+	 * p->exiting is pexit()'s acceptance marker under the same lock.
+	 */
+	lock(&st->lk);
+	live = st->state == PstatRunning && st->proc == p &&
+		p->pid == st->pid && !p->exiting;
+	unlock(&st->lk);
+	if(!live)
+		e = Eprocdied;
+	else if(p->boot || p->kp)
+		e = Eperm;
+	else {
+		/* Sticky until Proc reuse; ordinary notes cannot cancel this. */
+		p->terminate = 1;
+		/* Existing fault retry and queue-drain loops recognize exitme.
+		 * terminate remains the non-cancellable authority/cause latch. */
+		p->procctl = Proc_exitme;
+		procinterrupt(p);
+		if(p->state == Stopped)
+			ready(p);
+	}
+	qunlock(&p->debug);
+	if(e != nil)
+		error(e);
+	return 0;
 }
 
 void
@@ -1328,17 +1578,50 @@ freenotes(Proc *p)
 	}
 }
 
-_Noreturn void
-pexit(char *exitstr, int freemem)
+static int
+pexitcause(Proc *p)
 {
-	Proc *p;
-	ulong utime, stime;
-	Waitq *wq;
+	Note *n;
+
+	if(p->terminate)
+		return PcauseTerminated;
+	n = p->lastnote;
+	if(n == nil)
+		return PcauseExit;
+	if(n->flag == NExit)
+		return PcauseTerminated;
+	if(n->flag == NDebug){
+		if(strncmp(n->msg, "sys: killed", 11) == 0)
+			return PcauseTerminated;
+		return PcauseFault;
+	}
+	return PcauseFault;
+}
+
+_Noreturn void
+pexit(char *exitstr)
+{
+	Procstat *st;
+	ulong utime, stime, time[3];
 	Ref *fdgrp;
 	Egrp *egrp;
 	Pgrp *pgrp;
 	Segment *s;
-	int i;
+	char status[128];
+	int cause, i;
+
+	/*
+	 * Snapshot the bounded status while the user address space and the
+	 * note backing are still live.  In particular sysexits() may pass a
+	 * pointer into the exiting process's user memory.  Completion is
+	 * published later, after mapping teardown, from this kernel-owned
+	 * copy and never dereferences the old pointer again.
+	 */
+	status[0] = '\0';
+	if(exitstr != nil)
+		snprint(status, sizeof status, "%s", exitstr);
+	else if(up->lastnote != nil)
+		snprint(status, sizeof status, "%s", up->lastnote->msg);
 
 	up->alarm = 0;
 	timerdel(&up->timer);
@@ -1346,6 +1629,8 @@ pexit(char *exitstr, int freemem)
 	/* nil out all the resources under lock (free later) */
 	qlock(&up->debug);
 	up->exiting = 1;
+	if(up->terminate)
+		kstrcpy(status, "terminated", sizeof status);
 	fdgrp = up->fdgrp;
 	up->fdgrp = nil;
 	egrp = up->egrp;
@@ -1366,59 +1651,24 @@ pexit(char *exitstr, int freemem)
 	if(pgrp != nil)
 		closepgrp(pgrp);
 
-	if(up->parentpid == 0){
-		if(exitstr == nil)
-			exitstr = "unknown";
-		panic("boot process died: %s", exitstr);
-	}
+	if(up->boot)
+		panic("boot process died: %s",
+			status[0] != '\0' ? status : "unknown");
 
-	p = up->parent;
-	if(p != nil && p->pid == up->parentpid && p->state != Broken){
-		wq = smalloc(sizeof(Waitq));
-		wq->w.pid = up->pid;
-		utime = up->time[TUser] + up->time[TCUser];
-		stime = up->time[TSys] + up->time[TCSys];
-		wq->w.time[TUser] = tk2ms(utime);
-		wq->w.time[TSys] = tk2ms(stime);
-		wq->w.time[TReal] = tk2ms(MACHP(0)->pmach.ticks - up->time[TReal]);
-		if(exitstr != nil && exitstr[0])
-			snprint(wq->w.msg, sizeof(wq->w.msg), "%s %lud: %s", up->text, up->pid, exitstr);
-		else
-			wq->w.msg[0] = '\0';
+	cause = pexitcause(up);
+	utime = up->time[TUser] + up->time[TCUser];
+	stime = up->time[TSys] + up->time[TCSys];
+	time[TUser] = tk2ms(utime);
+	time[TSys] = tk2ms(stime);
+	time[TReal] = tk2ms(MACHP(0)->pmach.ticks - up->time[TReal]);
 
-		lock(&p->exl);
-		/*
-		 * Check that parent is still alive.
-		 */
-		if(p->pid == up->parentpid && p->state != Broken) {
-			p->nchild--;
-			p->time[TCUser] += utime;
-			p->time[TCSys] += stime;
-			/*
-			 * If there would be more than 128 wait records
-			 * processes for my parent, then don't leave a wait
-			 * record behind.  This helps prevent badly written
-			 * daemon processes from accumulating lots of wait
-			 * records.
-		 	 */
-			if(p->nwait < 128) {
-				wq->next = p->waitq;
-				p->waitq = wq;
-				p->nwait++;
-				wq = nil;
-				wakeup(&p->waitr);
-			}
-		}
-		unlock(&p->exl);
-		if(wq != nil)
-			free(wq);
-	}
-
-	if(!freemem){
-		edfstop(up);
-		addbroken();
-	}
-
+	/*
+	 * Release the address space and its mappings before publishing
+	 * completion.  A terminated writer therefore releases its region
+	 * writer slot and wakes REGIONWAIT observers before any completion
+	 * observer can conclude that cleanup is finished.  Read-only snapshots
+	 * survive independently through their own mapping references.
+	 */
 	qlock(&up->seglock);
 	for(i = 0; i < NSEG; i++){
 		s = up->seg[i];
@@ -1429,20 +1679,13 @@ pexit(char *exitstr, int freemem)
 	}
 	qunlock(&up->seglock);
 
+	st = up->stat;
+	up->stat = nil;
+	procstatcomplete(st, cause, status, time);
+	procstatput(st);
+
 	qlock(&up->debug);
-
-	lock(&up->exl);		/* Prevent my children from leaving waits */
 	pidfree(up);
-	up->parent = nil;
-	up->nchild = up->nwait = 0;
-	wakeup(&up->waitr);
-	unlock(&up->exl);
-
-	while((wq = up->waitq) != nil){
-		up->waitq = wq->next;
-		free(wq);
-	}
-
 	freenotes(up);
 	freenote(up->lastnote);
 	up->lastnote = nil;
@@ -1478,7 +1721,7 @@ pexit(char *exitstr, int freemem)
 
 /*
  * Discard a Proc allocated by newproc() that was never scheduled or
- * published.  It has no parent wait contract, run-queue membership or
+ * published.  It has no completion contract, run-queue membership or
  * per-Mach MMU state yet, so release its resources synchronously instead
  * of scheduling an abort child.  This is the prepublication rollback used
  * by the fork/spawn error paths.
@@ -1490,7 +1733,6 @@ void
 procdiscard(Proc *p)
 {
 	Segment *s;
-	Waitq *wq;
 	Ref *fdgrp;
 	Egrp *egrp;
 	Pgrp *pgrp;
@@ -1535,12 +1777,9 @@ procdiscard(Proc *p)
 	/* pidalloc() may not have run yet if an early setup allocation failed. */
 	if(p->pid != 0)
 		pidfree(p);
-	p->parent = nil;
-	p->parentpid = 0;
-	p->nchild = p->nwait = 0;
-	while((wq = p->waitq) != nil){
-		p->waitq = wq->next;
-		free(wq);
+	if(p->stat != nil){
+		procstatput(p->stat);
+		p->stat = nil;
 	}
 	freenotes(p);
 	freenote(p->lastnote);
@@ -1584,51 +1823,6 @@ procdiscard(Proc *p)
 	p->qnext = procalloc.free;
 	procalloc.free = p;
 	unlock(&procalloc.lk);
-}
-
-static int
-haswaitq(void *x)
-{
-	return ((Proc*)x)->waitq != nil;
-}
-
-ulong
-pwait(Waitmsg *w)
-{
-	ulong cpid;
-	Waitq *wq;
-
-	if(!canqlock(&up->qwaitr))
-		error(Einuse);
-
-	if(waserror()) {
-		qunlock(&up->qwaitr);
-		nexterror();
-	}
-
-	lock(&up->exl);
-	while(up->waitq == nil) {
-		if(up->nchild == 0) {
-			unlock(&up->exl);
-			error(Enochild);
-		}
-		unlock(&up->exl);
-		sleep(&up->waitr, haswaitq, up);
-		lock(&up->exl);
-	}
-	wq = up->waitq;
-	up->waitq = wq->next;
-	up->nwait--;
-	unlock(&up->exl);
-
-	qunlock(&up->qwaitr);
-	poperror();
-
-	if(w != nil)
-		memmove(w, &wq->w, sizeof(Waitmsg));
-	cpid = wq->w.pid;
-	free(wq);
-	return cpid;
 }
 
 Proc*
@@ -1762,7 +1956,7 @@ linkproc(void)
 {
 	spllo();
 	(*up->kpfun)(up->kparg);
-	pexit("kproc exiting", 0);
+	pexit("kproc exiting");
 }
 
 void
@@ -1788,10 +1982,8 @@ kproc(char *name, void (*func)(void *), void *arg)
 	kstrdup(&user, eve);
 	kstrdup(&args, "");
 
-	while((p = newproc()) == nil){
-		freebroken();
+	while((p = newproc()) == nil)
 		resrcwait("no procs for kproc");
-	}
 
 	qlock(&p->debug);
 
@@ -1851,15 +2043,19 @@ procctl(void)
 {
 	char *state;
 
+	if(up->terminate){
+		spllo();
+		pexit("terminated");
+	}
 	switch(up->procctl) {
 	case Proc_exitbig:
 		spllo();
 		print("%s %lud: Killed: Insufficient physical memory\n", up->text, up->pid);
-		pexit("Killed: Insufficient physical memory", 1);
+		pexit("Killed: Insufficient physical memory");
 
 	case Proc_exitme:
 		spllo();		/* pexit has locks in it */
-		pexit("Killed", 1);
+		pexit("Killed");
 
 	case Proc_traceme:
 		if(up->nnote == 0)
@@ -1945,10 +2141,6 @@ killproc(Proc *p, int ctl)
 
 	if(p->state <= New || p->pid == 0 || p->kp)
 		return;
-	if(p->state == Broken){
-		unbreak(p);
-		return;
-	}
 	if(ctl != 0)
 		p->procctl = ctl;
 	incref(&killnote.ref);
@@ -2036,11 +2228,11 @@ accounttime(void)
 
 /*
  *  A Pid structure is a reference counted hashtable entry
- *  with "pid" being the key and "procindex" being the value.
+ *  with "pid" being the key.
  *  A entry is allocated atomically by changing the key from
  *  negative or zero to the positive process id number.
  *  Pid's outlive ther Proc's as long as other processes hold
- *  a reference to them such as noteid or parentpid.
+ *  a reference to them such as noteid.
  *  This prevents pid reuse when the pid generator wraps.
  */
 typedef struct Pid Pid;
@@ -2048,7 +2240,6 @@ struct Pid
 {
 	Ref ref;
 	long	pid;
-	int	procindex;
 };
 
 enum {
@@ -2065,10 +2256,9 @@ pidinit(void)
 	/*
 	 * allocate 3 times conf.nproc Pid structures for the hash table
 	 * and round up to a power of two as each process can reference
-	 * up to 3 unique Pid structures:
+	 * up to 2 unique Pid structures:
 	 *	- pid
 	 *	- noteid
-	 *	- parentpid
 	 */
 	pidhashmask = 1<<PIDSHIFT;
 	while(pidhashmask < conf.nproc*3)
@@ -2148,33 +2338,6 @@ piddel(Pid *i)
 	i->pid = -1;	/* freed */
 }
 
-int
-procindex(ulong pid)
-{
-	Proc *p;
-	Pid *i;
-	int x;
-
-	i = pidlookup(pid);
-	if(i != nil){
-		x = i->procindex;
-		p = proctab(x);
-		if(p != nil && p->pid == pid)
-			return x;
-	}
-	return -1;
-}
-
-/*
- *  for the following functions:
- *    setnoteid(), pidalloc() and pidfree()
- *
- *  They need to be called with p->debug held
- *  to prevent devproc's changenoteid() from
- *  changing the noteid under us and make the
- *  update atomic.
- */
-
 /*
  *  change the noteid of a process
  */
@@ -2199,22 +2362,14 @@ setnoteid(Proc *p, ulong noteid)
 }
 
 /*
- *  allocate pid, noteid and parentpid to a process
+ *  allocate pid and noteid to a process
  */
 ulong
 pidalloc(Proc *p)
 {
 	Pid *i;
 
-	/* skip for the boot process */
-	if(up != nil){
-		i = pidadd(up->pid);
-		p->parentpid = i->pid;
-	} else
-		p->parentpid = 0;
-
 	i = pidadd(0);
-	i->procindex = p->index;
 
 	if(p->noteid == 0){
 		incref(&i->ref);
@@ -2226,7 +2381,7 @@ pidalloc(Proc *p)
 }
 
 /*
- *  release pid, noteid and parentpid from a process
+ *  release pid and noteid from a process
  */
 static void
 pidfree(Proc *p)
@@ -2240,8 +2395,5 @@ pidfree(Proc *p)
 		i = pidlookup(p->noteid);
 	piddel(i);
 
-	if(p->parentpid != 0)
-		piddel(pidlookup(p->parentpid));
-
-	p->pid = p->noteid = p->parentpid = 0;
+	p->pid = p->noteid = 0;
 }

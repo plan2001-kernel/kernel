@@ -174,7 +174,7 @@ trap(Ureg *ureg)
 out:
 	splhi();
 	if(user){
-		if(up->procctl || up->nnote)
+		if(up->terminate || up->procctl || up->nnote)
 			donotify(ureg);
 		kexit(ureg);
 	}
@@ -387,7 +387,7 @@ faultamd64(Ureg* ureg, void*)
 		if(waserror()){
 			if(up->nerrlab == 0){
 				pprint("suicide: sys: %s\n", up->errstr);
-				pexit(up->errstr, 1);
+				pexit(up->errstr);
 			}
 			/* skipping bottom of trap(), so do it outselfs */
 			splhi();
@@ -433,7 +433,7 @@ syscall(Ureg* ureg)
 		notereturn = 1;
 	if(scallnr == EXEC && (vlong)ureg->ax != -1)
 		bootmark(BMExec);	/* the first successful exec is /boot/boot */
-	if((up->procctl || up->nnote) && donotify(ureg))
+	if((up->terminate || up->procctl || up->nnote) && donotify(ureg))
 		notereturn = 1;
 	/* if we delayed sched because we held a lock, sched now */
 	if(up->delaysched)

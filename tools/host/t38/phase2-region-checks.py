@@ -208,13 +208,15 @@ def run():
 
     def waitmap(pids):
         got = {}
-        while len(got) < len(pids):
-            pid, status = space.wait()
-            got[pid] = status
-        for pid in pids:
-            if pid not in got:
-                raise AssertionError('child did not report')
+        for h in pids:
+            r = p.process_wait(h, -1)
+            got[h] = r[1]
+            p.obj_close(h)
         return got
+
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
 
     def spawn(code, fifo=None):
         vh = ()
@@ -248,6 +250,10 @@ def run():
     p.obj_close(reg)
     ok(p.region_read(addr, 19) == b'persist-after-close',
        'mapping survives closing its Handle')
+    denied(lambda: p.seg_brk(addr, addr), 'SEGBRK cannot empty a region')
+    denied(lambda: p.seg_brk(addr, addr + 8192), 'SEGBRK cannot grow a region')
+    ok(p.region_read(addr, 19) == b'persist-after-close',
+       'rejected region resize preserves mapped backing and writer lifetime')
     denied(lambda: p.seg_free(addr, 4096), 'SEGFREE cannot split a region')
     denied(lambda: p.seg_detach(addr), 'SEGDETACH cannot remove a region')
     denied(lambda: p.region_map(reg), 'stale Handle after close')
@@ -280,7 +286,7 @@ def run():
         except OSError:
             p.exits('')
         p.exits('fork-second-writer')
-    waited, status = space.wait()
+    waited, status = reap(pid)
     ok(waited == pid and status == '',
        'delegated writer Handle cannot map while parent writer is active')
     ok(p.region_read(rw, 9) == b'FORK-BASE',

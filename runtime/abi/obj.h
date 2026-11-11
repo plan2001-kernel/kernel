@@ -70,9 +70,9 @@ enum {
  * former OSPAWN route and the UART/KBD/device-control operations that are now
  * IOCTL(145).  They have no dispatch handler.
  *
- * Process Handle-table introspection is SYSCTL(144) SysctlHandleList; child
- * wait is the direct typed PROCWAIT(142) call; spawn is the direct SPAWN(146)
- * call; device control is IOCTL(145). */
+ * Process Handle-table introspection is SYSCTL(144) SysctlHandleList;
+ * completion observation and control are VkindProcess OBJINVOKE operations;
+ * creation is SPAWN(146) or RFORKEX(143); device control is IOCTL(145). */
 enum {
 	ObjOpInfo	= 1,	/* generic identity/type/size/rights metadata */
 	ObjOpRead	= 2,
@@ -121,6 +121,16 @@ enum {
 	 * caller's address space. */
 	ObjOpRegionMap	= 47,
 	ObjOpRegionUnmap = 48,
+	/* VkindProcess: durable, repeatable completion observation.  WAIT takes
+	 * an optional timeout in arg0 (-1 = infinite, 0 = poll) and copies an
+	 * ObjProcessInfo to out; it does not consume the completion.  TERMINATE
+	 * requires Vcontrol and requests non-cancellable termination at the target
+	 * boundary, independently of user note handlers. Repeated requests before
+	 * exit begins are idempotent; exiting/completed targets reject requests.
+	 * INFO requires Vmeta and never waits for completion. */
+	ObjOpProcessInfo = 49,
+	ObjOpProcessWait = 50,
+	ObjOpProcessTerminate = 51,
 };
 
 /* Classification after the SYSCTL/IOCTL/object/scalar split:
@@ -131,8 +141,8 @@ enum {
  *    privileged volume activation and own-process CPU/memory introspection.
  *  - IOCTL(145): UART configuration/status, KBD LED control and supported
  *    provider-specific device control.
- *  - Direct primitives: SPAWN/EXITS/OTERMINATE/PROCWAIT, RFORKEX, memory,
- *    time, synchronization, NOTIFY/NOTED and ERRSTR.
+ *  - Direct primitives: SPAWN/EXITS/RFORKEX, memory, time, synchronization,
+ *    NOTIFY/NOTED and ERRSTR.  Process observation/control use OBJINVOKE.
  *  - Discovery and opening: every supported physical family is an
  *    ObjOpDeviceList record opened through ObjOpenDevice with an authorized
  *    catalog Handle.  Selectors are hints, never authority.
@@ -389,20 +399,47 @@ typedef struct ObjCall {
 	unsigned int		reserved;
 } ObjCall;
 
-/* RFORKEX(143), SPAWN(146), OTERMINATE(93), EXITS(8) and PROCWAIT(142) are
- * direct primitives.  RFORKEX keeps the RFPROC child/PID return and the
- * group-only form; OTERMINATE keeps the direct-child, parentpid, kp and
- * exiting checks.  Child wait is the direct typed PROCWAIT call; none of
- * these has an OBJINVOKE variant. */
-#define PROCWAIT_MSG_MAX 128
+/* Process lifecycle is capability-based.  SPAWN and RFORKEX return a
+ * process-local VkindProcess Handle carrying Vobserve|Vcontrol|Vmeta|
+ * Vdelegate; a child sees 0 from RFORKEX.  The Handle is the authority, not
+ * a PID.  Observation is repeatable and independent of launcher lifetime.
+ * Control requires a separate Vcontrol grant. */
 
-typedef struct ProcWait {
-	long long		pid;
+/* Coherent observable lifecycle.  CREATED covers construction before the
+ * process is schedulable; RUNNING is a live execution context; COMPLETED is
+ * an immutable result.  A completion record is retained while any Handle or
+ * transient publication reference exists and is released at the last one. */
+enum {
+	ObjProcCreated		= 0,
+	ObjProcRunning		= 1,
+	ObjProcCompleted	= 2,
+};
+
+enum {
+	ObjProcCauseNone	= 0,
+	ObjProcCauseExit	= 1,	/* voluntary EXITS */
+	ObjProcCauseTerminated	= 2,	/* authorized control termination */
+	ObjProcCauseFault	= 3,	/* unhandled fault or fatal note */
+};
+
+#define OBJ_PROCESS_MSG_MAX 128
+
+typedef struct ObjProcessInfo {
+	unsigned int		version;	/* OBJ_ABI_VERSION */
+	unsigned int		state;		/* ObjProc* state */
+	unsigned int		cause;		/* ObjProcCause* (COMPLETED) */
+	unsigned int		reserved;
+	long long		pid;		/* identifier only, not authority */
+	unsigned long long	generation;	/* boot-local identity generation */
 	unsigned long long	time[3];	/* user, sys, real (ms) */
 	unsigned int		msglen;		/* bytes in msg, no NUL */
-	unsigned int		reserved;
-	char			msg[PROCWAIT_MSG_MAX];
-} ProcWait;
+	unsigned int		reserved2;
+	char			msg[OBJ_PROCESS_MSG_MAX];
+	unsigned int		waiters;	/* observers enrolled at snapshot time */
+	unsigned int		reserved3;
+} ObjProcessInfo;
+
+#define PROCESS_WAIT_INFINITE ((unsigned long long)-1)
 
 /* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
  * struct Ospawn *options) creates one static x86-64 ELF child from an
@@ -416,9 +453,10 @@ typedef struct ProcWait {
 
 #define OBJ_EXITMSG_MAX 128
 
-/* Process-lifecycle adapters.  Wait is the direct typed PROCWAIT call;
- * spawn is the direct SPAWN call; rfork, oterminate and exits are direct. */
-long proc_wait(ProcWait *w);
+/* Process-lifecycle adapters over the VkindProcess Handle. */
+long obj_process_info(int handle, ObjProcessInfo *out);
+long obj_process_wait(int handle, ObjProcessInfo *out, long long timeout);
+long obj_process_terminate(int handle);
 long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options);
 

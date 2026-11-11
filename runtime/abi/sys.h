@@ -43,8 +43,8 @@
 #define	SEGFREE		32
 #define	SEGFLUSH	33
 #define	UNMOUNT		35 /* reserved */
-/* _WAIT(36) is RESERVED: if a name is ever wanted it may not reuse this
- * number; child wait is the direct typed PROCWAIT syscall (142). */
+/* _WAIT(36) is RESERVED: process completion is observed through a
+ * VkindProcess Handle, not an ancestral wait call. */
 #define	_WAIT		36 /* reserved */
 #define	SEEK		39 /* reserved */
 #define	FVERSION	40 /* reserved */
@@ -54,7 +54,8 @@
 #define	WSTAT		44 /* reserved */
 #define	FWSTAT		45 /* reserved */
 #define	MOUNT		46 /* reserved */
-/* AWAIT(47) is RESERVED: libc await()/wait() use the direct PROCWAIT call. */
+/* AWAIT(47) is RESERVED: completion is observed through VkindProcess
+ * Handles; the historical no-argument libc wait()/await() adapters are gone. */
 #define	AWAIT		47 /* reserved */
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */
@@ -124,12 +125,11 @@
 #define TCP6READ        111 /* reserved */
 #define TCP6WRITE       112 /* reserved */
 #define TCP6CLOSE       113 /* reserved */
-/* OSPAWN(92) is RESERVED: spawning is the direct SPAWN(146) call taking an
- * authorized Space Handle and OID, consistent with OEXECUTE(60).
- * OTERMINATE(93) is the direct historical call again and takes one positive
- * direct-child PID. */
+/* OSPAWN(92) is RESERVED: spawning is SPAWN(146).  OTERMINATE(93) is
+ * RESERVED: termination requires a VkindProcess Handle carrying Vcontrol,
+ * so a PID, process-table index or ancestry never confers authority. */
 #define	OSPAWN		92 /* reserved */
-#define	OTERMINATE	93
+#define	OTERMINATE	93 /* reserved */
 /*
  * SPAWN's fifth argument (also the historical OSPAWN options layout).  cpu
  * is an exact online logical kernel CPU (0..conf.nmach-1), or ~0ULL for
@@ -183,10 +183,10 @@ struct Ospawn {
 /* OBJLIST(141) is RESERVED: own-process Handle-table introspection is
  * SYSCTL(144), operation SysctlHandleList. */
 #define	OBJLIST		141 /* reserved */
-/* Direct typed child wait.  The single argument points to one ProcWait
- * record; the kernel fills pid, the three times and the bounded status text
- * exactly as the historical _WAIT did.  No ProcessSelf Handle is created. */
-#define	PROCWAIT	142
+/* PROCWAIT(142) is RESERVED.  Completion is observed through a
+ * VkindProcess Handle (ObjOpProcessWait), which is repeatable and survives
+ * the launcher.  There is no parent/child wait ABI. */
+#define	PROCWAIT	142 /* reserved */
 /* SYSCTL(144) and IOCTL(145) separate configuration/introspection and
  * device control from object data operations.  See runtime/abi/sysctl.h and
  * runtime/abi/ioctl.h for their typed request records. */
@@ -194,7 +194,10 @@ struct Ospawn {
 #define	IOCTL		145
 /* Direct spawn: (int Space handle, uvlong OID, char **argv, int argc,
  * struct Ospawn *options).  The Handle must carry Vexecute and the same
- * Oexecute/role checks as OEXECUTE apply.  Returns the child PID or -1. */
+ * Oexecute/role checks as OEXECUTE apply.  Returns a process-local
+ * VkindProcess Handle carrying Vobserve|Vcontrol|Vmeta|Vdelegate, or -1.
+ * The Handle, not the PID, is the authority; the child may outlive the
+ * launcher and multiple attenuated observers may observe it. */
 #define	SPAWN		146
 /* Region-scoped publication wait/wake.
  *
@@ -320,8 +323,12 @@ struct Rforkex {
 	} h[RFORKEX_MAXHANDLES];
 };
 
-/* Generated user stub for the direct call; returns the child PID or -1. */
+/* Generated user stub for the direct call.  In the parent it returns a
+ * VkindProcess Handle for the child; in the child it returns 0; on failure
+ * it returns -1.  The child Handles are not granted automatically: use the
+ * options plan to delegate a Handle to the child and the process Handle's
+ * Vdelegate right to share observation or control. */
 long rforkex(unsigned long flags, struct Rforkex *opts,
-	unsigned long long *childhandles);
+		unsigned long long *childhandles);
 
 #endif /* PLAN2001_ABI_SYS_H */

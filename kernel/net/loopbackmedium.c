@@ -26,7 +26,7 @@ readloopback(void *x)
 		runlock(&ifc->rwlk);
 		poperror();
 	}
-	pexit("hangup", 1);
+	pexit("hangup");
 }
 
 static void

@@ -26,7 +26,6 @@ extern long objbind(int, void *, long, unsigned long long,
 extern long objinvoke(int, void *, long);
 extern long sysctl(unsigned int, unsigned int, SysctlReq *, long);
 extern long ioctl(int, unsigned int, IoctlReq *, long);
-extern long procwait(void *);
 extern long spawn(int, unsigned long long, char **, int, struct Ospawn *);
 extern long rforkex(unsigned long, void *, unsigned long long *);
 extern long regionwait(unsigned long long, unsigned long long,
@@ -404,12 +403,43 @@ obj_device_ether_detach(int device)
 	return obj_device_ioctl(device, IoctlEtherDetach, nil, 0, 0);
 }
 
+/* Typed process-capability operations over OBJINVOKE. */
 long
-proc_wait(ProcWait *w)
+obj_process_info(int handle, ObjProcessInfo *out)
 {
-	if(w == nil)
-		return -1;
-	return procwait(w);
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpProcessInfo;
+	c.out = out;
+	c.outlen = sizeof *out;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_process_wait(int handle, ObjProcessInfo *out, long long timeout)
+{
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpProcessWait;
+	c.arg0 = (unsigned long long)timeout;
+	c.out = out;
+	c.outlen = sizeof *out;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
+obj_process_terminate(int handle)
+{
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpProcessTerminate;
+	return obj_invoke(handle, &c, sizeof c);
 }
 
 /* Ordinary fork is the canonical extended fork with an empty Handle plan. */
