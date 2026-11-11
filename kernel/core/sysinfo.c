@@ -121,7 +121,7 @@ zerofill(void *va, long n)
 
 /* UJ1 fixed read-only status snapshot: version, CPUs, physical/user bytes,
  * native O partition capacity. No kernel pointers or approximate free space.
- * Word 5 is reserved (formerly the removed native TCP6 endpoint count).
+ * Word 5 reports the live Procstat completion-record count.
  * SYSCTL SysctlSnapshot: the caller supplies exactly seven uvlong words. */
 extern uvlong ovolcapacity(void);
 long
@@ -137,7 +137,7 @@ sysctlsnapshot(void *user, uvlong n)
  syscalltracedump("snapshot");
 #endif
  v[0]=1;v[1]=conf.nmach;v[2]=(uvlong)conf.npage*BY2PG;
- v[3]=(uvlong)conf.upages*BY2PG;v[4]=ovolcapacity();v[5]=0;
+ v[3]=(uvlong)conf.upages*BY2PG;v[4]=ovolcapacity();v[5]=(uvlong)procstatlive();
  lock(&palloc.lk);v[6]=(uvlong)palloc.freecount*BY2PG;unlock(&palloc.lk);
  memmove(user,v,sizeof v);return 0;
 }

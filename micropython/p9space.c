@@ -1265,21 +1265,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(space_spawn_obj, 1, space_spawn);
 
-// wait() -> (handle, status): status '' if the process exited cleanly
-static mp_obj_t space_wait(void) {
-    Waitmsg *w;
-    mp_obj_t t[2];
-
-    p9_space_rest();
-    if ((w = wait()) == nil) {
-        raise_err();
-    }
-    t[0] = mp_obj_new_int(w->pid);
-    t[1] = mp_obj_new_str(w->msg, strlen(w->msg));
-    free(w);
-    return mp_obj_new_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(space_wait_obj, space_wait);
 
 // terminate(handle): authorized termination through a Vcontrol Handle
 static mp_obj_t space_terminate(mp_obj_t handle) {
@@ -1685,7 +1670,6 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_oput), MP_ROM_PTR(&space_oput_obj) },
     { MP_ROM_QSTR(MP_QSTR_oregister), MP_ROM_PTR(&space_oregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_spawn), MP_ROM_PTR(&space_spawn_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&space_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_terminate), MP_ROM_PTR(&space_terminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_CommitError), MP_ROM_PTR(&mp_type_CommitError) },
     { MP_ROM_QSTR(MP_QSTR_atomic), MP_ROM_PTR(&atomic_type) },

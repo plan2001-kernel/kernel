@@ -20,6 +20,10 @@ def run():
     import struct
     n = [0]
 
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
+
     def ok(value, name):
         assert value, name
         n[0] += 1
@@ -139,7 +143,7 @@ p.obj_close(h)
             pid = space.spawn(0x4f45584543000003, handle=sh,
                 argv=('micropython', '-c', child),
                 vhandles=((w, 8 + 128 + 256),))
-            reaped, status = p.wait()
+            reaped, status = reap(pid)
             ok(reaped == pid and status == '',
                'non-privileged child writes via delegated UART Handle')
             p.obj_close(sh)

@@ -194,7 +194,9 @@ the initial Handle before publication, and `PROCWAIT`, `OTERMINATE`,
 `RFNOWAIT` are deleted. `SPAWN` still creates a fresh `Pgrp`; no ancestry
 grants authority. The boot process has an explicit `Proc.boot` role, not a
 `parentpid == 0` test. `OEXECUTE` keeps the same Process identity and its
-observers; it replaces the image in place without granting new rights.
+observers; it replaces the image in place without granting new rights. The
+no-argument libc `wait()`/`await()` tracking adapters are gone; users wait on
+explicit `VkindProcess` Handles.
 
 ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff, mappings,
 console, timer interrupts and physical-page allocation, not full-system

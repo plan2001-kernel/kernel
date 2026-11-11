@@ -186,6 +186,7 @@ void		procstatput(Procstat*);
 void		procstatstart(Procstat*);
 void		procstatcomplete(Procstat*, int, char*, ulong*);
 int		procstatwait(Procstat*, ObjProcessInfo*, long);
+int		procstatlive(void);
 void		procstatinfo(Procstat*, ObjProcessInfo*);
 int		procstatterminate(Procstat*);
 void		procdiscard(Proc*);

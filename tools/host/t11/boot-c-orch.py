@@ -37,7 +37,7 @@ m,e=plan9.obj_receive(sr,5000)
 gr=plan9.obj_read(m,128,0)
 plan9.obj_close(m)
 ck('ge-interproc',gr==(str(oid).encode()+bytes((58,))+b'GE-PAYLOAD'))
-a,bs=space.wait()
+a=p; bs=plan9.process_wait(p,-1)[1]
 ck('ge-wait',bs=='')
 plan9.obj_close(sg)
 plan9.obj_fifo_shutdown(gf)
@@ -65,7 +65,7 @@ ck('ambient-control',cres==b'1')
 ck('ambient-denied',ares==b'1')
 ck('ambient-oid-unreachable',ores==b'0')
 ck('no-ambient-handle',cres==b'1' and ares==b'1' and ores==b'0')
-a,bs=space.wait()
+a=pe; bs=plan9.process_wait(pe,-1)[1]
 ck('ambient-wait',a==pe and bs=='')
 plan9.obj_close(ctl)
 plan9.obj_close(sec)
@@ -152,7 +152,8 @@ plan9.obj_publish(crf,rel)
 plan9.obj_close(rel)
 qok=1
 for kp in kids:
-    a,bs=space.wait()
+    r=plan9.process_wait(kp,-1)
+    a=kp; bs=r[1]
     if not (bs==''):
         qok=0
 

@@ -432,6 +432,8 @@ typedef struct ObjProcessInfo {
 	unsigned int		msglen;		/* bytes in msg, no NUL */
 	unsigned int		reserved2;
 	char			msg[OBJ_PROCESS_MSG_MAX];
+	unsigned int		waiters;	/* observers enrolled at snapshot time */
+	unsigned int		reserved3;
 } ObjProcessInfo;
 
 #define PROCESS_WAIT_INFINITE ((unsigned long long)-1)
@@ -454,8 +456,6 @@ long obj_process_wait(int handle, ObjProcessInfo *out, long long timeout);
 long obj_process_terminate(int handle);
 long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options);
-long obj_rforkex(unsigned long flags, void *opts,
-		unsigned long long *childhandles);
 
 /*
  * libc/libo-style wrappers over the five kernel entry points.  The raw

@@ -11,6 +11,10 @@ def run():
     import space
     import struct
     n = [0]
+
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
     def ok(v, name):
         assert v, name
         n[0] += 1
@@ -138,8 +142,10 @@ p.obj_write(out,b'DONE'+ident+env)
         ok(struct.unpack('<IIIIQ',answer[28:])==(2,ctl,60,0,9),'TEE identical RX envelope')
         p.obj_close(rd)
     reaped=[]
-    for i in range(2):
-        pid,status=p.wait();reaped.append(pid)
+    for cpid,rd,gw in children:
+        r=p.process_wait(cpid,-1)
+        status=r[1]
+        reaped.append(cpid)
         ok(status=='','consumer successful exit')
     ok(sorted(reaped)==sorted([c[0] for c in children]),'exact consumer PIDs')
     # Stress ordinary independent queues; ring remains bounded without probes.
@@ -200,7 +206,7 @@ p.obj_write(out,b'DONE')
     p.obj_close(d)
     p.obj_write(gw,b'G');p.obj_close(gw)
     ok(p.obj_read(rd,4,0)==b'DONE','last owner has pending RX at exit')
-    got,status=p.wait()
+    got,status=reap(pid)
     ok(got==pid and status=='','last device owner exits successfully')
     ok(p.obj_info(f)[14]==1 and p.obj_info(sub)[12]==0,'exit closes and drains surviving FIFO capabilities')
     d=p.obj_device_open(cat,2,ctl,0)

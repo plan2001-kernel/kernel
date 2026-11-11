@@ -26,6 +26,10 @@ def run():
     print('T16-PASS segment flush free detach')
     import space
     sh = p.obj_open_space('init')
+
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
     if hasattr(shared, 'previous_ge_oid'):
         previous = p.obj_open_ge_space(sh, shared.previous_ge_oid)
         assert p.obj_read(previous, 11) == b'T16-UPDATED'
@@ -72,7 +76,7 @@ def run():
     cid = 0x4f45584543000003
     pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
                       vhandles=((gh, p.VREAD | p.VMETA),))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     assert waited == pid and status == ''
     print('T16-PASS child GE rights and process isolation')
     source = p.obj_open_ge_space(sh, oid)
@@ -185,7 +189,7 @@ def run():
              "else: raise AssertionError('child exported unauthorized role')\n")
     pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
                       vhandles=((control, p.VCONTROL | p.VMETA),))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     assert waited == pid and status == ''
     p.obj_close(control)
     p.obj_close(view)
@@ -216,7 +220,7 @@ def run():
              "assert p.obj_read(h,6)==b'T16-GE'\n")
     pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
                       view=1, roles=('t16binding',))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     assert waited == pid and status == ''
     print('T16-PASS role binding inherited by child')
 
@@ -245,7 +249,7 @@ def run():
              "assert p.obj_read(h,12)==b'T16-VOLATILE'\n")
     pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child),
                       view=1, roles=('t16bytes',))
-    waited, status = space.wait()
+    waited, status = reap(pid)
     assert waited == pid and status == ''
     p.obj_bind(0, 't16bytes', 0, p.OBJ_BIND_REMOVE)
     assert p.obj_read(opened_payload, 12) == b'T16-VOLATILE'
@@ -300,7 +304,7 @@ def run():
     for nr in (97, 98, 99, 101, 102, 103, 104, 105, 106):
         child = "import plan9 as p\np.sysraw(" + str(nr) + ")\n"
         pid = space.spawn(cid, handle=sh, argv=('micropython', '-c', child))
-        waited, status = space.wait()
+        waited, status = reap(pid)
         assert waited == pid and status != ''
     print('T16-PASS retired O Space, binding and namespace calls denied')
     p.obj_close(rh)

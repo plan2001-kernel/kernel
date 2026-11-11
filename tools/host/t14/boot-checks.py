@@ -11,6 +11,10 @@ def run():
     import plan9 as p
     import space
     n = [0]
+
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
     def ok(v, label):
         assert v, label
         n[0] += 1
@@ -88,7 +92,7 @@ exec(source.decode())
     ok(s[7]['nd_tx']==5,'cached peer skips redundant ND')
     s=cmd(b'C')
     ok(s[0] and s[1]=='stopped' and not s[4],'controlled shutdown clears neighbor state')
-    got,status=p.wait()
+    got,status=reap(pid)
     ok(got==pid and status=='','exact service child exit status')
     ok(p.obj_info(rf)[14]==1,'last device close closes surviving RX FIFO')
     for h in (command,output,response,rf):p.obj_close(h)
@@ -98,7 +102,7 @@ exec(source.decode())
     p.obj_fifo_shutdown(rf)
     s=receive()
     ok(s[0] and s[1]=='transport-error' and s[7]['transport_error']==1,'RX revoke stops service and releases device')
-    got,status=p.wait()
+    got,status=reap(pid)
     ok(got==pid and status=='','revoked service child exits cleanly')
     for h in (command,output,response,rf):p.obj_close(h)
     d=p.obj_device_open(cat,2,ctl,0)

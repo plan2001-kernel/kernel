@@ -157,7 +157,11 @@ counted and outlives execution; the scheduler `Proc` and address space are
 reclaimed independently. Voluntary exit, authorized termination and unhandled
 fault are distinct causes. `OEXECUTE` preserves the same process identity and
 existing observer authority. The boot process has an explicit `Proc.boot`
-role; no ancestry-dependent process wait or control path remains.
+role; no ancestry-dependent process wait or control path remains. The
+historical no-argument libc `wait()`/`await()` adapters are deleted: callers
+use `obj_process_wait()` with an explicit Process Handle, close it when
+finished, and need no global tracking table. A process Handle has no explicit
+revoke operation; completion is immutable and control is a separate grant.
 
 `Pgrp/OContext` currently owns volatile role bindings with share/copy/empty
 and sealing behavior. `OBJBIND`, `NamespaceView`, role opening and

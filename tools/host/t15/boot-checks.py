@@ -8,6 +8,10 @@ def run():
     import plan9 as p
     import space
     count=[0]
+
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
     def ok(v,name):
         assert v,name
         count[0]+=1;print('T15-PASS',count[0],name)
@@ -55,7 +59,7 @@ exec(code.decode())
     ok(s[7]['plain_drop']==1,'plaintext echo cannot bypass ESP')
     s=cmd(b'C')
     ok(s[0] and s[1]=='stopped','controlled userspace shutdown')
-    got,status=p.wait()
+    got,status=reap(pid)
     ok(got==pid and status=='','exact successful MPY child exit')
     ok(p.obj_info(rx)[14]==1,'last device close drains existing RX FIFO')
     for h in (rx,ctl,out,response,cat,sh):p.obj_close(h)

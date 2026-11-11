@@ -1265,6 +1265,7 @@ postnotepg(ulong noteid, char *msg, int flag)
  */
 static Lock pstatgendoor;
 static uvlong pstatgen;
+static int pstatlive;
 
 struct Pwait
 {
@@ -1284,6 +1285,7 @@ procstatnew(ulong pid)
 	st->pid = pid;
 	lock(&pstatgendoor);
 	st->generation = ++pstatgen;
+	pstatlive++;
 	unlock(&pstatgendoor);
 	return st;
 }
@@ -1298,8 +1300,23 @@ procstatref(Procstat *st)
 void
 procstatput(Procstat *st)
 {
-	if(st != nil && decref(&st->ref) == 0)
-		free(st);
+	if(st == nil || decref(&st->ref) != 0)
+		return;
+	lock(&pstatgendoor);
+	pstatlive--;
+	unlock(&pstatgendoor);
+	free(st);
+}
+
+int
+procstatlive(void)
+{
+	int n;
+
+	lock(&pstatgendoor);
+	n = pstatlive;
+	unlock(&pstatgendoor);
+	return n;
 }
 
 void
@@ -1360,11 +1377,33 @@ pstatunlink(Procstat *st, Pwait *w)
 		}
 }
 
+static int
+pstatwaiters(Procstat *st)
+{
+	Pwait *w;
+	int n;
+
+	n = 0;
+	for(w = st->wait; w != nil; w = w->next)
+		n++;
+	return n;
+}
+
 /*
  * Wait for completion, without consuming it.  Timeout is -1 for an infinite
  * wait, otherwise milliseconds.  Returns 0 when completed and 1 on timeout.
- * A pending interrupted note surfaces as the ordinary Eintr error; the wait
- * node is removed under the record lock before unwinding.
+ *
+ * Linearization point: after the optional sleep, the wait node is unlinked,
+ * the completed/timeout decision is made and the entire ObjProcessInfo
+ * snapshot is copied under the same st->lk critical section.  A completion
+ * that wins that lock is therefore reported as result 0 with COMPLETED;
+ * result 1 always describes a non-completed snapshot, even if completion
+ * happens immediately after the lock is released.  Completion itself takes
+ * the same lock for its one-time state transition and wake-all.
+ *
+ * A pending interrupted note surfaces as the ordinary Eintr error.  The
+ * error path unlinks the enrolled node under st->lk, so no wait node or
+ * reference can leak.
  */
 int
 procstatwait(Procstat *st, ObjProcessInfo *out, long timeout)
@@ -1382,26 +1421,20 @@ procstatwait(Procstat *st, ObjProcessInfo *out, long timeout)
 		nexterror();
 	}
 	lock(&st->lk);
-	if(st->state != PstatCompleted){
+	if(st->state != PstatCompleted && timeout != 0){
 		w.next = st->wait;
 		st->wait = &w;
 		unlock(&st->lk);
 		if(timeout < 0)
 			sleep(&w.r, pstatdone, &w);
-		else if(timeout > 0)
+		else
 			tsleep(&w.r, pstatdone, &w, timeout);
 		lock(&st->lk);
-		pstatunlink(st, &w);
-		completed = st->state == PstatCompleted;
-		unlock(&st->lk);
-	}else{
-		completed = 1;
-		unlock(&st->lk);
 	}
-	poperror();
+	pstatunlink(st, &w);
+	completed = st->state == PstatCompleted;
 	memset(out, 0, sizeof *out);
 	out->version = OBJ_ABI_VERSION;
-	lock(&st->lk);
 	out->state = st->state;
 	out->cause = st->cause;
 	out->pid = (long long)st->pid;
@@ -1413,7 +1446,9 @@ procstatwait(Procstat *st, ObjProcessInfo *out, long timeout)
 	if(out->msglen > OBJ_PROCESS_MSG_MAX)
 		out->msglen = OBJ_PROCESS_MSG_MAX;
 	memmove(out->msg, st->msg, out->msglen);
+	out->waiters = (unsigned int)pstatwaiters(st);
 	unlock(&st->lk);
+	poperror();
 	return completed ? 0 : 1;
 }
 
@@ -1436,6 +1471,7 @@ procstatinfo(Procstat *st, ObjProcessInfo *out)
 	if(out->msglen > OBJ_PROCESS_MSG_MAX)
 		out->msglen = OBJ_PROCESS_MSG_MAX;
 	memmove(out->msg, st->msg, out->msglen);
+	out->waiters = (unsigned int)pstatwaiters(st);
 	unlock(&st->lk);
 }
 
@@ -1518,8 +1554,21 @@ pexit(char *exitstr)
 	Egrp *egrp;
 	Pgrp *pgrp;
 	Segment *s;
-	char *msg;
+	char status[128];
 	int cause, i;
+
+	/*
+	 * Snapshot the bounded status while the user address space and the
+	 * note backing are still live.  In particular sysexits() may pass a
+	 * pointer into the exiting process's user memory.  Completion is
+	 * published later, after mapping teardown, from this kernel-owned
+	 * copy and never dereferences the old pointer again.
+	 */
+	status[0] = '\0';
+	if(exitstr != nil)
+		snprint(status, sizeof status, "%s", exitstr);
+	else if(up->lastnote != nil)
+		snprint(status, sizeof status, "%s", up->lastnote->msg);
 
 	up->alarm = 0;
 	timerdel(&up->timer);
@@ -1547,16 +1596,11 @@ pexit(char *exitstr)
 	if(pgrp != nil)
 		closepgrp(pgrp);
 
-	if(up->boot){
-		if(exitstr == nil)
-			exitstr = "unknown";
-		panic("boot process died: %s", exitstr);
-	}
+	if(up->boot)
+		panic("boot process died: %s",
+			status[0] != '\0' ? status : "unknown");
 
 	cause = pexitcause(up);
-	msg = exitstr;
-	if(msg == nil && up->lastnote != nil)
-		msg = up->lastnote->msg;
 	utime = up->time[TUser] + up->time[TCUser];
 	stime = up->time[TSys] + up->time[TCSys];
 	time[TUser] = tk2ms(utime);
@@ -1582,7 +1626,7 @@ pexit(char *exitstr)
 
 	st = up->stat;
 	up->stat = nil;
-	procstatcomplete(st, cause, msg, time);
+	procstatcomplete(st, cause, status, time);
 	procstatput(st);
 
 	qlock(&up->debug);

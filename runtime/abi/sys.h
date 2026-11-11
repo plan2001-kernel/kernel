@@ -54,7 +54,8 @@
 #define	WSTAT		44 /* reserved */
 #define	FWSTAT		45 /* reserved */
 #define	MOUNT		46 /* reserved */
-/* AWAIT(47) is RESERVED: libc await()/wait() observe process Handles. */
+/* AWAIT(47) is RESERVED: completion is observed through VkindProcess
+ * Handles; the historical no-argument libc wait()/await() adapters are gone. */
 #define	AWAIT		47 /* reserved */
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */

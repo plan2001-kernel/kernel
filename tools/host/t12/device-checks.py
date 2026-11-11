@@ -20,6 +20,10 @@ def run():
     import struct
     n = [0]
 
+    def reap(h):
+        r = p.process_wait(h, -1)
+        return h, r[1]
+
     def epo(kind, mode):
         return struct.pack('<IIII', 1, mode, kind, 0)
 
@@ -297,7 +301,7 @@ p.obj_write(out,b'DONE 12')
         p.sleep(2)
     ok(count==12, 'parent completes concurrent peripheral transfers')
     ok(p.obj_read(rd,7,0)==b'DONE 12', 'child completes concurrent peripheral transfers')
-    reaped, status = p.wait()
+    reaped, status = reap(pid)
     ok(reaped==pid and status=='', 'exact successful child PID and exit status')
     p.obj_close(rd)
     final = p.obj_device_send(peripheral,descriptor_req)
@@ -322,7 +326,7 @@ p.obj_write(out,b'SENT')
     p.obj_write(go_write,b'G')
     p.obj_close(go_write)
     assert p.obj_read(rd,4,0)==b'SENT'
-    reaped, status = p.wait()
+    reaped, status = reap(pid)
     ok(reaped==pid and status=='', 'last-owner process exits with pending completion')
     p.obj_close(rd)
     p.obj_close(sh)

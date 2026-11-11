@@ -87,8 +87,8 @@ try:
 except OSError:
     ck('timeout',True)
 
-a,bs=space.wait()
-c,ds=space.wait()
+a=p1; bs=plan9.process_wait(p1,-1)[1]
+c=p2; ds=plan9.process_wait(p2,-1)[1]
 ck('waitpids',(a==p1 and c==p2) or (a==p2 and c==p1))
 ck('waitok',bs=='' and ds=='')
 say(b'M6'+chr(10).encode())

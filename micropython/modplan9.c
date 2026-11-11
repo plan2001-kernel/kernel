@@ -52,26 +52,11 @@ static mp_obj_t p9_alarm(mp_obj_t ms) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_alarm_obj, p9_alarm);
 
-// wait() -> (handle, status): status '' if the process exited cleanly
-static mp_obj_t p9_wait(void) {
-    Waitmsg *w;
-    mp_obj_t t[2];
-
-    p9_space_rest();
-    if ((w = wait()) == nil) {
-        raise_err();
-    }
-    t[0] = mp_obj_new_int(w->pid);
-    t[1] = mp_obj_new_str(w->msg, strlen(w->msg));
-    free(w);
-    return mp_obj_new_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_wait_obj, p9_wait);
 
 static mp_obj_t
 p9_proctuple(ObjProcessInfo *p, long result)
 {
-    mp_obj_t t[9];
+    mp_obj_t t[10];
 
     t[0] = mp_obj_new_int_from_ll(p->pid);
     t[1] = mp_obj_new_str(p->msg, p->msglen);
@@ -82,7 +67,8 @@ p9_proctuple(ObjProcessInfo *p, long result)
     t[6] = mp_obj_new_int_from_ull(p->time[1]);
     t[7] = mp_obj_new_int_from_ull(p->time[2]);
     t[8] = mp_obj_new_int(result);
-    return mp_obj_new_tuple(9, t);
+    t[9] = mp_obj_new_int_from_ull(p->waiters);
+    return mp_obj_new_tuple(10, t);
 }
 
 // process_wait(handle, timeout=-1) -> typed completion tuple.  Repeatable.
@@ -180,7 +166,7 @@ static mp_obj_t p9_rforkex(size_t n, const mp_obj_t *a) {
     req.count = (unsigned int)have;
     if(n > 3 && a[3] != mp_const_none)
         req.count = (unsigned int)mp_obj_get_int(a[3]);
-    r = obj_rforkex((unsigned long)mp_obj_get_int(a[0]), &req, map);
+    r = rforkex((unsigned long)mp_obj_get_int(a[0]), &req, map);
     if(r < 0)
         raise_err();
     if(r == 0)
@@ -1071,7 +1057,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_pipeclose), MP_ROM_PTR(&p9_pipeclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&p9_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_wait), MP_ROM_PTR(&p9_processwait_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_info), MP_ROM_PTR(&p9_processinfo_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_terminate), MP_ROM_PTR(&p9_processterminate_obj) },

@@ -263,7 +263,6 @@ LIBC_SOURCES = [
     "9sys/privalloc.c",
     "9sys/rerrstr.c",
     "9sys/sbrk.c",
-    "9sys/wait.c",
     "9sys/werrstr.c",
     "fmt/dofmt.c",
     "fmt/errfmt.c",
@@ -512,7 +511,7 @@ def main() -> int:
                 checks.append(f"syscall stub {sym} has no RBP={num}")
         # Migrated process-lifecycle adapters must be real C symbols, not
         # retired syscall stubs; their OBJOP path is checked in the disasm.
-        realsyms = ("wait", "obj_ospawn", "obj_rforkex", "rfork",
+        realsyms = ("obj_ospawn", "rfork",
                     "obj_process_wait", "obj_process_info",
                     "obj_process_terminate")
         for sym in realsyms:
