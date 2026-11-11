@@ -464,7 +464,9 @@ enum
  */
 enum
 {
-	SSEG, TSEG, DSEG, BSEG, ESEG, LSEG, SEG1, SEG2, SEG3, SEG4, NSEG
+	SSEG, TSEG, DSEG, BSEG, ESEG, LSEG, SEG1, SEG2, SEG3, SEG4,
+	SEG5, SEG6, SEG7, SEG8, SEG9, SEG10, SEG11, SEG12, SEG13, SEG14,
+	SEG15, SEG16, NSEG
 };
 
 enum
@@ -554,7 +556,6 @@ struct Proc
 	Pgrp	*pgrp;		/* Process group for namespace */
 	Egrp 	*egrp;		/* Environment group */
 	Ref	*fdgrp;		/* legacy RFORK FD-group presence token, nil = absent */
-	int	stdoutpipe;	/* explicit Pipe-backed IOWRITE route, otherwise 0 */
 	void	*vobjhandles;	/* Unified process-local OBJ, GE and namespace Handles */
 	ulong	iomask;		/* Process-local native output grants */
 

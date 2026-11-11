@@ -9,7 +9,6 @@
 #include	<libc.h>
 #include	<envapi.h>
 #include	"../../abi/sysctl.h"
-#include	"../../abi/tcp6.h"
 
 extern long sysctl(unsigned int, unsigned int, SysctlReq *, long);
 

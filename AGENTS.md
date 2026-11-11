@@ -6,8 +6,8 @@ Read [the authoritative target architecture](docs/ARCHITECTURE.md) first.
 Processes are independent execution contexts related only by explicit
 capabilities and shared resources, not privileged parent/child ancestry.
 Memory-publication IPC uses one RW writer, authorized RO readers, atomic
-release/acquire publication and blocking WAIT/WAKE. `ObjectFIFO` is a current
-implementation rejected as the target generic kernel IPC primitive.
+release/acquire publication and blocking WAIT/WAKE. Do not reintroduce a
+generic kernel message FIFO, Pipe or payload-copy IPC primitive.
 
 Whenever a phase replaces a mechanism, **remove** its obsolete code, public
 ABI, wrappers/adapters, dormant providers, fixtures, tests and docs. List
@@ -51,10 +51,10 @@ AMD64 or claim that ARM64 userspace and drivers already work.
   and objects reimported.
 - Object operations belong to resources with object/capability semantics.
   Direct scalar syscalls are allowed. **There is no fixed syscall-count goal.**
-- Keep low-level device mechanisms. Current Ethernet receive uses
-  `ObjectFIFO`; current USB control has distinct synchronous completion.
-  Migrate needed transport before deleting the obsolete FIFO provider in
-  Phase 6. Do not introduce another universal kernel message queue.
+- Keep low-level device mechanisms. Ethernet receive and console sessions
+  use capability regions with WAIT/WAKE; USB control has distinct
+  synchronous completion. Do not introduce another universal kernel message
+  queue, FIFO or Pipe.
 - MicroPython is the current userspace proof of concept. Do not add larger
   userspace products, protocol stacks, or compatibility requirements without
   an explicit request.

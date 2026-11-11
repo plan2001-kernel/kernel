@@ -33,10 +33,6 @@ int		obootstrap(Proc*);
 int		procmemreplace(Proc*, uvlong);
 void		vobjprocexec(Proc*);
 void		vobjprocexit(Proc*);
-void		pipeprocexec(Proc*);
-int		pipekernelinstall(Proc*, void*, int);
-void		espctl_bootstrap(Proc*);
-void		pipeprocexit(Proc*);
 void		kbdprocexec(Proc*);
 void		kbdprocexit(Proc*);
 void		uartprocexec(Proc*);
@@ -408,6 +404,3 @@ long		zerofill(void*, long);
 #pragma varargck argpos pprint	1
 
 void envsetval(Egrp*, char*, char*);
-
-void pipeoutputset(Proc*, int);
-long pipeoutputwrite(int, void*, long);

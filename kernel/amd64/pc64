@@ -1,9 +1,9 @@
 # pc64 - canonical O-only storage/boot plus raw Ethernet devices.
 #
-# Combines native O storage and boot with the E7.7 native Ethernet/IPv6
-# components still present in the link closure. The legacy #l/#I/#W
-# registrations and compiled IPv4 paths are omitted. T13 does not start
-# native IPv6; the common Device ABI exclusively claims raw NIC RX on open.
+# Combines native O storage and boot with raw L2 Ethernet drivers only.  The
+# legacy #l/#I/#W registrations, compiled IPv4 paths, kernel IPv6/ARP/ESP
+# protocol stack and all network boot services are removed.  The common
+# Device ABI exclusively claims raw NIC RX through a capability region ring.
 # There is no Dev registry and no swap Dev: Plan2001-O has no swap
 # partition, file, device or anonymous pageout, and no legacy Dev front
 # doors.  The native framebuffer text console and the raw PS/2 keyboard
@@ -14,7 +14,6 @@ link
 	etheri225	pci ethermii
 	ethersink
 	ethervirtio10	pci virtio10pc
-	loopbackmedium
 	usbehci		pci usbehcipc
 	usbxhcipci	pci usbxhci
 
@@ -22,24 +21,8 @@ misc
 	pci		pcipc
 	archcore
 	envcore
-	pipecore
 	rtccore
 	uartcore
-	nativev6
-	espctl
-	espcontrol
-	esp6
-	nativeinh6
-	ethernative
-	ipcore
-	ip6only
-	ipv6
-	ipaux
-	iproute6
-	ipv6only
-	netlog
-	nullmedium
-	arp
 	archgeneric	kbdcore i8259 i8253
 	archacpi	mp apic squidboy ec hpet
 	mtrr
@@ -55,10 +38,6 @@ misc
 
 	uarti8250
 	uartpci		pci
-
-ip
-	ipifc
-	icmp6
 
 port
 	int cpuserver = 0;

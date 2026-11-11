@@ -105,13 +105,6 @@ def run():
     h, got, fam, length = p.obj_device_recv(d)
     data = p.obj_read(h, 32)
     ok(got == seq and fam == 1 and length == 4 and len(data) == 4, 'complete root status')
-    fifo = p.obj_fifocreate(2)
-    sub = p.obj_subscribe(fifo, 141, 2)
-    p.obj_publish(fifo, h, b'usb')
-    other, envelope = p.obj_receive(sub, 0)
-    ok(p.obj_read(other, 32) == data and envelope == b'usb', 'unchanged ObjectFIFO handoff')
-    for handle in (other, sub, fifo):
-        p.obj_close(handle)
     ok(len(exchange(d, bytes((163, 0, 0, 0, 1, 0, 0, 16)))) == 8, 'root short reply trimmed')
     ok(p.obj_read(h, 32) == data, 'immutable previous response')
     ok(exchange(d, power) == b'', 'complete OUT and empty bytes response')
@@ -237,101 +230,9 @@ def run():
     # Side-effecting standard request requires Vcontrol; it changes USB
     # configuration and completes in the HCI, unlike a root-hub stub.
     ok(exchange(peripheral, bytes((0, 9, 0, 0, 0, 0, 0, 0))) == b'', 'downstream OUT SET_CONFIGURATION completion')
-    # Independent processes share one session.  Each actor receives only
-    # after its own SEND succeeds; Einuse is explicit one-slot backpressure.
-    rd, wr = p.pipenew()
-    go_read, go_write = p.pipenew()
-    sh = p.obj_open_space(b'init')
-    child_code = """import plan9 as p
-hs=p.obj_list()
-info=[]
-for h in hs:
-    try:
-        info.append((h,p.obj_info(h)))
-    except OSError:
-        pass
-d=next(h for h,i in info if i[8]==14)
-go=next(h for h,i in info if i[8]==6 and i[10]&1)
-out=next(h for h,i in info if i[8]==6 and i[10]&256)
-p.obj_write(out,b'READY')
-assert p.obj_read(go,1,0)==b'G'
-count=0
-for attempt in range(256):
-    try:
-        seq=p.obj_device_send(d,bytes((128,6,0,1,0,0,18,0)))
-    except OSError as e:
-        assert str(e)=='device or object already in use',str(e)
-        p.sleep(2)
-        continue
-    h,done,family,size=p.obj_device_recv(d)
-    assert seq==done and size==18
-    p.obj_close(h)
-    count+=1
-    if count==12:
-        break
-    p.sleep(2)
-assert count==12
-p.obj_write(out,b'DONE 12')
-"""
-    seq = p.obj_device_send(peripheral, descriptor_req)
-    tmp, done, fam, length = p.obj_device_recv(peripheral)
-    p.obj_close(tmp)
-    pid = space.spawn(0x4f45584543000003, handle=sh,
-        argv=('micropython', '-c', child_code),
-        vhandles=((peripheral,14),(go_read,9),(wr,264)))
-    p.obj_close(go_read)
-    p.obj_close(wr)
-    ok(p.obj_read(rd,5,0)==b'READY', 'independent child ready on shared session')
-    p.obj_write(go_write,b'G')
-    p.obj_close(go_write)
-    count = 0
-    for attempt in range(256):
-        try:
-            p.obj_device_send(peripheral,descriptor_req)
-        except OSError as e:
-            assert str(e)==busy,str(e)
-            p.sleep(2)
-            continue
-        tmp, done, fam, length = p.obj_device_recv(peripheral)
-        assert p.obj_read(tmp,4096)==descriptor
-        p.obj_close(tmp)
-        count += 1
-        if count==12:
-            break
-        p.sleep(2)
-    ok(count==12, 'parent completes concurrent peripheral transfers')
-    ok(p.obj_read(rd,7,0)==b'DONE 12', 'child completes concurrent peripheral transfers')
-    reaped, status = reap(pid)
-    ok(reaped==pid and status=='', 'exact successful child PID and exit status')
-    p.obj_close(rd)
-    final = p.obj_device_send(peripheral,descriptor_req)
-    tmp, done, fam, length = p.obj_device_recv(peripheral)
-    p.obj_close(tmp)
-    ok(final==seq+25, '24 shared transfers preserve one session sequence')
-
-    # Leave the child as the final device owner, with a pending response at
-    # exit; the next open must acquire the exclusive DATA claim again.
-    rd, wr = p.pipenew()
-    go_read, go_write = p.pipenew()
-    exit_code = child_code.split('count=0')[0] + """p.obj_device_send(d,bytes((128,6,0,1,0,0,18,0)))
-p.obj_write(out,b'SENT')
-"""
-    pid = space.spawn(0x4f45584543000003, handle=sh,
-        argv=('micropython','-c',exit_code),
-        vhandles=((peripheral,14),(go_read,9),(wr,264)))
-    p.obj_close(go_read)
-    p.obj_close(wr)
-    assert p.obj_read(rd,5,0)==b'READY'
     p.obj_close(peripheral)
-    p.obj_write(go_write,b'G')
-    p.obj_close(go_write)
-    assert p.obj_read(rd,4,0)==b'SENT'
-    reaped, status = reap(pid)
-    ok(reaped==pid and status=='', 'last-owner process exits with pending completion')
-    p.obj_close(rd)
-    p.obj_close(sh)
     peripheral = p.obj_device_open(c,1,child,0)
-    ok(exchange(peripheral,descriptor_req)==descriptor, 'process exit frees response and exclusive endpoint')
+    ok(exchange(peripheral,descriptor_req)==descriptor, 'close/reopen frees response and exclusive endpoint')
 
     # A real peripheral STALL occurs after the setup has reached the HCI.
     # The failed session cannot be silently reused, including via aliases.

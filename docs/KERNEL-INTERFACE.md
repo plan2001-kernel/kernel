@@ -171,13 +171,14 @@ ancestry dependence is removed. A role, OID or set membership cannot grant
 authority by name alone. GE/O revocation affects copies of the same grant
 origin, not independently opened grants to the same OID.
 
-`ObjectFIFO` currently supplies framed transport, subscriptions and Ethernet
-receive; Pipe and `SPAWN` `stdoutpipe` remain. USB control completion is
-synchronous and distinct. These are implementation facts. `ObjectFIFO` is
-rejected as the target generic kernel IPC primitive. After the Phase 4
-MicroPython proof, Phase 6 removes its provider, ABI, adapters and tests,
-alongside replaced device/console transport. Do not replace it with a
-universal kernel queue. See [device ABI](DEVICE-ABI.md).
+Ethernet receive and console sessions use the `ObjRingHeader` capability-ring
+layout in `runtime/abi/obj.h`: one writer, authorized read-only mappings,
+release/acquire publication and `REGIONWAIT`/`REGIONWAKE`. Ethernet transmit
+uses the same layout in the opposite direction: the authorized publisher owns
+the unique writable mapping and the kernel consumes complete frames and
+publishes `ack_seq`. USB control completion is synchronous and distinct.
+`ObjectFIFO`, Pipe and the `SPAWN` stdout route are deleted; no generic kernel
+message queue replaces them. See [device ABI](DEVICE-ABI.md).
 
 Current `SYSCTL(144)` covers system/own-process inspection and configuration;
 `IOCTL(145)` covers authorized device control/status. Device payload uses

@@ -25,7 +25,7 @@
  * Handle plan. */
 #define	RFORK		19 /* reserved */
 #define	_WRITE		20 /* reserved */
-#define	PIPE		21 /* reserved */
+/* 21 is retired: there is no Pipe syscall. */
 #define	CREATE		22 /* reserved */
 #define	FD2PATH		23 /* reserved */
 #define	BRK_		24
@@ -80,12 +80,9 @@
 #define	USBCLOSE	69 /* reserved */
 #define	USBEPNAME	70 /* reserved */
 /* 71-85 RESERVED: former Pipe/KBD/UART compatibility family.  The numbers
- * stay allocated forever but have no dispatch entry; use the OBJ* five-call
- * ABI (Pipe via CREATE/INVOKE/CLOSE, UART/KBD via OPEN/INVOKE/CLOSE). */
-#define	PIPENEW		71 /* reserved */
-#define	PIPEREAD	72 /* reserved */
-#define	PIPEWRITE	73 /* reserved */
-#define	PIPECLOSE	74 /* reserved */
+ * have no dispatch entry; use the OBJ* five-call ABI (UART/KBD via
+ * OPEN/INVOKE/CLOSE and IOCTL).  The retired Pipe identifiers are not
+ * retained as a source-level compatibility alias. */
 #define	KBDOPEN		75 /* reserved */
 #define	KBDREAD		76 /* reserved */
 #define	KBDCLOSE	77 /* reserved */
@@ -105,13 +102,11 @@
 #define	ENVSET		89 /* reserved */
 #define	ENVDELETE	90 /* reserved */
 #define	ENVLIST		91 /* reserved */
-/* N13 experimental object views.  PIPEINHERIT=100 is RESERVED: the number
- * stays allocated forever but has no dispatch entry.  Handle inheritance is
- * declared atomically by RFORKEX(143) or SPAWN options, never armed ahead
- * of process creation. */
+/* N13 experimental object views.  Handle inheritance is declared atomically
+ * by RFORKEX(143) or SPAWN options, never armed ahead of process creation. */
 #define OBIND           96 /* reserved */
-/* 97-99 reserved: retired object binding calls. */
-#define PIPEINHERIT     100 /* reserved */
+/* 97-100 reserved: retired object binding calls and the retired Pipe
+ * inheritance arming call; none is retained as a source-level alias. */
 /* 104 reserved: retired extended object binding call. */
 #define OQUERY          106 /* reserved */
 /* SYSSNAPSHOT(107) is RESERVED: system status is SYSCTL(144), operation
@@ -145,7 +140,7 @@ struct Ospawn {
 /* 116-120 RESERVED: former NET6* UDP6 compatibility family.  The numbers
  * stay allocated forever but have no dispatch entry.  There is no kernel
  * UDP6/TCP6 object interface; network protocols are userspace over raw
- * device frames/ObjectFIFO. */
+ * device frames and memory regions. */
 #define	NET6ADDR	116 /* reserved */
 #define	NET6OPEN	117 /* reserved */
 #define	NET6RECVFROM	118 /* reserved */
@@ -159,11 +154,7 @@ struct Ospawn {
 #define	VOBJREAD	122 /* reserved */
 #define	VOBJINFO	123 /* reserved */
 #define	VOBJCLOSE	124 /* reserved */
-#define	VOBJFIFOCREATE	125 /* reserved */
-#define	VOBJFIFOSUB	126 /* reserved */
-#define	VOBJFIFOSEND	127 /* reserved */
-#define	VOBJFIFORECV	128 /* reserved */
-#define	VOBJFIFOSTAT	129 /* reserved */
+/* 125-129 are retired FIFO adapter names; no alias is retained. */
 #define	VOBJGRANT	130 /* reserved */
 #define	VOBJREVOKE	131 /* reserved */
 #define	VOBJIO		132 /* reserved */
@@ -257,19 +248,22 @@ struct Ospawn {
  * region and region-relative offset.  count must be greater than zero; a
  * value greater than the number of waiters wakes those present.  It returns
  * the number actually woken.  Wait keys use the kernel region identity plus
- * offset, never a virtual address.  A wake carries no payload. */
+ * offset, never a virtual address.  A wake carries no payload.
+ *
+ * For an Ethernet transmit ring the authorized publisher is the writable
+ * writer: it WAKEs OBJ_RING_PUBOFF after publishing a frame and may WAIT on
+ * OBJ_RING_ACKOFF for ring space.  The kernel consumer reads slots and
+ * publishes ack_seq; its trusted internal notification wakes waiters blocked
+ * on that cursor.  It never exposes a writable kernel mapping and never
+ * copies a frame through a syscall. */
 #define	REGIONWAIT	147
 #define	REGIONWAKE	148
 /* flags=1 opts into this bounded extension immediately after Ospawn.
  * view: 0 EMPTY, 1 COPY listed roles, 2 SHARE (list must name whole view).
- * Pipe rights: 1 read, 2 write, 3 both. No implicit endpoint selection.
- */
+ * There is no implicit endpoint or ancestry selection. */
 struct Oinherit {
  uvlong view, nroles;
  char roles[32][32];
- uvlong npipes;
- int pipes[16][2];
- uvlong stdoutpipe; /* 0 or one of the selected writable Pipe handles */
  uvlong nenv;
  struct { char name[32]; char value[128]; } env[8];
 };
@@ -305,8 +299,8 @@ struct Oinheritv {
  *
  * flags are ordinary RFORK flags.  RFPROC is required when count is nonzero.
  * The options pointer may be NULL, meaning an empty plan (count 0).  This
- * call has no OContext, environment, Pipe-list or stdout options; those
- * remain explicit SPAWN-only fields and are not implicit inheritance. */
+ * call has no OContext or environment options; those remain explicit
+ * SPAWN-only fields and are not implicit inheritance. */
 #define RFORKEX			143
 enum {
 	RFORKEX_VERSION		= 1,

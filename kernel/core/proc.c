@@ -709,12 +709,10 @@ newproc(void)
 	if(!fresh){
 		oprocexit(p);
 		vobjprocexit(p);
-		pipeprocexit(p);
 		kbdprocexit(p);
 		uartprocexit(p);
 	}
 	p->vobjhandles = nil;
-	p->stdoutpipe = 0;
 	p->iomask = 0;
 	p->psstate = nil;
 	p->stat = nil;
@@ -1641,7 +1639,6 @@ pexit(char *exitstr)
 
 	oprocexit(up);
 	vobjprocexit(up);
-	pipeprocexit(up);
 	kbdprocexit(up);
 	uartprocexit(up);
 	if(fdgrp != nil)
@@ -1752,7 +1749,6 @@ procdiscard(Proc *p)
 
 	oprocexit(p);
 	vobjprocexit(p);
-	pipeprocexit(p);
 	kbdprocexit(p);
 	uartprocexit(p);
 

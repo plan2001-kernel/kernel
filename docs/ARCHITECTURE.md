@@ -115,15 +115,15 @@ keyboard and rebuild sessions. The protected kernel-owned early-boot/panic
 framebuffer/serial diagnostics path remains independent and cannot be blocked
 indefinitely by a failed userspace service.
 
-Phase 6 must demonstrate an end-to-end handoff: boot to MicroPython, start the
+Phase 6 demonstrates an end-to-end handoff: boot to MicroPython, start the
 console owner, attach two independent REPLs through publication-region grants,
-switch focus, type UTF-8 and control keys, observe separate output/diagnostics,
-and interrupt or terminate a blocked reader. Exit the active client and recover
-a surviving session; kill/restart the service and reacquire the keyboard
-without leaked claims. Check denied raw-device/control grants and absence of
-input theft; kernel diagnostics must still work. Run the AMD64 guest checks
-and record hardware checks separately. This is a future acceptance contract,
-not evidence that this data path exists today.
+switch focus, deliver UTF-8 and control keys, observe separate
+output/diagnostics, and interrupt a busy reader. Exit the active client and
+recover a surviving session; release and reacquire the keyboard without leaked
+claims. Denied raw-device/control grants, absence of input theft and protected
+kernel diagnostics are checked. AMD64 guest checks exercise the synthetic
+keyboard event path; physical keyboard injection and hardware tests remain
+separate hardware checks.
 
 ## CURRENT IMPLEMENTATION
 
@@ -134,12 +134,17 @@ the authority. Observation and control are separate `OBJINVOKE` operations,
 completion is an immutable multi-reader record, and no parent/child wait
 state or ancestral control path exists. `Pgrp/OContext` sharing/copying/
 sealing and namespace views remain independent resource mechanisms.
-`ObjectFIFO` carries framed IPC and Ethernet receive data; Pipe and current
-console paths also remain. The `-I` REPL directly claims PS/2 input;
-`micropython/p9console.c` decodes the scan codes and supplies the HAL.
-`ObjOpenConsole` and `stdoutpipe` route selected output;
-`kernel/core/fbconsole.c` is the kernel-owned framebuffer text sink. These are current
-facts, not target requirements.
+Ethernet receive and console sessions use capability-region rings with
+`REGIONWAIT`/`REGIONWAKE`; the authorized Ethernet transmit publisher uses the
+same mechanism with the kernel as reader. USB control has distinct synchronous
+completion.
+An authorized userspace console owner claims the PS/2 keyboard, decodes scan
+codes and routes input/output through per-session region grants. The `-I`
+native REPL may instead claim the keyboard directly for a single session.
+`ObjOpenConsole` selects protected output streams; `kernel/core/fbconsole.c`
+is the kernel-owned framebuffer text sink and early-boot/panic diagnostics
+remain independent of userspace. `ObjectFIFO` and Pipe providers, their ABI,
+adapters and tests are deleted.
 
 AMD64 also has volatile capability regions: `ObjKindRegion` creation, an
 attenuable `Vread`/`Vwrite` Handle, and `ObjOpRegionMap`/`ObjOpRegionUnmap`
@@ -168,7 +173,8 @@ recheck. A later writer may map and publish, so status 3 is temporal rather
 than destruction. The retired public
 `RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` ABI, its user
 wrappers, `RF*REND` resource and internal `Rgrp`/`Sema` waiting lists were
-deleted. Free-process grants remain Phase 5. The former named `shared`
+deleted. Free-process grants are implemented by SPAWN/RFORKEX process
+Handles. The former named `shared`
 segment attach, `SG_SHARED` type and `_globalsegattach` hook were removed;
 `SEGATTACH` remains only for the anonymous `memory` and physical device
 segments.
@@ -227,7 +233,9 @@ for backward compatibility.
    multi-observer completion and launcher-first exit. Delete ancestry-based
    lifecycle code and obsolete `RFORKEX/PROCWAIT/OTERMINATE` semantics.
    Retain or reshape namespace views only where justified.
-6. **Delete old kernel IPC:** migrate required device/console transport;
-   physically delete `ObjectFIFO` implementation, provider types, ABI,
-   MicroPython/libc adapters, obsolete tests/docs, plus replaced Pipe/other
-   IPC. Boot and the console/REPL handoff acceptance contract above must pass.
+6. **Delete old kernel IPC (completed):** Ethernet receive and console
+   sessions were migrated to capability regions and WAIT/WAKE. The
+   `ObjectFIFO` and Pipe implementations, provider types, ABI, MicroPython and
+   libc adapters, device adapters, obsolete tests and contradicted docs were
+   physically deleted, along with the kernel IPv6/ARP/ESP stack. Boot, raw L2
+   Ethernet and the console/REPL handoff contract pass on AMD64.

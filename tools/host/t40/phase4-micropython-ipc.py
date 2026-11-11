@@ -131,8 +131,8 @@ def find_region(write, size):
             i = p.obj_info(h)
         except OSError:
             continue
-        if i[8] == p.VKIND_FIFO or i[8] == p.VKIND_PIPE:
-            fail('fifo-or-pipe-inherited')
+        if i[8] == 1 or i[8] == 6:
+            fail('legacy-object-inherited')
         if i[8] != p.VKIND_REGION or i[3] != size:
             continue
         if bool(i[10] & p.VWRITE) == write:

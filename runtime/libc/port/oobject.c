@@ -4,7 +4,7 @@
  * The kernel boundary is exactly CREATE, OPEN, CLOSE, BIND and INVOKE.
  * Everything here is argument packing plus the familiar READ/WRITE/
  * PUBLISH/SUBSCRIBE/RECEIVE/ACCEPT ergonomics on top of INVOKE.  A READ of
- * a byte-stream object returns a byte count; a RECEIVE from an ObjectFIFO
+ * a byte-stream object returns a byte count; a RECEIVE from a message FIFO
  * returns one authorized Handle and an optional envelope.
  */
 #include	<u.h>
@@ -174,58 +174,6 @@ obj_info(int handle, void *info)
 }
 
 long
-obj_stat(int handle, void *stat)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpStat);
-	c.out = stat;
-	c.outlen = sizeof(VobjFifostat);
-	return obj_invoke(handle, &c, sizeof c);
-}
-
-long
-obj_subscribe(int fifo, unsigned long long rights,
-		unsigned long long capacity)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpSubscribe);
-	c.arg0 = rights;
-	c.arg1 = capacity;
-	return obj_invoke(fifo, &c, sizeof c);
-}
-
-long
-obj_publish(int fifo, int object, void *env, unsigned long long envlen)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpSend);
-	c.arg0 = (unsigned long long)object;
-	c.in = env;
-	c.inlen = envlen;
-	return obj_invoke(fifo, &c, sizeof c);
-}
-
-long
-obj_receive(int subscription, void *env, unsigned long long envcap,
-		unsigned long long timeout, unsigned long long *got)
-{
-	ObjCall c;
-	long r;
-
-	callinit(&c, ObjOpRecv);
-	c.out = env;
-	c.outlen = envcap;
-	c.arg0 = timeout;
-	r = obj_invoke(subscription, &c, sizeof c);
-	if(got != nil)
-		*got = c.aux;
-	return r;
-}
-
-long
 obj_grant(int handle, unsigned long long rights)
 {
     ObjOpenHandleReq req = {handle, 0};
@@ -241,16 +189,6 @@ obj_revoke(int handle)
 	ObjCall c;
 
 	callinit(&c, ObjOpRevoke);
-	return obj_invoke(handle, &c, sizeof c);
-}
-
-/* Close the FIFO transport for all subscribers.  This is not revocation. */
-long
-obj_fifo_shutdown(int handle)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpFifoShutdown);
 	return obj_invoke(handle, &c, sizeof c);
 }
 
@@ -281,24 +219,9 @@ obj_list(void *records, unsigned long long count)
 	return obj_list_count(records, count, nil);
 }
 
-/* Native Pipe, UART and KBD userland adapters.  They add no kernel entry
- * point: Pipe creation is CREATE(kind=Pipe), the peer is INVOKE(PipePeer),
- * byte I/O is READ/WRITE, and UART/KBD controls are typed INVOKE calls. */
-long
-obj_pipe_create(ObjId *out)
-{
-	return obj_create(0, ObjKindPipe, nil, 0, out);
-}
-
-long
-obj_pipe_peer(int handle)
-{
-	ObjCall c;
-
-	callinit(&c, ObjOpPipePeer);
-	return obj_invoke(handle, &c, sizeof c);
-}
-
+/* Native byte-stream and capability-region userland adapters.  They add no
+ * kernel entry point: UART/KBD controls are typed IOCTL calls, and a region
+ * is CREATE(kind=Region) plus mapping/publication calls. */
 long
 obj_region_create(unsigned long long size, ObjId *out)
 {
@@ -520,25 +443,14 @@ obj_catalog_device_open(unsigned int family, int selector0, int selector1,
 }
 
 long
-obj_device_send_kind(int device, void *message, unsigned long long length,
-		unsigned int *kind)
+obj_device_send(int device, void *message, unsigned long long length)
 {
 	ObjCall c;
-	long r;
 
 	callinit(&c, ObjOpDeviceSend);
 	c.in = message;
 	c.inlen = length;
-	r = obj_invoke(device, &c, sizeof c);
-	if(kind != nil)
-		*kind = (unsigned int)c.aux;
-	return r;
-}
-
-long
-obj_device_send(int device, void *message, unsigned long long length)
-{
-	return obj_device_send_kind(device, message, length, nil);
+	return obj_invoke(device, &c, sizeof c);
 }
 
 /* One completed USB control message. */
@@ -553,13 +465,24 @@ obj_device_recv(int device, ObjDeviceResult *completion)
 	return obj_invoke(device, &c, sizeof c);
 }
 
-/* Acquire the Ethernet receive FIFO channel (not a completed message). */
+/* Acquire the Ethernet receive region channel (not a completed message). */
 long
 obj_device_rx(int device)
 {
 	ObjCall c;
 
 	callinit(&c, ObjOpDeviceRx);
+	return obj_invoke(device, &c, sizeof c);
+}
+
+/* Acquire the Ethernet transmit region channel; the unique writable mapping
+ * is the frame publisher. */
+long
+obj_device_tx(int device)
+{
+	ObjCall c;
+
+	callinit(&c, ObjOpDeviceTx);
 	return obj_invoke(device, &c, sizeof c);
 }
 

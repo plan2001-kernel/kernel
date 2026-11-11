@@ -181,7 +181,6 @@ syscallfmt(ulong syscallno, uintptr pc, sysva_list list)
 		i[0] = sysva_arg(list, int);
 		fmtprint(&fmt, "%#ux", i[0]);
 		break;
-	case PIPE:
 	case BRK_:
 		v = sysva_arg(list, int*);
 		fmtprint(&fmt, "%#p", v);

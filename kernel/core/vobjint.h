@@ -12,9 +12,9 @@ typedef struct Procstat Procstat;
 enum {
 	Vobjpaymax	= 1*1024*1024,
 	Vsubcapmax	= 1024,
-	/* One table covers bytes/FIFO/GE plus Pipe, UART, KBD and devices.
-	 * The low Handle byte still addresses 255 slots; keep the table small
-	 * enough for the kernel stack arrays in vobjlist/vobjprocexit. */
+	/* One table covers volatile objects, GE/O and devices.  The low
+	 * Handle byte still addresses 255 slots; keep the table small enough
+	 * for the kernel stack arrays in vobjlist/vobjprocexit. */
 	Vhandmax	= 96,
 };
 
@@ -32,7 +32,6 @@ struct Vobj {
 	ulong	size;
 	uchar	*data;		/* immutable snapshot, may be nil */
 	void	*priv;		/* provider-private state */
-	void	*fifo;		/* VkindFifo state, owned by sysvobj.c */
 };
 
 /* Core operations exported to concrete providers. */
@@ -122,31 +121,30 @@ int	vobjopenhandle(int src, uvlong rights, VobjId *id);
 int	vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id);
 int	vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode);
 int	vobjinfo(int handle, VobjInfo *out);
-int	vobjfifostat(int handle, VobjFifostat *out);
-int	vobjfifosub(int fifoh, uvlong rights, long capacity);
-int	vobjfifosend(int fifoh, int objh, void *env, long envlen);
-int	vobjfiforecv(int subh, void *env, long envlen, int timeout, long *got);
 int	vobjrevoke(int handle);
-int	vobjfifoshutdown(int handle);
 long	vobjio(int handle, uvlong op, void *buf, long n, long timeout);
 long	vobjreadver(int handle, void *buf, long n, long timeout, uvlong *ver);
 int	vobjlist(void *buf, long n);
 
 /*
- * Native Pipe, UART and KBD providers.  They live in the same Vobj/Vhand
- * core as bytes, FIFO and GE and are reached only through the OBJ* five-call
- * ABI; syspipe.c, sysuart.c and syskbd.c keep only the RFORK/exec/exit,
- * OSPAWN and bootstrap-output hooks.  All errors use the normal kernel error
- * mechanism.
+ * Native UART and KBD providers and capability regions.  They live in the
+ * same Vobj/Vhand core as bytes and GE and are reached only through the OBJ*
+ * five-call ABI; sysuart.c and syskbd.c keep only the exec/exit hooks.  All
+ * errors use the normal kernel error mechanism.
  */
-int	vobjpipecreate(VobjId *id);
-int	vobjpipepeer(int handle);
 int	vobjregioncreate(uvlong size, VobjId *id);
+Vobj*	vobjregionalloc(uvlong size);
 uintptr	vobjregionmap(int handle, uintptr va);
 int	vobjregionunmap(uintptr va);
-void	vobjpipeoutputset(Proc *p, int handle);
-long	vobjpipeoutputwrite(int handle, void *data, long n);
-int	vobjpipekernelinstall(Proc *proc, void *pipe, int end);
+int	vobjregionwriterhold(Vobj *o);
+int	vobjregionringinit(Vobj *o);
+void	vobjregionwriterrelease(Vobj *o);
+int	vobjregionringpublish(Vobj *o, uvlong *seq, void *data, ulong len);
+uvlong	vobjregionringload(Vobj *o, uvlong off);
+int	vobjregionringconsume(Vobj *o, uvlong seq, void *buf, ulong max,
+		ulong *len);
+int	vobjregionringack(Vobj *o, uvlong seq);
+int	vobjregionwaitkern(Vobj *o, uvlong off, uvlong expected, int timeout);
 
 int	vobjuartctl(int handle, void *cfg);
 long	vobjuartstatus(int handle, void *buf, long n);
@@ -158,21 +156,17 @@ int	vobjkbdleds(int handle, int leds);
 int vobjdevicesopen(uvlong rights, VobjId *id);
 long vobjdevicelist(int handle, void *out, long bytes);
 int vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id);
-long vobjdevicesend(int handle, void *in, long len, unsigned int *kind);
+long vobjdevicesend(int handle, void *in, long len);
 int vobjdevicerecv(int handle, void *out);
 int vobjdevicerx(int handle);
+int vobjdevicetx(int handle);
 long vobjioctl(int handle, uvlong op, void *data, long len, uvlong arg0);
-/* Kernel-owned references and envelope, process context only.  This is the
- * same ObjectFIFO publisher used by user Handle sends, without ambient
- * process Handle lookup.  Caller pins fifo/object throughout the call. */
-int vobjfifopublish(Vobj *fifo, Vobj *object, int rights, void *env, long len);
-void vobjfifoclose(Vobj *fifo);
 int vetherlist(ObjDeviceEntry *out, int capacity);
 Veth *vetheropen(int controller);
 void vetherclose(Veth*);
 void vetherdetach(Veth*);
-Vobj *vetherfifo(Veth*);
-long vethersend(Veth*, void*, long);
+Vobj *vetherrxregion(Veth*);
+Vobj *vethertxregion(Veth*);
 void vetherstatus(Veth*, ObjEtherStatus*);
 
 /* CLOSE only when the Handle still names the expected provider kind. */

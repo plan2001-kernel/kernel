@@ -15,6 +15,15 @@
 #ifndef PLAN2001_ABI_SYSCTL_H
 #define PLAN2001_ABI_SYSCTL_H
 
+/* Bounded system snapshot used by libc syssnapshot().  It is not a network
+ * or object-family ABI and carries no FIFO/Pipe state. */
+typedef struct {
+	unsigned long long version, cpus, physical_bytes, user_pool_bytes;
+	unsigned long long volume_bytes, reserved, free_user_bytes;
+} PlanSystemSnapshot;
+
+long syssnapshot(PlanSystemSnapshot*);
+
 #define SYSCTL_ABI_VERSION 1
 
 /* Scope is explicit: own-process introspection may not reach another

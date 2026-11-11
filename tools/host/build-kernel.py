@@ -63,14 +63,13 @@ if os.environ.get("PLAN2001_SYSCALL_TRACE") == "1":
     CFLAGS.append("-DPLAN2001_SYSCALL_TRACE")
 if os.environ.get("PLAN2001_ALARM_NOTETEST") == "1":
     CFLAGS.append("-DPLAN2001_ALARM_NOTETEST")
-# Opt-in Pgrp/OContext live-allocation tracing for tools/host/t30.
+# Opt-in Pgrp/OContext live-allocation tracing for lifecycle diagnostics.
 if os.environ.get("PLAN2001_LIFECYCLE_DIAG") == "1":
     CFLAGS.append("-DPLAN2001_LIFECYCLE_DIAG")
 
 INCLUDES = [
     ROOT / "kernel/amd64",
     ROOT / "kernel/core",
-    ROOT / "kernel/net",
     ROOT / "kernel/drivers/usb",
     ROOT / "kernel/drivers/uart",
     ROOT / "ge/storage",
@@ -92,7 +91,6 @@ KERNEL_SOURCES = {
     "archacpi": "kernel/amd64/archacpi.c",
     "archcore": "kernel/amd64/archcore.c",
     "archgeneric": "kernel/amd64/archgeneric.c",
-    "arp": "kernel/net/arp.c",
     "auth": "kernel/core/auth.c",
     "bootarch": "kernel/amd64/bootarch.c",
     "bootargs": "kernel/core/bootargs.c",
@@ -108,7 +106,6 @@ KERNEL_SOURCES = {
     "ethercore": "kernel/core/ethercore.c",
     "etheri225": "kernel/amd64/etheri225.c",
     "ethermii": "kernel/core/ethermii.c",
-    "ethernative": "kernel/net/ethernative.c",
     "ethersink": "kernel/core/ethersink.c",
     "ethervirtio10": "kernel/core/ethervirtio10.c",
     "fault": "kernel/core/fault.c",
@@ -132,24 +129,12 @@ KERNEL_SOURCES = {
     "hpet": "kernel/amd64/hpet.c",
     "i8253": "kernel/amd64/i8253.c",
     "i8259": "kernel/amd64/i8259.c",
-    "icmp6": "kernel/net/icmp6.c",
     "iomap": "kernel/core/iomap.c",
-    "ip6only": "kernel/net/ip6only.c",
-    "ipaux": "kernel/net/ipaux.c",
-    "ipcore": "kernel/net/ipcore.c",
-    "ipifc": "kernel/net/ipifc.c",
-    "iproute6": "kernel/net/iproute6.c",
-    "ipv6": "kernel/net/ipv6.c",
-    "espctl": "kernel/net/espctl.c",
-    "espcontrol": "kernel/net/espcontrol.c",
-    "esp6": "kernel/net/esp6.c",
-    "ipv6only": "kernel/net/ipv6only.c",
     "irq": "kernel/amd64/irq.c",
     "kbdcore": "kernel/amd64/kbdcore.c",
     "led": "kernel/core/led.c",
     "lentry": "kernel/amd64/gcc/lentry.S",
     "lgcc": "kernel/amd64/gcc/lgcc.S",
-    "loopbackmedium": "kernel/net/loopbackmedium.c",
     "lprim": "kernel/amd64/gcc/lprim.S",
     "main": "kernel/amd64/main.c",
     "memmap": "kernel/core/memmap.c",
@@ -157,10 +142,6 @@ KERNEL_SOURCES = {
     "mmu": "kernel/amd64/mmu.c",
     "mp": "kernel/amd64/mp.c",
     "mtrr": "kernel/amd64/mtrr.c",
-    "nativeinh6": "kernel/net/nativeinh6.c",
-    "nativev6": "kernel/net/nativev6.c",
-    "netlog": "kernel/net/netlog.c",
-    "nullmedium": "kernel/net/nullmedium.c",
     "ouser": "kernel/amd64/ouser.c",
     "oplanboot": "kernel/core/oplanboot.c",
     "page": "kernel/core/page.c",
@@ -168,7 +149,6 @@ KERNEL_SOURCES = {
     "pci": "kernel/core/pci.c",
     "pcipc": "kernel/amd64/pcipc.c",
     "pgrp": "kernel/core/pgrp.c",
-    "pipecore": "kernel/core/pipe/pipecore.c",
     "portclock": "kernel/core/portclock.c",
     "print": "kernel/core/print.c",
     "proc": "kernel/core/proc.c",
@@ -195,7 +175,6 @@ KERNEL_SOURCES = {
     "syskbd": "kernel/core/syskbd.c",
     "sysn3": "kernel/core/sysn3.c",
     "sysobj": "kernel/core/sysobj.c",
-    "syspipe": "kernel/core/syspipe.c",
     "sysproc": "kernel/core/sysproc.c",
     "sysuart": "kernel/core/sysuart.c",
     "sysvobj": "kernel/core/sysvobj.c",
@@ -654,8 +633,6 @@ def base_command(cc: str, src: Path, obj: Path, extra: list[str] | None = None) 
         # Kernel entry stacks retain Plan 9 alignment; namespace C must not
         # introduce aligned SSE stack stores or borrow the up/Mach registers.
         cmd += ["-mgeneral-regs-only", "-ffixed-r14", "-ffixed-r15"]
-    if src.name in ("espctl.c", "espcontrol.c", "esp6.c"):
-        cmd += ["-g", "-O2", "-mgeneral-regs-only", "-ffixed-r14", "-ffixed-r15"]
     for inc in INCLUDES:
         cmd += ["-I", str(inc)]
     cmd.append(str(src))
@@ -751,8 +728,6 @@ def unit_group(obj: str, src: Path) -> str:
         return "GEFS"
     if rel.startswith("kernel/amd64/"):
         return "ARCH"
-    if rel.startswith("kernel/net/"):
-        return "NET"
     return "CORE"
 
 
@@ -1163,7 +1138,6 @@ LIB_SETS = {
     "libc": [ROOT / "runtime/libc/port", ROOT / "runtime/libc/fmt", ROOT / "runtime/libc/9sys"],
     "libip": [ROOT / "runtime/ip"],
     "libsec": [ROOT / "runtime/crypto"],
-    "libesp": [ROOT / "runtime/ikecrypto"],
     "libmp": [ROOT / "runtime/mp"],
     "libaml": [ROOT / "runtime/aml"],
     "libfis": [ROOT / "runtime/fis"],
@@ -1179,10 +1153,6 @@ def build_gcc_libraries(cc: str, jobs: int) -> tuple[dict[str, Path], list[Resul
     for lib, dirs in LIB_SETS.items():
         for d in dirs:
             for src in sorted(d.rglob("*.c")):
-                if lib == "libesp" and src.name not in {
-                    "espcrypto.c", "aes_ct.c", "aes_ct_enc.c", "aes_ct_ctr.c", "ghash_ctmul.c", "gcm.c"
-                }:
-                    continue
                 if src.name in LIB_SKIP:
                     continue
                 rel = src.relative_to(ROOT).as_posix().replace("/", "_")
@@ -1197,9 +1167,6 @@ def build_gcc_libraries(cc: str, jobs: int) -> tuple[dict[str, Path], list[Resul
         cmd += ["-I", str(ROOT / "include/amd64"), "-I", str(ROOT / "include")]
         if u.group == "libsec":
             cmd += ["-I", str(ROOT / "runtime/mp/port")]
-        if u.group == "libesp":
-            cmd += ["-O2", "-mgeneral-regs-only", "-ffixed-r14", "-ffixed-r15", "-I", str(ROOT / "runtime/ikecrypto/bearssl/inc"),
-                    "-I", str(ROOT / "runtime/ikecrypto/bearssl/src")]
         cmd.append(str(u.src))
         p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, errors="replace")
         log.write_text(shlex.join(cmd) + "\n\n" + p.stdout + p.stderr)

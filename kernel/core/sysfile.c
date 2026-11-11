@@ -37,8 +37,6 @@ iowriteok(int h)
 	if(h < Iohout || h > Iohdiag)
 		return 0;
 	bit = 1UL << (h-1);
-	if(h == Iohout && up->stdoutpipe != 0)
-		return 1;
 	return (up->iomask & bit) != 0;
 }
 
@@ -50,11 +48,9 @@ iowritek(int h, void *data, long n)
 	if(n < 0 || n > Iomax)
 		error(Ebadarg);
 	if(n == 0)
-		return up->stdoutpipe ? pipeoutputwrite(up->stdoutpipe, nil, 0) : 0;
+		return 0;
 	if(data == nil)
 		error(Ebadarg);
-	if(up->stdoutpipe)
-		return pipeoutputwrite(up->stdoutpipe, data, n);
 	putstrn(data, (int)n);
 	return n;
 }
