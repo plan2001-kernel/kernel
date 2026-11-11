@@ -231,6 +231,18 @@ def inspect(path, extract=None, sid=1):
         require(values.get(b'\x08init') == (1).to_bytes(8, 'big'), 'invalid init catalog')
         hdr = values[b'\x07' + sid.to_bytes(8, 'big')]
         published, oldest, writer = struct.unpack_from('>QQQ', hdr)
+        user = hdr[24:]
+        owner_mode = len(user) >= 104 and user[88:96] == b'OOWNMODE'
+        owners = {}
+        for k, v in values.items():
+            if len(k) == 25 and k[:9] == b'\x09' + sid.to_bytes(8, 'big'):
+                oid, negver = struct.unpack_from('>QQ', k, 9)
+                owners.setdefault('%016x' % oid, []).append(
+                    {'version': NIL ^ negver,
+                     'owner': v[8:16].hex() if len(v) >= 16 else None,
+                     'bytes': len(v)})
+        for recs in owners.values():
+            recs.sort(key=lambda r: r['version'])
         objects = {}
         for k, v in values.items():
             if len(k) == 29 and k[:9] == b'\x07' + sid.to_bytes(8, 'big'):
@@ -240,6 +252,8 @@ def inspect(path, extract=None, sid=1):
                     objects.setdefault(oid, {}).setdefault(ver, {})[idx] = v
         result = {'superblocks': supers, 'arenas': arenas, 'tree_blocks': len(checked),
                   'tree_records': len(values), 'space': {'id': sid, 'N': published, 'K': oldest, 'W': writer},
+                  'owner_mode': owner_mode,
+                  'owners': owners,
                   'catalog': {k[1:].decode('utf-8'): uint(v, 0)
                               for k, v in values.items() if k[:1] == b'\x08' and len(v) == 8},
                   'objects': {}}

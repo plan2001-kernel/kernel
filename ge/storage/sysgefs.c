@@ -44,6 +44,7 @@ void	onativeclose(void*);
 int	ospaceownerget(void*, uvlong, uvlong*, int*);
 void	ospaceownersetlegacy(uvlong);
 extern int ownerfault;
+extern int ownercrash;
 extern uvlong ownerroot(void);
 extern void ownerprogrambootregister(void);
 void	osownercheck(Ohand*, uvlong oid);
@@ -719,7 +720,10 @@ osownerof(Ohand *oh, uvlong oid)
 		return ownerroot();
 	if(ospaceownerget(oh->sp, oid, &owner, &required))
 		return owner;
-	if(required)
+	/* An absent or tombstoned OID has no owner to report.  It is not a
+	 * live object missing metadata; opening it yields a handle whose
+	 * read reports absence.  A live object with no record is corruption. */
+	if(required && ospaceget(oh->sp, oid, nil, 0, nil) >= 0)
 		error("O: corrupt object owner metadata");
 	return ownerroot();
 }
@@ -771,7 +775,13 @@ osownercheckcreate(Ohand *oh, uvlong oid)
 int
 osownerfault(int point)
 {
-	if(point < 0 || point > 3)
+	/* 101..104 arm the hard-stop checkpoints used by the crash-recovery
+	 * runner; 1..4 keep the in-kernel error fault points (4: migration). */
+	if(point >= 101 && point <= 104){
+		ownercrash = point;
+		return 0;
+	}
+	if(point < 0 || point > 4)
 		error(Ebadarg);
 	ownerfault = point;
 	return 0;

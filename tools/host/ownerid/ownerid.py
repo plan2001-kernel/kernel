@@ -74,6 +74,14 @@ try:
         pass
     else:
         fail('b-modify-a-object')
+    # A different owner cannot rewrite A's persistent object; the existing
+    # owner record must remain the only one.
+    try:
+        p.obj_put_oid(sh, AOBJ, b'B-was-here')
+    except OSError:
+        pass
+    else:
+        fail('b-modify-a-persist')
     # B creates and reopens its own object; ownership is immutable.
     stage = 'own-create'
     gh, oid = p.obj_create_ge(sh, b'B-alpha')
@@ -316,10 +324,13 @@ try:
     if not sh:
         fail('a-space')
     # Fixed OID persistence: first publication assigns this process owner
-    # atomically; the object survives reboot for the two-boot check.
+    # atomically; same-owner rewrites must not create or overwrite the
+    # immutable owner record.  The object survives reboot for the two-boot
+    # check.
     stage = 'persist'
-    p.obj_put_oid(sh, AOBJ, b'A-persist')
-    p.obj_commit(sh)
+    for _ in range(3):
+        p.obj_put_oid(sh, AOBJ, b'A-persist')
+        p.obj_commit(sh)
     ph = p.obj_open_ge_space(sh, AOBJ)
     if p.obj_owner(ph)[0] != AOWN or p.obj_read(ph, 16) != b'A-persist':
         fail('a-persist')
@@ -362,14 +373,19 @@ try:
            p.VMETA | p.VDELEGATE)
     vh = ((sh, shr), (reg, rw), (child, ctl))
     stage = 'launchB'
+    # The GE/O store admits one active writer transaction at a time, so the
+    # two same-owner B processes are exercised sequentially rather than
+    # racing in objtxbegin()'s "object store busy" rejection.
     b1 = p.program_launch('B', bargs, vh)
-    b2 = p.program_launch('B', bargs, vh)
-    if p.obj_owner(b1)[0] != BOWN or p.obj_owner(b2)[0] != BOWN:
+    if p.obj_owner(b1)[0] != BOWN:
         fail('a-b-owner')
     p.region_atomic_store(base + 8, 1)
     p.region_wake(base, 8, 0x7fffffff)
     stage = 'waitB'
     r1 = p.process_wait(b1, -1)
+    b2 = p.program_launch('B', bargs, vh)
+    if p.obj_owner(b2)[0] != BOWN:
+        fail('a-b2-owner')
     r2 = p.process_wait(b2, -1)
     if r1[8] != 0 or r2[8] != 0 or r1[2] != p.OBJ_PROC_CAUSE_EXIT or \
        r2[2] != p.OBJ_PROC_CAUSE_EXIT:

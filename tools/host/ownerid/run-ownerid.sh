@@ -29,3 +29,14 @@ assert [int(n) for n,_ in checks]==list(range(1,int(result[1])+1)), 'non-sequent
 assert not re.search(r'^Traceback|^AssertionError|^panic:',s,re.M)
 print('Verified',len(checks),'sequential executed assertions')
 PY
+python3 - "$OUT/o-after.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+assert d['owner_mode'] is True, 'Space 1 did not publish owner mode'
+owners=d['owners']
+for oid in ('4f45584543000101','4f45584543000102'):
+    rec=[r for r in owners.get(oid,[]) if r['version'] <= d['space']['N']]
+    assert len(rec)==1, ('owner record is not write-once',oid,rec)
+    assert rec[0]['bytes']==16 and int(rec[0]['owner'],16)!=0, (oid,rec)
+print('Verified write-once Kowner metadata for AOBJ/BOBJ')
+PY
