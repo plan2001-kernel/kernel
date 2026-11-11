@@ -1478,32 +1478,70 @@ procstatinfo(Procstat *st, ObjProcessInfo *out)
 
 /*
  * Authorized termination through the process capability.  Identity is the
- * record generation plus the live Proc pointer, never a PID.  The Proc
- * allocation is never freed, so the pointer is a safe comparison token, but
- * completion clears it and Proc reuse installs a different record.
- * debug serializes acceptance against pexit marking exiting. Concurrent
- * requests accepted before that point are idempotent; later requests fail
- * with Eprocdied. Only the target exits, at its own trap/syscall boundary.
+ * live Proc pointer recorded in the Procstat, its PID and the record
+ * generation, never a numeric PID supplied by userspace.  Proc allocations
+ * are recycled, so the pointer alone is not identity; every check below is
+ * made while holding p->debug.
+ *
+ * Acceptance protocol and lock order:
+ *
+ *	st->lk		authoritative run/completed transition and Proc pointer
+ *	p->debug	pexit()'s exiting transition and process-local identity
+ *	p->rlock	only inside procinterrupt()
+ *	Rendez.lk / q->use
+ *	runq.lk		inside ready()
+ *
+ * No path acquires p->debug while holding st->lk, a Rendez lock, a QLock
+ * queue lock or runq.lk, so this order is acyclic.  procinterrupt() may
+ * retry a contended Rendez lock by calling sched(); p->debug is a sleepable
+ * QLock, procinterrupt() drops p->rlock before sleeping, and no Rendez or
+ * queue-lock holder waits for p->debug, so the retry cannot deadlock.
+ *
+ * p->debug is deliberately held from revalidation through the wakeup.
+ * pexit() sets p->exiting under that same lock before it releases mappings
+ * or publishes completion.  Therefore, if revalidation sees exiting == 0,
+ * the target cannot begin exiting, complete, be recycled or be replaced
+ * until this function has delivered the interrupt and released the lock.
+ * The wakeup can never reach a replacement Proc, and there is no gap in
+ * which the target could complete before the wakeup.
+ *
+ * Concurrent requests accepted before pexit marks exiting are idempotent:
+ * terminate and Proc_exitme are sticky latches, and termination happens
+ * exactly once in the target's own exit path.  Requests that lose the race
+ * with pexit's exiting transition, or arrive after the record completed,
+ * deterministically fail with Eprocdied.  The boot/kernel process protection
+ * is checked under the same identity validation.
  */
 int
 procstatterminate(Procstat *st)
 {
 	Proc *p;
 	char *e;
+	int live;
 
 	if(st == nil)
 		error(Ebadarg);
 	e = nil;
 	lock(&st->lk);
 	p = st->proc;
-	if(st->state != PstatRunning || p == nil)
-		e = Eprocdied;
+	live = st->state == PstatRunning && p != nil;
 	unlock(&st->lk);
-	if(e != nil)
-		error(e);
+	if(!live)
+		error(Eprocdied);
 
 	qlock(&p->debug);
-	if(p->pid != st->pid || p->exiting || p->stat != st)
+	/*
+	 * Revalidate under the record lock.  st->proc and the run/completed
+	 * state are the authoritative liveness token; completion clears
+	 * st->proc, so a recycled Proc with a stale pointer can never pass.
+	 * p->pid is written only under p->debug (pidalloc/pidfree), and
+	 * p->exiting is pexit()'s acceptance marker under the same lock.
+	 */
+	lock(&st->lk);
+	live = st->state == PstatRunning && st->proc == p &&
+		p->pid == st->pid && !p->exiting;
+	unlock(&st->lk);
+	if(!live)
 		e = Eprocdied;
 	else if(p->boot || p->kp)
 		e = Eperm;

@@ -324,6 +324,49 @@ except OSError as e:
 p.exits('')
 '''
 
+# High-iteration termination stress target.  It maps a writer region and a
+# shared GO region, publishes READY, waits for the launcher's GO, then
+# voluntarily exits, faults or blocks in REGIONWAIT depending on the mode.
+STRESS_TARGET = PRELUDE + r'''
+rw = findregion(True)
+go = findregion(False)
+if not rw or not go:
+    fail('stress-target-handles')
+base = p.region_map(rw, 0x4f600000)
+g = p.region_map(go, 0x4f610000)
+p.region_write(base + 64, b'STRESS-DATA')
+p.region_atomic_store(base, 1)
+p.region_wake(base, 0, 0x7fffffff)
+while p.region_atomic_load(g) == 0:
+    p.region_wait(g, 0, 0, -1)
+@MODE@
+'''
+
+# Independent stress controller.  It publishes READY in its own writer
+# region, waits for GO, then attempts authorized termination.  Eprocdied is
+# the expected outcome whenever the target completed first.
+STRESS_CONTROLLER = PRELUDE + r'''
+ctl = findkind(p.VKIND_PROCESS, p.VCONTROL)
+go = findregion(False)
+rw = findregion(True)
+if not ctl or not go or not rw:
+    fail('stress-controller-handles')
+rbase = p.region_map(rw, @RBASE@)
+g = p.region_map(go, @GBASE@)
+p.region_write(rbase + 64, b'READY')
+p.region_atomic_store(rbase, 1)
+p.region_wake(rbase, 0, 0x7fffffff)
+while p.region_atomic_load(g) == 0:
+    p.region_wait(g, 0, 0, -1)
+p.sleep(@CTLDELAY@)
+try:
+    p.process_terminate(ctl)
+except OSError as e:
+    if 'process exited' not in str(e):
+        fail('stress-controller:' + str(e))
+p.exits('')
+'''
+
 
 class Counter:
     def __init__(self):
@@ -746,6 +789,158 @@ p.exits('handled-note-exit')
     p.obj_close(ro2)
     p.obj_close(r1)
     p.obj_close(r2)
+
+    # --- two-controller termination/exit/fault stress ---------------------
+    # Each round has one target owning a region writer and two independent
+    # Vcontrol controllers released by an explicit GO barrier.  The target
+    # either exits voluntarily, faults, or blocks in REGIONWAIT.  Depending on
+    # the race the completion is EXIT/FAULT/TERMINATED, but it must be unique,
+    # repeatable, bounded and must release the writer before observers read it.
+    stress_live = p.system()[5]
+    stress_handles = len(p.obj_list())
+    stress_free = p.system()[6]
+    stress_modes = (
+        ('exit', "p.sleep(@DELAY@)\np.exits(@STATUS@)\n"),
+        ('fault', "p.sleep(@DELAY@)\n"
+                  "p.region_write(0x50000000, b'X')\n"
+                  "p.exits('no-fault')\n"),
+        ('wait', "while True:\n"
+                 "    try:\n"
+                 "        p.region_wait(g, 0, 1, -1)\n"
+                 "    except OSError:\n"
+                 "        pass\n"),
+        ('pwait', "m = findkind(p.VKIND_PROCESS, p.VOBSERVE)\n"
+                  "if not m:\n"
+                  "    fail('stress-pwait-handle')\n"
+                  "while True:\n"
+                  "    try:\n"
+                  "        p.process_wait(m, -1)\n"
+                  "    except OSError:\n"
+                  "        pass\n"),
+    )
+    for i in range(16):
+        mode, body = stress_modes[i % len(stress_modes)]
+        delay = i % 5
+        ctldelay = 0 if mode in ('wait', 'pwait') else (i * 3) % 7
+        status = 'stress-exit-%02d' % i
+
+        treg = p.region_create(8192)
+        trw = p.obj_open_handle(treg, RW)
+        tro = p.obj_open_handle(treg, RO)
+        tbase = p.region_map(tro, 0x4f600000)
+        c1reg = p.region_create(8192)
+        c1rw = p.obj_open_handle(c1reg, RW)
+        c1ro = p.obj_open_handle(c1reg, RO)
+        c1base = p.region_map(c1ro, 0x4f620000)
+        c2reg = p.region_create(8192)
+        c2rw = p.obj_open_handle(c2reg, RW)
+        c2ro = p.obj_open_handle(c2reg, RO)
+        c2base = p.region_map(c2ro, 0x4f640000)
+        go = p.region_create(8192)
+        gorw = p.obj_open_handle(go, RW)
+        goro = p.obj_open_handle(go, RO)
+        gobase = p.region_map(gorw, 0x4f660000)
+
+        code = (STRESS_TARGET
+                .replace('@MODE@', body)
+                .replace('@DELAY@', str(delay))
+                .replace('@STATUS@', repr(status)))
+        hold = 0
+        hobs = 0
+        vh = ((trw, RW), (goro, RO))
+        if mode == 'pwait':
+            hold = spawn(B_LONG.replace('@MS@', '60000'), cpu=i % 3)
+            hobs = p.obj_open_handle(hold, OB)
+            vh = ((trw, RW), (goro, RO), (hobs, OB))
+        b = spawn(code, vh, cpu=i % 3)
+        if hobs:
+            p.obj_close(hobs)
+        ctl = p.obj_open_handle(b, CT)
+        c1 = spawn(STRESS_CONTROLLER.replace('@RBASE@', '0x4f620000')
+                   .replace('@GBASE@', '0x4f630000')
+                   .replace('@CTLDELAY@', str(ctldelay)),
+                   ((ctl, CT), (c1rw, RW), (goro, RO)),
+                   cpu=(i + 1) % 3)
+        c2 = spawn(STRESS_CONTROLLER.replace('@RBASE@', '0x4f640000')
+                   .replace('@GBASE@', '0x4f650000')
+                   .replace('@CTLDELAY@', str(ctldelay)),
+                   ((ctl, CT), (c2rw, RW), (goro, RO)),
+                   cpu=(i + 2) % 3)
+        p.obj_close(trw)
+        p.obj_close(c1rw)
+        p.obj_close(c2rw)
+        p.obj_close(goro)
+        p.obj_close(ctl)
+
+        waitword(tbase, 1, 'stress target ready')
+        waitword(c1base, 1, 'stress controller 1 ready')
+        waitword(c2base, 1, 'stress controller 2 ready')
+        p.region_atomic_store(gobase, 1)
+        p.region_wake(gobase, 0, 0x7fffffff)
+
+        rb = rec(b, 10000)
+        if rb[8] != 0 or rb[3] != p.OBJ_PROC_COMPLETED:
+            raise AssertionError('stress completion %d: %r' % (i, (rb,)))
+        rb2 = rec(b, 0)
+        if (rb2[0] != rb[0] or rb2[1] != rb[1] or rb2[2] != rb[2] or
+                rb2[3] != rb[3] or rb2[4] != rb[4]):
+            raise AssertionError('stress completion changed %d' % i)
+        cause = rb[2]
+        if mode == 'exit':
+            if cause == p.OBJ_PROC_CAUSE_EXIT:
+                if rb[1] != status:
+                    raise AssertionError('stress exit status %d: %r' %
+                                         (i, (rb[1],)))
+            elif cause == p.OBJ_PROC_CAUSE_TERMINATED:
+                if rb[1] != 'terminated':
+                    raise AssertionError('stress term status %d: %r' %
+                                         (i, (rb[1],)))
+            else:
+                raise AssertionError('stress exit cause %d: %r' % (i, (rb,)))
+        elif mode == 'fault':
+            if cause not in (p.OBJ_PROC_CAUSE_FAULT,
+                             p.OBJ_PROC_CAUSE_TERMINATED):
+                raise AssertionError('stress fault cause %d: %r' % (i, (rb,)))
+            if rb[1] == '':
+                raise AssertionError('stress fault empty status %d' % i)
+        else:
+            if cause != p.OBJ_PROC_CAUSE_TERMINATED:
+                raise AssertionError('stress %s cause %d: %r' %
+                                     (mode, i, (rb,)))
+            if rb[1] != 'terminated':
+                raise AssertionError('stress %s status %d: %r' %
+                                     (mode, i, (rb[1],)))
+        if p.region_wait(tbase, 0, 1, 3000) != 3:
+            raise AssertionError('stress writer not released %d' % i)
+        if rstr(tbase) != b'STRESS-DATA':
+            raise AssertionError('stress payload changed %d' % i)
+        rec_ok(c1, p.OBJ_PROC_CAUSE_EXIT, 'stress-controller-1')
+        rec_ok(c2, p.OBJ_PROC_CAUSE_EXIT, 'stress-controller-2')
+        if hold:
+            p.process_terminate(hold)
+            rec_ok(hold, p.OBJ_PROC_CAUSE_TERMINATED, 'stress-hold')
+            p.obj_close(hold)
+        for h in (b, c1, c2):
+            p.obj_close(h)
+        p.region_unmap(gobase)
+        p.region_unmap(c1base)
+        p.region_unmap(c2base)
+        p.region_unmap(tbase)
+        for h in (gorw, go, c1ro, c1reg, c2ro, c2reg, tro, treg):
+            p.obj_close(h)
+        ok(True, 'stress round %d (%s): unique bounded cause %d completion '
+           'and writer release' % (i, mode, cause))
+
+    p.sleep(200)
+    ok(p.system()[5] == stress_live,
+       'two-controller stress returns live completion records to baseline (%d)'
+       % stress_live)
+    ok(len(p.obj_list()) == stress_handles,
+       'two-controller stress returns the Handle table to baseline (%d)'
+       % stress_handles)
+    ok(stress_free - p.system()[6] <= 262144,
+       'two-controller stress reclaims process resources (free delta=%d)'
+       % (stress_free - p.system()[6]))
 
     # --- no observer / launcher exit, then stress and reclamation ---------
     live0 = p.system()[5]
