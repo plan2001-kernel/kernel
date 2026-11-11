@@ -566,8 +566,6 @@ execcommit(Segment *ts, Segment *ds, Segment *bs, uintptr tstk,
 		up->procctl = Proc_stopme;
 	oprocexec(up);
 	vobjprocexec(up);
-	pipeprocexec(up);
-	espctl_bootstrap(up);
 	kbdprocexec(up);
 	uartprocexec(up);
 }
@@ -1168,7 +1166,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		if(inh == nil) error(Enomem);
 		validaddr((uintptr)(uopt+1), sizeof *inh, 0);
 		memmove(inh, uopt+1, sizeof *inh);
-		if(inh->view > 2 || inh->nroles > 32 || inh->npipes > 16 || inh->nenv > 8)
+		if(inh->view > 2 || inh->nroles > 32 || inh->nenv > 8)
 			error(Ebadarg);
 		if(inh->view == 0 && inh->nroles != 0) error(Ebadarg);
 	}
@@ -1194,20 +1192,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 				error(Ebadarg);
 			plan[nplan].handle = (int)inhv->h[i].handle;
 			plan[nplan].rights = inhv->h[i].rights;
-			plan[nplan].dstslot = 0;
-			nplan++;
-		}
-	}
-	if(inh != nil){
-		for(i = 0; i < (int)inh->npipes; i++){
-			int r = inh->pipes[i][1];
-
-			if(nplan >= (int)(sizeof plan/sizeof plan[0]) ||
-			   inh->pipes[i][0] <= 0 || r <= 0 || (r & ~3))
-				error(Ebadarg);
-			plan[nplan].handle = inh->pipes[i][0];
-			plan[nplan].rights = (uvlong)(((r & 1) ? Vread : 0) |
-				((r & 2) ? Vwrite : 0));
 			plan[nplan].dstslot = 0;
 			nplan++;
 		}
@@ -1326,17 +1310,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	vobjinheritcommit(p, &vi);
 	if(inh != nil){
 		ocontextspawn(p, inh->view, inh->roles, inh->nroles);
-		if(inh->stdoutpipe){
-			int ch;
-
-			if(inh->stdoutpipe > 0x7fffffffULL) error(Ebadarg);
-			/* stdoutpipe names one parent Pipe.  It must resolve to
-			 * exactly one plan entry: absent (0) and ambiguous (-1)
-			 * are both rejected rather than picking the first. */
-			ch = vobjinheritsrchandle(&vi, (int)inh->stdoutpipe);
-			if(ch <= 0) error(Ebadarg);
-			pipeoutputset(p, ch);
-		}
 		for(i = 0; i < inh->nenv; i++){
 			if(memchr(inh->env[i].name, 0, 32) == nil || inh->env[i].name[0] == 0 ||
 						memchr(inh->env[i].value, 0, 128) == nil) error(Ebadarg);

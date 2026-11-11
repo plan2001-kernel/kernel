@@ -59,8 +59,8 @@ int p9_space_commit(int force);
 extern size_t p9_space_noid;
 void p9_space_dirty(const void *p);
 void p9_space_freed(const void *p);
-#define P9_DIRTY(p) do { if (p9_space_noid) p9_space_dirty(p); } while (0)
-#define P9_FREED(p) do { if (p9_space_noid) p9_space_freed(p); } while (0)
+#define P9_DIRTY(p) do { if (p9_space_noid) p9_space_dirty(p); } while (0);
+#define P9_FREED(p) do { if (p9_space_noid) p9_space_freed(p); } while (0);
 #define MICROPY_BOARD_AFTER_PYTHON_EXEC(kind, flags, val, ret) p9_space_commit(0)
 /* the types a Space keeps (p9space.c and p9image.c 5.5); graph's links
    are descriptors (5.7) */
@@ -146,3 +146,13 @@ void p9_space_freed(const void *p);
 typedef long long mp_off_t;
 #define MP_STATE_PORT MP_STATE_VM
 #define MICROPY_USE_GCC_MUL_OVERFLOW_INTRINSIC (0)
+
+/* Poll the region session input for a pending Ctrl-C while bytecode runs.
+ * The console owner publishes control keys as session input; consuming only
+ * an exact Ctrl-C record preserves typed-ahead REPL input. */
+#define MICROPY_VM_HOOK_LOOP do { \
+    extern int p9_console_poll_interrupt(void); \
+    if (p9_console_poll_interrupt()) { \
+        mp_sched_keyboard_interrupt(); \
+    } \
+} while (0);

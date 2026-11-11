@@ -9,12 +9,14 @@
 #include "py/runtime.h"
 #include "py/objstr.h"
 #include "py/objtuple.h"
+#include "shared/runtime/pyexec.h"
 #ifndef NO_QSTR
 #include "../runtime/abi/vobj.h"
 #include "../runtime/abi/obj.h"
 #include "../runtime/abi/sys.h"
 #include "../runtime/abi/sysctl.h"
 #include "../runtime/abi/ioctl.h"
+#include "p9console.h"
 #include <envapi.h>
 #include <uartapi.h>
 #endif
@@ -312,46 +314,15 @@ static mp_obj_t p9_exits(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_exits_obj, 0, 1, p9_exits);
 
-/* Historical Pipe method names are userland adapters over the canonical
- * OBJCREATE/INVOKE/CLOSE paths; the retired numbers have no dispatch entry. */
-static mp_obj_t p9_pipenew(void) {
-    ObjId id; long a,b; mp_obj_t t[2];
-    a=obj_pipe_create(&id);
-    if(a<0)raise_err();
-    b=obj_pipe_peer((int)a);
-    if(b<0)raise_err();
-    t[0]=mp_obj_new_int((mp_int_t)a); t[1]=mp_obj_new_int((mp_int_t)b);
-    return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_pipenew_obj,p9_pipenew);
-static mp_obj_t p9_piperead(mp_obj_t h,mp_obj_t count) {
-    long n=mp_obj_get_int(count),r; vstr_t v;
-    if(n<0 || n>65536) mp_raise_ValueError(MP_ERROR_TEXT("Pipe read limit"));
-    vstr_init_len(&v,n);
-    r=obj_read(mp_obj_get_int(h),v.buf,(unsigned long long)n,0);
-    if(r<0){vstr_clear(&v);raise_err();}
-    v.len=r;return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_piperead_obj,p9_piperead);
-static mp_obj_t p9_pipewrite(mp_obj_t h,mp_obj_t data) {
-    mp_buffer_info_t b;mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
-    return check(obj_write(mp_obj_get_int(h),b.buf,(unsigned long long)b.len,0));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_pipewrite_obj,p9_pipewrite);
-static mp_obj_t p9_pipeclose(mp_obj_t h) {
-    check(obj_close(mp_obj_get_int(h)));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_pipeclose_obj,p9_pipeclose);
 /* Process creation declares Handle inheritance in the creation call itself
- * (RFORKEX or the explicit OSPAWN options); there is no pipeinherit side
+ * (RFORKEX or the explicit OSPAWN options); there is no side-channel
  * channel that could arm a later fork. */
 /* The TCP6/UDP6 object interface and its Python adapters were removed.  The
- * supported network boundary is raw device frames/ObjectFIFO with userspace
- * protocol handling. */
+ * supported network boundary is raw L2 device frames plus userspace protocol
+ * handling. */
 
-/* Historical Python object/object-FIFO method names.  They are compatibility
- * adapters over the canonical five-operation OBJ* ABI; the retired VOBJ*
- * kernel numbers have no dispatch entry. */
+/* Historical Python object method names over the canonical five-operation
+ * OBJ* ABI; the retired VOBJ* kernel numbers have no dispatch entry. */
 static mp_obj_t p9_vobjcreate(size_t n,const mp_obj_t *a){
  mp_buffer_info_t b;long r;unsigned long long space=0;
  mp_get_buffer_raise(a[0],&b,MP_BUFFER_READ);
@@ -371,20 +342,18 @@ static mp_obj_t p9_vobjread(mp_obj_t handle){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjread_obj,p9_vobjread);
 
-/* Generic metadata comes from ObjOpInfo; FIFO/subscription counters come
- * from the separate ObjOpStat contract.  This adapter keeps the historical
- * 16-tuple view for existing scripts. */
+/* Generic metadata comes from ObjOpInfo.  The historical 16-tuple positions
+ * for queue counters are retained as zero so scripts that only index the
+ * generic identity fields keep working without any FIFO provider. */
 static mp_obj_t p9_infotuple(int handle){
- VobjInfo i;VobjFifostat f;
+ VobjInfo i;
  if(obj_info(handle,&i)<0)raise_err();
- memset(&f,0,sizeof f);
- if(i.kind==VkindFifo)obj_stat(handle,&f);
  mp_obj_t a[16]={mp_obj_new_int_from_ull(i.incarnation),mp_obj_new_int_from_ull(i.space),
   mp_obj_new_int_from_ull(i.oid),mp_obj_new_int_from_ull(i.size),mp_obj_new_int_from_ull(i.holds),
-  mp_obj_new_int_from_ull(f.subscribers),mp_obj_new_int_from_ull(f.sends),mp_obj_new_int_from_ull(f.drops),
+  mp_obj_new_int(0),mp_obj_new_int(0),mp_obj_new_int(0),
   mp_obj_new_int(i.kind),mp_obj_new_int(i.flags),mp_obj_new_int(i.rights),
-  mp_obj_new_int(f.capacity),mp_obj_new_int(f.queued),mp_obj_new_int(f.sub_dropped),
-  mp_obj_new_int(f.fifo_closed),mp_obj_new_int(f.sub_closed)};
+  mp_obj_new_int(0),mp_obj_new_int(0),mp_obj_new_int(0),
+  mp_obj_new_int(0),mp_obj_new_int(0)};
  return mp_obj_new_tuple(16,a);
 }
 
@@ -395,49 +364,6 @@ static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjinfo_obj,p9_vobjinfo);
 
 static mp_obj_t p9_vobjclose(mp_obj_t h){check(obj_close(mp_obj_get_int(h)));return mp_const_none;}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjclose_obj,p9_vobjclose);
-
-static mp_obj_t p9_vobjfifocreate(size_t n,const mp_obj_t *a){
- long cap=n>0?mp_obj_get_int(a[0]):64;
- return check(obj_create(0,ObjKindFifo,NULL,(unsigned long long)cap,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfifocreate_obj,0,1,p9_vobjfifocreate);
-
-static mp_obj_t p9_vobjfifosub(size_t n,const mp_obj_t *a){
- long cap=n>2?mp_obj_get_int(a[2]):0;
- unsigned long long rights=n>1?(unsigned long long)mp_obj_get_int(a[1]):(Vrecv|Vmeta);
- return check(obj_subscribe(mp_obj_get_int(a[0]),rights,(unsigned long long)cap));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfifosub_obj,1,3,p9_vobjfifosub);
-
-static mp_obj_t p9_vobjfifosend(size_t n,const mp_obj_t *a){
- mp_buffer_info_t b;b.buf=NULL;b.len=0;
- if(n>2)mp_get_buffer_raise(a[2],&b,MP_BUFFER_READ);
- check(obj_publish(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),b.buf,(unsigned long long)b.len));
- return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfifosend_obj,2,3,p9_vobjfifosend);
-
-static mp_obj_t p9_vobjfiforecv(size_t n,const mp_obj_t *a){
- int timeout=n>1?mp_obj_get_int(a[1]):-1,envcap=n>2?mp_obj_get_int(a[2]):64;
- long got=0,r;vstr_t v;mp_obj_t t[2];
- if(envcap<0||envcap>64)mp_raise_ValueError(MP_ERROR_TEXT("vobj envelope limit"));
- vstr_init_len(&v,envcap);
- r=obj_receive(mp_obj_get_int(a[0]),envcap?v.buf:NULL,(unsigned long long)envcap,(unsigned long long)timeout,(unsigned long long*)&got);
- if(r<0){vstr_clear(&v);raise_err();}
- if(got<v.len)v.len=got;else if(got>0&&got<=envcap)v.len=got;
- t[0]=mp_obj_new_int((mp_int_t)r);t[1]=mp_obj_new_bytes_from_vstr(&v);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfiforecv_obj,1,3,p9_vobjfiforecv);
-
-static mp_obj_t p9_vobjfifostat(mp_obj_t h){
- VobjFifostat s;if(obj_stat(mp_obj_get_int(h),&s)<0)raise_err();
- mp_obj_t a[7]={mp_obj_new_int_from_ull(s.sends),mp_obj_new_int_from_ull(s.drops),
-  mp_obj_new_int(s.subscribers),mp_obj_new_int(s.queued),mp_obj_new_int(s.capacity),
-  mp_obj_new_int(s.fifo_closed),mp_obj_new_int(s.sub_closed)};
- return mp_obj_new_tuple(7,a);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjfifostat_obj,p9_vobjfifostat);
 
 static mp_obj_t p9_vobjgrant(mp_obj_t h,mp_obj_t rights){
  return check(obj_grant(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(rights)));
@@ -492,12 +418,6 @@ static mp_obj_t p9_objcreate(size_t n,const mp_obj_t *a){
  return check(obj_create(space,ObjKindBytes,b.buf,(unsigned long long)b.len,NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objcreate_obj,0,2,p9_objcreate);
-
-static mp_obj_t p9_objfifocreate(size_t n,const mp_obj_t *a){
- long cap=n>0?mp_obj_get_int(a[0]):64;
- return check(obj_create(0,ObjKindFifo,NULL,(unsigned long long)cap,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objfifocreate_obj,0,1,p9_objfifocreate);
 
 static mp_obj_t p9_objclose(mp_obj_t h){
  check(obj_close(mp_obj_get_int(h)));return mp_const_none;
@@ -622,60 +542,16 @@ static mp_obj_t p9_objinfo(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objinfo_obj,p9_objinfo);
 
-static mp_obj_t p9_objstat(mp_obj_t h){
- VobjFifostat s;if(obj_stat(mp_obj_get_int(h),&s)<0)raise_err();
- mp_obj_t a[7]={mp_obj_new_int_from_ull(s.sends),mp_obj_new_int_from_ull(s.drops),
-  mp_obj_new_int(s.subscribers),mp_obj_new_int(s.queued),mp_obj_new_int(s.capacity),
-  mp_obj_new_int(s.fifo_closed),mp_obj_new_int(s.sub_closed)};
- return mp_obj_new_tuple(7,a);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objstat_obj,p9_objstat);
-
-static mp_obj_t p9_objsubscribe(size_t n,const mp_obj_t *a){
- unsigned long long rights=n>1?(unsigned long long)mp_obj_get_int(a[1]):(Vrecv|Vmeta);
- unsigned long long cap=n>2?(unsigned long long)mp_obj_get_int(a[2]):0;
- return check(obj_subscribe(mp_obj_get_int(a[0]),rights,cap));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objsubscribe_obj,1,3,p9_objsubscribe);
-
-static mp_obj_t p9_objpublish(size_t n,const mp_obj_t *a){
- mp_buffer_info_t b;b.buf=NULL;b.len=0;
- if(n>2)mp_get_buffer_raise(a[2],&b,MP_BUFFER_READ);
- check(obj_publish(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),b.buf,(unsigned long long)b.len));
- return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objpublish_obj,2,3,p9_objpublish);
-
-static mp_obj_t p9_objreceive(size_t n,const mp_obj_t *a){
- int timeout=n>1?mp_obj_get_int(a[1]):-1,envcap=n>2?mp_obj_get_int(a[2]):64;
- unsigned long long got=0;long r;vstr_t v;mp_obj_t t[2];
- if(envcap<0||envcap>64)mp_raise_ValueError(MP_ERROR_TEXT("obj envelope limit"));
- vstr_init_len(&v,envcap);
- r=obj_receive(mp_obj_get_int(a[0]),envcap?v.buf:NULL,(unsigned long long)envcap,
-  (unsigned long long)timeout,&got);
- if(r<0){vstr_clear(&v);raise_err();}
- if(got<v.len)v.len=got;else if(got>0&&got<=(unsigned long long)envcap)v.len=got;
- t[0]=mp_obj_new_int((mp_int_t)r);t[1]=mp_obj_new_bytes_from_vstr(&v);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objreceive_obj,1,3,p9_objreceive);
 
 static mp_obj_t p9_objgrant(mp_obj_t h,mp_obj_t rights){
  return check(obj_grant(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(rights)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objgrant_obj,p9_objgrant);
 
-/* Capability revocation only.  A FIFO is a transport, not a revoked grant;
- * use obj_fifo_shutdown() for FIFO shutdown. */
 static mp_obj_t p9_objrevoke(mp_obj_t h){
- check(obj_revoke(mp_obj_get_int(h)));return mp_const_none;
+ return check(obj_revoke(mp_obj_get_int(h)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objrevoke_obj,p9_objrevoke);
-
-static mp_obj_t p9_objfifoshutdown(mp_obj_t h){
- check(obj_fifo_shutdown(mp_obj_get_int(h)));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objfifoshutdown_obj,p9_objfifoshutdown);
 
 static mp_obj_t p9_objlist(void){
  VobjListRec rec[32];long n,i;mp_obj_t t[32];
@@ -772,6 +648,32 @@ static mp_obj_t p9_regionwake(mp_obj_t base,mp_obj_t offset,mp_obj_t count){
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(p9_regionwake_obj,p9_regionwake);
 
+/* Console session transport.  console_attach(in, out[, diag]) maps three
+ * capability regions: the input region is read-only here, the output and
+ * optional diagnostic regions are writable here.  repl() runs the friendly
+ * REPL over the attached session and returns when Ctrl-D ends the client. */
+static mp_obj_t p9_consoleattach(size_t n,const mp_obj_t *a){
+ long in=mp_obj_get_int(a[0]),out=mp_obj_get_int(a[1]);
+ long diag=n>2?mp_obj_get_int(a[2]):-1;
+ long r=p9_console_attach((int)in,(int)out,(int)diag);
+ if(r<0)
+  mp_raise_msg_varg(&mp_type_ValueError,
+    MP_ERROR_TEXT("console session attach failed %d: %s"),(int)r,
+    p9_console_session_error());
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_consoleattach_obj,2,3,p9_consoleattach);
+
+static mp_obj_t p9_repl(void){
+ for(;;){
+  pyexec_mode_kind=PYEXEC_MODE_FRIENDLY_REPL;
+  if(pyexec_friendly_repl()!=0)
+   break;
+ }
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_repl_obj,p9_repl);
+
 /* Test-only callback address for ObjOpNotifyRegister: a real user text
  * address that accepts any note.  It is not installed by normal startup;
  * a script can pass it as arg0 of the new operation, remove it, and observe
@@ -834,27 +736,14 @@ static mp_obj_t p9_notify_probe_framevals(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_notify_probe_framevals_obj,p9_notify_probe_framevals);
 
 /* Read-only system information (UJ1). */
-extern long syssnapshot(void*);
+
 static mp_obj_t p9_system(void){
  unsigned long long v[7];check(syssnapshot(v));mp_obj_t a[7];
  for(int i=0;i<7;i++)a[i]=mp_obj_new_int_from_ull(v[i]);return mp_obj_new_tuple(7,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_system_obj,p9_system);
 
-/* Native Pipe, UART and KBD: canonical OBJ* adapters and the historical
- * compatibility calls.  Both routes hit the same Vhand table. */
-static mp_obj_t p9_objpipecreate(void){
- ObjId id;long h=obj_pipe_create(&id);
- if(h<0)raise_err();
- mp_obj_t t[2]={mp_obj_new_int((mp_int_t)h),mp_obj_new_int_from_ull(id.oid)};
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_objpipecreate_obj,p9_objpipecreate);
-
-static mp_obj_t p9_objpipepeer(mp_obj_t h){
- return check(obj_pipe_peer(mp_obj_get_int(h)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objpipepeer_obj,p9_objpipepeer);
+/* Native UART and KBD: canonical OBJ* adapters. */
 
 static mp_obj_t p9_objuartctl(size_t n,const mp_obj_t *a){
  Uartcfg c;
@@ -1050,13 +939,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_seg_brk), MP_ROM_PTR(&p9_segbrk_obj) },
     { MP_ROM_QSTR(MP_QSTR_seg_free), MP_ROM_PTR(&p9_segfree_obj) },
     { MP_ROM_QSTR(MP_QSTR_seg_flush), MP_ROM_PTR(&p9_segflush_obj) },
-    { MP_ROM_QSTR(MP_QSTR_seg_detach), MP_ROM_PTR(&p9_segdetach_obj) },
-
-    { MP_ROM_QSTR(MP_QSTR_pipenew), MP_ROM_PTR(&p9_pipenew_obj) },
-    { MP_ROM_QSTR(MP_QSTR_piperead), MP_ROM_PTR(&p9_piperead_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pipeclose), MP_ROM_PTR(&p9_pipeclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_detach), MP_ROM_PTR(&p9_segdetach_obj) },    { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_wait), MP_ROM_PTR(&p9_processwait_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_info), MP_ROM_PTR(&p9_processinfo_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_terminate), MP_ROM_PTR(&p9_processterminate_obj) },
@@ -1079,23 +962,14 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_vobjcreate), MP_ROM_PTR(&p9_vobjcreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjread), MP_ROM_PTR(&p9_vobjread_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjinfo), MP_ROM_PTR(&p9_vobjinfo_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjclose), MP_ROM_PTR(&p9_vobjclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifocreate), MP_ROM_PTR(&p9_vobjfifocreate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifosub), MP_ROM_PTR(&p9_vobjfifosub_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifosend), MP_ROM_PTR(&p9_vobjfifosend_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfiforecv), MP_ROM_PTR(&p9_vobjfiforecv_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifostat), MP_ROM_PTR(&p9_vobjfifostat_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjgrant), MP_ROM_PTR(&p9_vobjgrant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_vobjclose), MP_ROM_PTR(&p9_vobjclose_obj) },    { MP_ROM_QSTR(MP_QSTR_vobjgrant), MP_ROM_PTR(&p9_vobjgrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjrevoke), MP_ROM_PTR(&p9_vobjrevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjio), MP_ROM_PTR(&p9_vobjio_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjlist), MP_ROM_PTR(&p9_vobjlist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create), MP_ROM_PTR(&p9_objcreate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_fifocreate), MP_ROM_PTR(&p9_objfifocreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_close), MP_ROM_PTR(&p9_objclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_handle), MP_ROM_PTR(&p9_objopenhandle_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_binding), MP_ROM_PTR(&p9_objopenbinding_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_pipe_create), MP_ROM_PTR(&p9_objpipecreate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_pipe_peer), MP_ROM_PTR(&p9_objpipepeer_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_ctl), MP_ROM_PTR(&p9_objuartctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_status), MP_ROM_PTR(&p9_objuartstatus_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_kbd_leds), MP_ROM_PTR(&p9_objkbdleds_obj) },
@@ -1122,13 +996,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_read_version), MP_ROM_PTR(&p9_objreadver_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_write), MP_ROM_PTR(&p9_objwrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_info), MP_ROM_PTR(&p9_objinfo_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_stat), MP_ROM_PTR(&p9_objstat_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_subscribe), MP_ROM_PTR(&p9_objsubscribe_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_publish), MP_ROM_PTR(&p9_objpublish_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_receive), MP_ROM_PTR(&p9_objreceive_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_grant), MP_ROM_PTR(&p9_objgrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_revoke), MP_ROM_PTR(&p9_objrevoke_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_fifo_shutdown), MP_ROM_PTR(&p9_objfifoshutdown_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_list), MP_ROM_PTR(&p9_objlist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_invoke), MP_ROM_PTR(&p9_objinvoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_region_create), MP_ROM_PTR(&p9_regioncreate_obj) },
@@ -1140,6 +1009,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_region_atomic_store), MP_ROM_PTR(&p9_regionatomicstore_obj) },
     { MP_ROM_QSTR(MP_QSTR_region_wait), MP_ROM_PTR(&p9_regionwait_obj) },
     { MP_ROM_QSTR(MP_QSTR_region_wake), MP_ROM_PTR(&p9_regionwake_obj) },
+    { MP_ROM_QSTR(MP_QSTR_console_attach), MP_ROM_PTR(&p9_consoleattach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl), MP_ROM_PTR(&p9_repl_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_addr), MP_ROM_PTR(&p9_notify_probe_addr_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_count), MP_ROM_PTR(&p9_notify_probe_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_reset), MP_ROM_PTR(&p9_notify_probe_reset_obj) },
@@ -1168,10 +1039,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_NSAVE), MP_ROM_INT(NSAVE) },
     { MP_ROM_QSTR(MP_QSTR_NRSTR), MP_ROM_INT(NRSTR) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_DATA), MP_ROM_INT(OBJ_USB_EP_DATA) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_REGION), MP_ROM_INT(VkindRegion) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },    { MP_ROM_QSTR(MP_QSTR_VKIND_REGION), MP_ROM_INT(VkindRegion) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_PROCESS), MP_ROM_INT(VkindProcess) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_INFO), MP_ROM_INT(ObjOpProcessInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_WAIT), MP_ROM_INT(ObjOpProcessWait) },
@@ -1205,13 +1073,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PUT_OID), MP_ROM_INT(ObjOpPutOid) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_INFO), MP_ROM_INT(ObjOpInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_READ), MP_ROM_INT(ObjOpRead) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_WRITE), MP_ROM_INT(ObjOpWrite) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_STAT), MP_ROM_INT(ObjOpStat) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SEND), MP_ROM_INT(ObjOpSend) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_RECV), MP_ROM_INT(ObjOpRecv) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SUBSCRIBE), MP_ROM_INT(ObjOpSubscribe) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_FIFO_SHUTDOWN), MP_ROM_INT(ObjOpFifoShutdown) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_WRITE), MP_ROM_INT(ObjOpWrite) },    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_DEVICE_RX), MP_ROM_INT(ObjOpDeviceRx) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_COPY), MP_ROM_INT(ObjBindCopy) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_EXCLUSIVE), MP_ROM_INT(ObjBindExclusive) },
@@ -1232,11 +1094,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VCOMMIT), MP_ROM_INT(Vcommit) },
     { MP_ROM_QSTR(MP_QSTR_VEXECUTE), MP_ROM_INT(Vexecute) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_BYTES), MP_ROM_INT(VkindBytes) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_FIFO), MP_ROM_INT(VkindFifo) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_GE), MP_ROM_INT(VkindGe) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_SPACE), MP_ROM_INT(VkindSpace) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_PIPE), MP_ROM_INT(VkindPipe) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_SPACE), MP_ROM_INT(VkindSpace) },    { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_KBD), MP_ROM_INT(VkindKbd) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_USB_EP), MP_ROM_INT(VkindUsbEp) },
     { MP_ROM_QSTR(MP_QSTR_VIO_READ), MP_ROM_INT(VioRead) },

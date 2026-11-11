@@ -1105,13 +1105,11 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         { MP_QSTR_handle, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_view, MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_roles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_pipes, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_env, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_stdout, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_vhandles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     struct {
-        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, pipes, env, stdout, vhandles;
+        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, env, vhandles;
     } a;
     struct { struct Ospawn base; struct Oinherit extra; } ext;
     struct Oinheritv *hv;
@@ -1181,9 +1179,8 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     hasv = a.vhandles.u_obj != mp_const_none;
     hv = (struct Oinheritv *)&ext.extra;
     if (hasv) {
-        if (a.view.u_int != 0
-        || a.stdout.u_obj != mp_const_none || a.roles.u_obj != mp_const_none
-        || a.pipes.u_obj != mp_const_none || a.env.u_obj != mp_const_none) {
+        if (a.view.u_int != 0 || a.roles.u_obj != mp_const_none
+        || a.env.u_obj != mp_const_none) {
             mp_raise_msg(&mp_type_ValueError,
                 MP_ERROR_TEXT("space.spawn: vhandles cannot be combined with other inheritance"));
         }
@@ -1211,7 +1208,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     ext.base.flags = hasv ? 2 : 1;
     if (!hasv) {
     ext.extra.view = a.view.u_int;
-    if(a.stdout.u_obj != mp_const_none) ext.extra.stdoutpipe = mp_obj_get_uint(a.stdout.u_obj);
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
@@ -1219,17 +1215,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
             if(ext.extra.nroles == 32 || strlen(s) >= 32)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn role limit"));
             strcpy(ext.extra.roles[ext.extra.nroles++], s);
-        }
-    }
-    if(a.pipes.u_obj != mp_const_none){
-        it = mp_getiter(a.pipes.u_obj, NULL);
-        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
-            size_t count; mp_obj_t *pair;
-            mp_obj_get_array(item, &count, &pair);
-            if(count != 2 || ext.extra.npipes == 16)
-                mp_raise_ValueError(MP_ERROR_TEXT("spawn pipe limit"));
-            ext.extra.pipes[ext.extra.npipes][0] = mp_obj_get_int(pair[0]);
-            ext.extra.pipes[ext.extra.npipes++][1] = mp_obj_get_int(pair[1]);
         }
     }
     if(a.env.u_obj != mp_const_none){

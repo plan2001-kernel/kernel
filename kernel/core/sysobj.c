@@ -9,10 +9,11 @@
  * object class hierarchy and contains no network stack.
  *
  * Historical VOBJ* syscall numbers are reserved and have no handlers.  The
- * TCP6/UDP6 object providers are gone: the permitted network boundary is raw
- * device frames/ObjectFIFO plus userspace protocol handling.  Process handle
- * introspection is SYSCTL SysctlHandleList; process completion observation
- * and control are VkindProcess INIT operations; device control is IOCTL.
+ * TCP6/UDP6 object providers and the legacy FIFO/Pipe providers are gone: the
+ * permitted network boundary is raw device frames plus userspace protocol
+ * handling.  Process handle introspection is SYSCTL SysctlHandleList; process
+ * completion observation and control are VkindProcess INIT operations;
+ * device control is IOCTL.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -54,11 +55,6 @@ sysobjcreate(sysva_list list)
 		error(Ebadarg);
 	kind = (int)(flags & ObjCreateKindMask);
  if(id != nil) validaddr((uintptr)id, sizeof *id, 1);
-	if(kind == ObjKindPipe){
-		if(buf != nil || n != 0)
-			error(Ebadarg);
-		return vobjpipecreate((VobjId*)id);
-	}
 	if(kind == ObjKindRegion){
 		VobjId vid;
 		int h;
@@ -91,10 +87,9 @@ sysobjcreate(sysva_list list)
 		}
 		return h;
 	}
-	if(kind != ObjKindBytes && kind != ObjKindFifo)
+	if(kind != ObjKindBytes)
 		error(Ebadarg);
-	return vobjcreat(kind == ObjKindFifo ? VkindFifo : VkindBytes,
-		space, buf, n, (VobjId*)id);
+	return vobjcreat(VkindBytes, space, buf, n, (VobjId*)id);
 }
 
 uintptr
@@ -297,22 +292,10 @@ sysobjinvoke(sysva_list list)
             error(Ebadarg);
         c.result = vobjdevicerx(handle);
         break;
-    case ObjOpFifoShutdown:
-        if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
-           c.arg0 != 0 || c.arg1 != 0)
-            error(Ebadarg);
-        c.result = vobjfifoshutdown(handle);
-        break;
     case ObjOpInfo:
 		if(c.out == nil || c.outlen != sizeof(VobjInfo))
 			error(Ebadarg);
 		vobjinfo(handle, (VobjInfo*)c.out);
-		c.result = 0;
-		break;
-	case ObjOpStat:
-		if(c.out == nil || c.outlen != sizeof(VobjFifostat))
-			error(Ebadarg);
-		vobjfifostat(handle, (VobjFifostat*)c.out);
 		c.result = 0;
 		break;
 	case ObjOpRead:
@@ -339,40 +322,12 @@ sysobjinvoke(sysva_list list)
 		c.result = vobjio(handle, VioWrite, c.in,
 			bounded(c.inlen, Vobjpaymax, Ebadarg), 0);
 		break;
-	case ObjOpSend:
-  if(c.arg0 > 0x7fffffffULL) error(Ebadarg);
-		c.result = vobjfifosend(handle, (int)c.arg0, c.in,
-			bounded(c.inlen, 0x7fffffff, Ebadarg));
-		break;
-	case ObjOpRecv:
-		/* The historical FIFO timeout is <0 for an infinite wait; the
-		 * OBJ adapter passes it as an unsigned -1.  Accept both signed
-		 * and 32-bit unsigned infinite sentinels and keep finite waits
-		 * bounded to the int-millisecond range. */
-		if(c.arg0 == 0xffffffffffffffffULL || c.arg0 == 0xffffffffULL)
-			tmo = -1;
-		else
-			tmo = (int)bounded(c.arg0, 0x7fffffff, Ebadarg);
-		got = 0;
-		c.result = vobjfiforecv(handle, c.out,
-			bounded(c.outlen, 0x7fffffff, Ebadarg), tmo, &got);
-		c.aux = (uvlong)got;
-		break;
-	case ObjOpSubscribe:
-		c.result = vobjfifosub(handle, c.arg0,
-			bounded(c.arg1, Vsubcapmax, Ebadarg));
-		break;
 	case ObjOpRevoke:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
 		   c.arg0 != 0 || c.arg1 != 0)
 			error(Ebadarg);
 		vobjrevoke(handle);
 		c.result = 0;
-		break;
-	case ObjOpPipePeer:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
-			error(Ebadarg);
-		c.result = vobjpipepeer(handle);
 		break;
 	case ObjOpRegionMap:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||

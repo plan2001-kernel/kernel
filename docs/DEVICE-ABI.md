@@ -37,7 +37,7 @@ OBJOPEN(ObjOpenDevices, rights)
 | --- | --- | --- |
 | `ObjDeviceUart` | `mode` = `OREAD`/`OWRITE`/`ORDWR` | Authorized bounded byte-stream READ/WRITE; `Vread`/`Vwrite`. `IOCTL(IoctlUartConfig)` needs `Vcontrol`; `IOCTL(IoctlUartStatus)` needs `Vmeta`. No artificial frames. |
 | `ObjDeviceKbd` | `flags` = `OBJ_DEVICE_KBD_EXCLUSIVE` | Exclusive PS/2 scan-code claim; READ returns raw scan codes; `IOCTL(IoctlKbdLeds)` needs `Vcontrol`. |
-| `ObjDeviceEthernet` | no options | Current raw L2 SEND accepts complete frames and returns accepted/enqueued bytes. Current `ObjOpDeviceRx` returns an ObjectFIFO receive-channel capability; `IOCTL(IoctlEtherStatus/Detach)` needs `Vmeta`/`Vcontrol`. This receive transport is a Phase 6 removal target. |
+| `ObjDeviceEthernet` | no options | Raw L2 SEND accepts complete frames and returns accepted/enqueued bytes. `ObjOpDeviceRx` returns one read-only `VkindRegion` Handle carrying an `ObjRingHeader` with complete L2 frame slots; `IOCTL(IoctlEtherStatus/Detach)` needs `Vmeta`/`Vcontrol`. |
 | `ObjDeviceUsbControl` | no options | Synchronous control transfer; exactly one session-owned pending immutable completion, not an Ethernet FIFO and not a bulk API. |
 | `ObjDeviceUsbEndpoint` | `kind` = data/CTL, `mode` | DATA performs the existing exclusive endpoint data open; CTL references the endpoint for provider administration. No USB bulk data API is implied. |
 
@@ -55,18 +55,14 @@ keeping device configuration/control separate from payload.
 A USB control *transfer* is transport with its own send/completion sequence;
 the naming of "control transfer" does not make it an IOCTL.
 
-**CURRENT IMPLEMENTATION:** Ethernet receive publishes immutable byte objects
-through ObjectFIFO with subscription rights and frame boundaries. USB control
-publishes at most one synchronous, non-queued completion. Neither establishes
-ObjectFIFO as a target device/IPC transport.
-
-**TARGET:** Migrate Ethernet receive and structured device events to
-capability-mapped memory publication plus WAIT/WAKE notification after those
-mechanisms exist. A userspace service defines framing, buffering, fan-out and
-backpressure; retain checked device ownership and control authority. Console
-input can use the same primitives while the kernel retains early-boot and
-panic output. Phase 6 deletes the obsolete FIFO provider, ABI, adapters and
-tests after the replacement device/console path works.
+**CURRENT IMPLEMENTATION:** Ethernet receive publishes complete L2 frames into
+a kernel-written capability region; userspace maps it read-only and uses
+`REGIONWAIT`/`REGIONWAKE`. The ring is bounded and overwrites old slots; frame
+fan-out, IP, IPv6, ARP and all upper-layer policy belong to userspace. USB
+control publishes at most one synchronous, non-queued completion. Console
+sessions use two such regions per session (owner-written input and
+client-written output), with diagnostics distinguished by a slot flag. The
+obsolete FIFO, Pipe and kernel IPv6/ARP/ESP providers are deleted.
 
 ## Current reserved identifiers
 

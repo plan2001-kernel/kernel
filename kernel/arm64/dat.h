@@ -110,7 +110,6 @@ struct Conf
 	ulong	upages;		/* user page pool */
 	ulong	copymode;	/* 0 is copy on write, 1 is copy on reference */
 	ulong	ialloc;		/* max interrupt time allocation in bytes */
-	ulong	pipeqsize;	/* size in bytes of pipe queues */
 	ulong	nimage;		/* number of page cache image headers */
 	ulong	nswap;		/* number of swap pages */
 	int	nswppo;		/* max # of pageouts per segment pass */

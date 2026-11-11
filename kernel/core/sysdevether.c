@@ -1,6 +1,7 @@
 /* T13 raw Ethernet device provider.  The only IRQ-side state is a bounded
- * array of owned Blocks.  The ordinary ObjectFIFO remains the sole message
- * distribution mechanism; publication and allocation run in a kproc. */
+ * array of owned Blocks.  A capability-mapped region ring is the sole receive
+ * transport; the kernel holds the only writer mapping and publishes complete
+ * L2 frames with release ordering plus REGIONWAKE notification. */
 #include "u.h"
 #include "../core/lib.h"
 #include "mem.h"
@@ -27,7 +28,8 @@ struct Veth {
     Rendez rxready;
     Rendez workerexit;
     Ether *ether;            /* ethercore registry has boot lifetime */
-    Vobj *fifo;              /* strong, ordinary ObjectFIFO reference */
+    Vobj *rxregion;          /* strong reference to the receive region */
+    uvlong rxseq;            /* published frame sequence */
     Rxslot slot[HandoffCapacity];
     int head, tail, queued;
     int registered, started, closed, done;
@@ -43,7 +45,8 @@ vetherput(Veth *v)
 {
     if(decref(&v->ref) != 0)
         return;
-    vobjput(v->fifo);
+    if(v->rxregion != nil)
+        vobjput(v->rxregion);
     free(v);
 }
 
@@ -102,8 +105,7 @@ vetherworker(void *arg)
 {
     Veth *v = arg;
     Block *bp;
-    Vobj *object;
-    ObjEtherRxMeta meta;
+    ulong len;
     int closed;
 
     for(;;){
@@ -117,11 +119,7 @@ vetherworker(void *arg)
             continue;
         }
         bp = v->slot[v->head].block;
-        memset(&meta, 0, sizeof meta);
-        meta.version = OBJ_DEVICE_ABI_VERSION;
-        meta.controller = v->ether->ctlrno;
-        meta.length = BLEN(bp);
-        meta.sequence = v->slot[v->head].sequence;
+        len = BLEN(bp);
         v->slot[v->head].block = nil;
         v->head = (v->head+1) % HandoffCapacity;
         v->queued--;
@@ -130,31 +128,25 @@ vetherworker(void *arg)
             freeb(bp);
             continue;
         }
-        object = vobjnewkind(VkindBytes, meta.length);
-        if(object == nil){
-            freeb(bp);
-            ilock(&v->lk);
-            v->publishdrops++;
-            iunlock(&v->lk);
-            continue;
-        }
         if(waserror()){
-            vobjput(object);
             freeb(bp);
             ilock(&v->lk);
             v->publishdrops++;
             iunlock(&v->lk);
             continue;
         }
-        memmove(object->data, bp->rp, meta.length);
-        vobjfifopublish(v->fifo, object, Vread|Vmeta|Vdelegate,
-            &meta, sizeof meta);
+        {
+            int rc = vobjregionringpublish(v->rxregion, &v->rxseq,
+                bp->rp, len);
+            ilock(&v->lk);
+            if(rc < 0)
+                v->publishdrops++;
+            else
+                v->published++;
+            iunlock(&v->lk);
+        }
         poperror();
-        vobjput(object);
         freeb(bp);
-        ilock(&v->lk);
-        v->published++;
-        iunlock(&v->lk);
     }
     ilock(&v->lk);
     v->done = 1;
@@ -208,9 +200,12 @@ vetheropen(int controller)
     v->ether = ethercore_lookup(controller);
     if(v->ether == nil)
         error(Ebadarg);
-    v->fifo = vobjnewkind(VkindFifo, 0);
-    if(v->fifo == nil)
+    v->rxregion = vobjregionalloc(OBJ_RING_BYTES);
+    if(v->rxregion == nil)
         error(Enomem);
+    if(vobjregionwriterhold(v->rxregion) < 0)
+        error(Einuse);
+    vobjregionringinit(v->rxregion);
     rc = ethercore_attach(v->ether);
     if(rc != EtherErrOk)
         error("ether: attach failed");
@@ -260,8 +255,8 @@ vetherdetach(Veth *v)
             freeb(bp);
         }
     }
-    if(v->fifo != nil)
-        vobjfifoclose(v->fifo);
+    if(v->rxregion != nil)
+        vobjregionwriterrelease(v->rxregion);
     poperror();
     qunlock(&v->gate);
 }
@@ -276,7 +271,7 @@ vetherclose(Veth *v)
 }
 
 Vobj*
-vetherfifo(Veth *v)
+vetherregion(Veth *v)
 {
     int closed;
     ilock(&v->lk);
@@ -284,7 +279,7 @@ vetherfifo(Veth *v)
     iunlock(&v->lk);
     if(closed)
         error(Ehungup);
-    return v->fifo; /* borrowed; caller holds a live device Vhand */
+    return v->rxregion; /* borrowed; caller holds a live device Vhand */
 }
 
 static char*
