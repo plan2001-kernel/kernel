@@ -16,7 +16,7 @@ qob_new_o_image() {
   mkdir -p "$logdir"
   qob_safe_rm "$img"
   MPEXEC="$QOB_MPY" "$T46_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
-    "$T46_ROOT/tools/host/t46/phase6-console.py" >"$logdir/mkovol.log" 2>&1
+    "$T46_ROOT/tools/host/console-sessions/phase6-console.py" >"$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --accel kvm:tcg --cpus 3 --ncpu 3 --obootcpu 0 \
   --mib 512 --timeout 900 --obootexec 0x4f45584543000003 \

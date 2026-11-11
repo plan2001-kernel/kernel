@@ -26,7 +26,7 @@ qob_new_o_image() {
   mkdir -p "$logdir"
   qob_safe_rm "$img"
   MPEXEC="$QOB_MPY" "$T12_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
-    "$T12_ROOT/tools/host/t12/device-checks.py" >"$logdir/mkovol.log" 2>&1
+    "$T12_ROOT/tools/host/device-checks/device-checks.py" >"$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --accel kvm:tcg --timeout 180 --obootexec 0x4f45584543000003 \
   --output-dir "$T12_OUT" --expect '^T12-FINISH [0-9]+ PASS' "$@"

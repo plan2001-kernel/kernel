@@ -82,17 +82,25 @@ Volatile capability regions are `ObjKindRegion` objects reached through the
 same five-call object ABI. Creation takes a non-zero, page-multiple size up to
 16 MiB and returns a Handle with `Vread|Vwrite|Vmeta|Vdelegate|Vcontrol`; `OBJOPEN`
 attenuates it like any other Handle, and explicit delegation is the only way
-another process obtains authority. `ObjOpRegionMap` installs the region at a
-process-local address (arg0, 0 chooses) and returns that address.
-`ObjOpRegionUnmap` removes the caller's mapping by address and needs no live
-Handle. A writable mapping requires `Vwrite` and is unique for the region; it
-is rejected while any other writable mapping exists. Read-only mappings require
-`Vread` only. A mapping is independent of its Handle: closing the Handle does
+another process obtains authority. The eagerly allocated, zeroed backing pages
+are committed once to the creating process's memory budget at creation; a
+mapping only installs PTEs over that backing and is not charged again, so
+creating many regions cannot bypass the budget by leaving them unmapped.
+`ObjOpRegionMap` installs the region at a process-local address (arg0, 0
+chooses), takes an optional `ObjRegionMap*` flag mask in arg1 (0 preserves the
+default), and returns that address. `ObjOpRegionUnmap` removes the caller's
+mapping by its exact base address and needs no live Handle. A writable mapping
+requires `Vwrite` and is unique for the region; it is rejected while any other
+writable mapping exists. Read-only mappings require `Vread` only, and
+`ObjRegionMapReadonly` maps a `Vwrite` Handle read-only without consuming the
+writer slot. A mapping is independent of its Handle: closing the Handle does
 not unmap it, and process exit or explicit unmap releases the mapping
-reference. Writer exit releases the writer slot but not pages still referenced
-by reader Handles or mappings. The region and its eagerly zeroed pages are
-freed at the last reference. Phase 2 does not transfer the writer role
-automatically.
+reference. An ordinary fork does not inherit region mappings; an RFMEM child
+shares the parent's address space and therefore shares the installed
+`SG_REGION` Segments, their PTE sets and the writer slot. Writer exit releases
+the writer slot but not pages still referenced by reader Handles or mappings.
+The region and its eagerly zeroed pages are freed at the last reference.
+Phase 2 does not transfer the writer role automatically.
 
 `ObjOpRevoke` on a region Handle carrying `Vcontrol` is the explicit
 revocation operation. It permanently denies **new** mappings through every
@@ -104,6 +112,14 @@ other parties. There is no implicit TLB shootdown or forced unmap.
 Installed mappings, including their writable slot, remain usable for
 `REGIONWAIT`/`REGIONWAKE` after revocation; only new maps are denied.
 
+This is a deliberate limitation: revocation cannot remove authority that has
+already been exercised as an installed mapping, and it cannot reclaim or
+transfer the writer slot. A broken writer therefore keeps the slot until its
+process exits or is terminated, which releases the mapping and notifies
+waiters. Recovering a service after a crashed writer relies on that process
+death, not on revocation; there is no forced unmap, writer eviction or
+implicit slot transfer.
+
 `REGIONWAIT(mapping base, region offset, expected, timeout)` and
 `REGIONWAKE(mapping base, region offset, count)` operate on an installed
 `SG_REGION` mapping, not a Handle or raw pointer. The publication word is
@@ -114,22 +130,26 @@ process's Handle conveys nothing. Only the unique writable mapping may wake;
 an RO holder cannot. `count` must be positive and the call returns how many
 waiters it woke. `WAIT` applies a fixed order: validate the mapping and word;
 compare the word and return changed (0) if it differs even when no writer is
-present; if it still matches and no RW mapping is active, return 3 immediately
-even for an infinite timeout; otherwise apply the non-blocking rule or enroll
-and sleep. Writer-presence, comparison and enrollment are linearizable under
-one short spin lock with writer-slot acquisition and release. Status 3 means
-"no active writer at check time / the previous writer mapping was released",
-not permanent destruction: a new writer may map later unless revocation denies
-it, and the caller decides whether to retry or treat the stream as ended.
-Releasing the writable mapping notifies enrolled waiters with 3 as a lifecycle
-event, which a rapid replacement writer cannot hide. Normal returns also
-include woken (1) and timeout/non-blocking (2); interruption or an invalid
-mapping raises the ordinary error. Waiters always recheck; a wake carries no
-data and proves no particular value. The kernel does not copy payload bytes.
-A faulting or NDebug-terminated user process no longer parks in a Broken
-state that retains its mappings. Final termination releases the writable
-mapping slot and notifies REGIONWAIT readers with status 3, while read-only
-snapshots remain readable through their own mapping references.
+present; if it still matches and no RW mapping is active, use the writer
+generation to distinguish the two temporal states. A writer that was present
+and released, or a revoked region, returns 3 immediately even for an infinite
+timeout. A region that has never had a writer enrolls and blocks until a
+writer appears or the timeout/interrupt applies, so the reader does not poll
+for writer appearance. Writer-presence, comparison and enrollment are
+linearizable under one short spin lock with writer-slot acquisition and
+release. Status 3 therefore means "the previous writer mapping was released,
+or revocation ended the possibility of a new writer", not permanent
+destruction: a new writer may map later unless revocation denies it, and the
+caller decides whether to retry or treat the stream as ended. Releasing the
+writable mapping notifies enrolled waiters with 3 as a lifecycle event, which
+a rapid replacement writer cannot hide. Normal returns also include woken (1)
+and timeout/non-blocking (2); interruption or an invalid mapping raises the
+ordinary error. Waiters always recheck; a wake carries no data and proves no
+particular value. The kernel does not copy payload bytes. A faulting or
+NDebug-terminated user process no longer parks in a Broken state that retains
+its mappings. Final termination releases the writable mapping slot and
+notifies REGIONWAIT readers with status 3, while read-only snapshots remain
+readable through their own mapping references.
 
 The Phase 4 three-process MicroPython path grants two regions with explicit
 `SPAWN` vhandles: A writes only the task region, B writes only the answer

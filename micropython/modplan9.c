@@ -587,9 +587,10 @@ static MP_DEFINE_CONST_FUN_OBJ_1(p9_regioncreate_obj,p9_regioncreate);
 
 static mp_obj_t p9_regionmap(size_t n,const mp_obj_t *a){
  unsigned long long addr=n>1?(unsigned long long)mp_obj_get_uint(a[1]):0;
- return check(obj_region_map(mp_obj_get_int(a[0]),addr));
+ unsigned int flags=n>2?(unsigned int)mp_obj_get_uint(a[2]):0;
+ return check(obj_region_map_flags(mp_obj_get_int(a[0]),addr,flags));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_regionmap_obj,1,2,p9_regionmap);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_regionmap_obj,1,3,p9_regionmap);
 
 static mp_obj_t p9_regionunmap(mp_obj_t addr){
  check(obj_region_unmap((unsigned long long)mp_obj_get_uint(addr)));
@@ -1063,6 +1064,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_REGION), MP_ROM_INT(ObjKindRegion) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_MAP), MP_ROM_INT(ObjOpRegionMap) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_UNMAP), MP_ROM_INT(ObjOpRegionUnmap) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_REGION_MAP_READONLY), MP_ROM_INT(ObjRegionMapReadonly) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_CONFIG), MP_ROM_INT(IoctlUartConfig) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_STATUS), MP_ROM_INT(IoctlUartStatus) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_KBD_LEDS), MP_ROM_INT(IoctlKbdLeds) },
@@ -1116,6 +1118,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_RFFDG), MP_ROM_INT(RFFDG) },
     { MP_ROM_QSTR(MP_QSTR_RFNOTEG), MP_ROM_INT(RFNOTEG) },
     { MP_ROM_QSTR(MP_QSTR_RFPROC), MP_ROM_INT(RFPROC) },
+    { MP_ROM_QSTR(MP_QSTR_RFMEM), MP_ROM_INT(RFMEM) },
     { MP_ROM_QSTR(MP_QSTR_RFCNAMEG), MP_ROM_INT(RFCNAMEG) },
     { MP_ROM_QSTR(MP_QSTR_RFCENVG), MP_ROM_INT(RFCENVG) },
     { MP_ROM_QSTR(MP_QSTR_RFCFDG), MP_ROM_INT(RFCFDG) },

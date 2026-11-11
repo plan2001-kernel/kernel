@@ -286,17 +286,26 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	}
 	for(i = 0; i < NSEG; i++)
 		/*
-		 * Capability-region mappings are process-local authority.  A
-		 * child receives a region only through explicit Handle
-		 * delegation and maps it itself; it never inherits a writable
-		 * address-space alias.
+		 * An ordinary fork does not inherit capability-region mappings:
+		 * the child receives a region only through explicit Handle
+		 * delegation and maps it itself.  RFMEM shares one address
+		 * space, so it must also share the existing SG_REGION Segments
+		 * (and their writer slot); otherwise a thread would fault on an
+		 * address that is valid in the process it shares memory with.
 		 */
 		if(up->seg[i] != nil &&
-		   (up->seg[i]->type & SG_TYPE) != SG_REGION)
+		   (n != 0 || (up->seg[i]->type & SG_TYPE) != SG_REGION))
 			p->seg[i] = dupseg(up->seg, i, n);
 	forkpages = 0;
 	for(i = 0; i < NSEG; i++)
-		if(p->seg[i] != nil) forkpages += p->seg[i]->size;
+		/*
+		 * SG_REGION backing is charged once to the region creator and a
+		 * mapping does not add a per-process commitment; do not charge
+		 * an RFMEM child for the shared mapping either.
+		 */
+		if(p->seg[i] != nil &&
+		   (p->seg[i]->type & SG_TYPE) != SG_REGION)
+			forkpages += p->seg[i]->size;
 	if(procmemreplace(p, forkpages) < 0) error(Enovmem);
 	qunlock(&p->seglock);
 	poperror();

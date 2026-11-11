@@ -192,9 +192,13 @@ dupseg(Segment **seg, int segno, int share)
 	case SG_REGION:
 		/*
 		 * A region mapping is process-local authority, never an
-		 * inherited address-space range.  Fork skips region segments;
-		 * reaching here is an invariant violation.
+		 * ordinary inherited address-space range.  An RFMEM child shares
+		 * the parent's address space, so it shares the exact Segment and
+		 * its mapping reference; an ordinary fork skips region segments
+		 * and must not reach here.
 		 */
+		if(share)
+			goto sameseg;
 		qunlock(&s->qlk);
 		poperror();
 		error(Ebadarg);

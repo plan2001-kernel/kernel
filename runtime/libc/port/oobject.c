@@ -231,10 +231,17 @@ obj_region_create(unsigned long long size, ObjId *out)
 long
 obj_region_map(int handle, unsigned long long addr)
 {
+	return obj_region_map_flags(handle, addr, 0);
+}
+
+long
+obj_region_map_flags(int handle, unsigned long long addr, unsigned int flags)
+{
 	ObjCall c;
 
 	callinit(&c, ObjOpRegionMap);
 	c.arg0 = addr;
+	c.arg1 = flags;
 	return obj_invoke(handle, &c, sizeof c);
 }
 

@@ -17,7 +17,7 @@ qob_new_o_image() {
   mkdir -p "$logdir"
   qob_safe_rm "$img"
   MPEXEC="$QOB_MPY" "$T40_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
-    "$T40_ROOT/tools/host/t40/phase4-micropython-ipc.py" >"$logdir/mkovol.log" 2>&1
+    "$T40_ROOT/tools/host/micropython-ipc/phase4-micropython-ipc.py" >"$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --accel kvm:tcg --cpus 3 --ncpu 3 --obootcpu 0 \
   --mib 1024 --timeout 1200 --obootexec 0x4f45584543000003 --output-dir "$T40_OUT" \

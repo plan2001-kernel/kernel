@@ -14,9 +14,9 @@ qob_new_o_image() {
   mkdir -p "$logdir"
   qob_safe_rm "$img"
   MPEXEC="$QOB_MPY" "$T47_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
-    "$T47_ROOT/tools/host/t47/phase6-ethernet.py" >"$logdir/mkovol.log" 2>&1
+    "$T47_ROOT/tools/host/ethernet-frames/phase6-ethernet.py" >"$logdir/mkovol.log" 2>&1
 }
-python3 "$T47_ROOT/tools/host/t47/peer.py" 31401 31402 >"$T47_OUT/peer.log" 2>&1 &
+python3 "$T47_ROOT/tools/host/ethernet-frames/peer.py" 31401 31402 >"$T47_OUT/peer.log" 2>&1 &
 T47_PEER_PID=$!
 trap 'kill "$T47_PEER_PID" 2>/dev/null || true' EXIT
 sleep .1

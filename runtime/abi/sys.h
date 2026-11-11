@@ -214,12 +214,13 @@ struct Ospawn {
  *   1. Validate the installed mapping and aligned/in-bounds word.
  *   2. Compare the word: if it differs from expected, return 0 immediately,
  *      whether or not a writer is present.
- *   3. If it still matches and no RW mapping is active, return 3 immediately,
- *      even when timeout < 0.  This covers a region that never had a writer, a
- *      writer that unmapped, and a writer process that exited or was killed
- *      and whose mappings were released.  A process retained in the kernel's
- *      broken/debug state still owns its mapping and remains the active
- *      writer until that mapping is released.
+ *   3. If it still matches and no RW mapping is active, distinguish the two
+ *      temporal states.  If a writer was present and released, or the region
+ *      was revoked, return 3 immediately even when timeout < 0.  If no writer
+ *      has ever been present, enroll and sleep so the reader need not poll
+ *      for writer appearance; timeout == 0 returns 2 without sleeping and
+ *      timeout > 0 is a bounded wait.  A revoked region wakes such waiters
+ *      with 3 because no future writer is allowed.
  *   4. If a writer is active and the word still matches, timeout == 0 returns
  *      2; otherwise atomically enroll and sleep with the timeout/interrupt
  *      rules below.
@@ -227,12 +228,14 @@ struct Ospawn {
  *      notified and returns 3.  A replacement writer mapping later cannot
  *      erase that notification.  If a normal WAKE wins the race, returning 1
  *      is permitted.
- * Status 3 is "no active writer at check time / the previous writer mapping
- * was released", not permanent region destruction: a new writer may map later
- * unless Phase 2 revocation denies it.  The caller decides whether to retry,
- * request a new grant or treat the stream as ended.  timeout < 0 blocks until
- * notified, timeout == 0 only checks, and timeout > 0 is a bounded millisecond
- * wait.  Other returns are:
+ * Status 3 therefore means "a writer was present and its mapping was
+ * released, or revocation ended the possibility of a new writer"; it does not
+ * mean permanent region destruction, and a new writer may map later unless
+ * revocation denies it.  The reader can distinguish this from a region that
+ * has never had a writer because that case blocks instead of returning 3.
+ * The caller decides whether to retry, request a new grant or treat the
+ * stream as ended.  timeout < 0 blocks until notified, timeout == 0 only
+ * checks, and timeout > 0 is a bounded millisecond wait.  Other returns are:
  *   0  value already differed from expected; nothing was slept on
  *   1  woken (possibly spuriously); the caller must recheck the word
  *   2  timeout or a non-blocking check with the value still equal

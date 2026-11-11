@@ -173,6 +173,7 @@ int		needpages(void*);
 Egrp*		newegrp(void);
 Ref*		newfdgrp(void);
 Page*		newpage(uintptr, QLock*);
+Page*		newpagenowait(uintptr);
 Pgrp*		newpgrp(void);
 Pgrp*		kprocpgrp(void);
 Proc*		newproc(void);
