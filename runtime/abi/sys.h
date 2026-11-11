@@ -261,6 +261,43 @@ struct Ospawn {
  * copies a frame through a syscall. */
 #define	REGIONWAIT	147
 #define	REGIONWAKE	148
+/* Trusted program registration and registered-program launch.
+ *
+ * PROGRAMREGISTER(req, size) is accepted only from the explicit boot
+ * process.  It creates a named OwnerID (or resolves an existing one),
+ * installs a private owner-owned copy of the executable object, and records
+ * {program name, OwnerID, executable GE/O reference, startup policy}.  The
+ * request is copied back with the installed OID and owner ID.  There is no
+ * userspace installation daemon and no pathname.
+ *
+ * PROGRAMLAUNCH(name, namelen, argv, argc, options) resolves only a
+ * registered, launchable entry and starts an independent process under that
+ * program's OwnerID, never the requester's.  The requester receives an
+ * observation-only process Handle: it does not gain control, ownership or
+ * launcher ancestry.  The optional Ospawn/Oinherit layout is the same
+ * explicit IPC/CPU/budget declaration used by SPAWN. */
+#define	PROGRAMREGISTER	149
+#define	PROGRAMLAUNCH	150
+enum {
+	OWNER_PROGRAM_ABI_VERSION = 1,
+	OWNER_PROGRAM_AUTOSTART = 1<<0,
+	OWNER_PROGRAM_LAUNCHABLE = 1<<1,
+	OWNER_NAME_MAX = 32,
+	OWNER_PROGRAM_NAME_MAX = 32,
+};
+
+typedef struct ProgramRegisterReq {
+	unsigned int	version;	/* OWNER_PROGRAM_ABI_VERSION */
+	unsigned int	policy;		/* OWNER_PROGRAM_* flags */
+	unsigned int	namelen;	/* 1..OWNER_PROGRAM_NAME_MAX-1 */
+	unsigned int	ownerlen;	/* 1..OWNER_NAME_MAX-1 */
+	int		space;		/* VkindSpace handle */
+	unsigned int	reserved;	/* zero */
+	unsigned long long oid;		/* in: source; out: installed copy */
+	unsigned long long owner;	/* out: resolved OwnerID */
+	char		name[OWNER_PROGRAM_NAME_MAX];
+	char		owner_name[OWNER_NAME_MAX];
+} ProgramRegisterReq;
 /* flags=1 opts into this bounded extension immediately after Ospawn.
  * view: 0 EMPTY, 1 COPY listed roles, 2 SHARE (list must name whole view).
  * There is no implicit endpoint or ancestry selection. */

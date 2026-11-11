@@ -47,6 +47,8 @@ enum {
 	SysctlVolumeOpen	= 7,
 	/* read-only own-process CPU affinity / memory budget introspection */
 	SysctlProcessInfo	= 8,
+	/* caller's immutable OwnerID and registered name */
+	SysctlOwnerInfo		= 9,
 };
 
 typedef struct SysctlReq {
@@ -69,12 +71,22 @@ typedef struct SysctlProcInfo {
 	long long		pid;
 	unsigned long long	cpu;		/* affinity, ~0ULL = unpinned */
 	unsigned long long	membudget;	/* 0 = unlimited */
+	unsigned long long	owner;		/* immutable OwnerID */
 } SysctlProcInfo;
+
+typedef struct SysctlOwnerInfoRec {
+	unsigned int		version;	/* SYSCTL_ABI_VERSION */
+	unsigned int		flags;		/* bit 0: name valid */
+	unsigned long long	owner;
+	unsigned long long	reserved;
+	char			name[32];
+} SysctlOwnerInfoRec;
 
 long	sysctl(unsigned int scope, unsigned int operation, SysctlReq *req,
 		long size);
 
 /* libc convenience wrappers; the kernel routes remain SYSCTL. */
 long	proc_info(SysctlProcInfo *out);
+long	owner_info(SysctlOwnerInfoRec *out);
 
 #endif /* PLAN2001_ABI_SYSCTL_H */

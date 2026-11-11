@@ -26,6 +26,7 @@ struct Vobj {
 	uvlong	incarnation;
 	uvlong	space;
 	uvlong	oid;
+	uvlong	owner;		/* immutable OwnerID of the object */
 	int	kind;
 	int	flags;
 	int	provider;
@@ -109,7 +110,7 @@ void	vobjinheritrelease(Vinherit*);
  * termination and pexit completion all use the one Procstat resource. */
 ulong	kernrforkex(ulong flag, Vinhand*, int, uvlong*);
 long	kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc,
-		struct Ospawn *uopt);
+		struct Ospawn *uopt, uvlong owner, int internal);
 int	vobjprocinstall(Procstat*);
 int	vobjprocinfo(int, ObjProcessInfo*);
 long	vobjprocesswait(int, ObjProcessInfo*, long);
@@ -121,6 +122,7 @@ int	vobjopenhandle(int src, uvlong rights, VobjId *id);
 int	vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id);
 int	vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode);
 int	vobjinfo(int handle, VobjInfo *out);
+int	vobjownerinfo(int handle, ObjOwnerInfo *out);
 int	vobjrevoke(int handle);
 long	vobjio(int handle, uvlong op, void *buf, long n, long timeout);
 long	vobjreadver(int handle, void *buf, long n, long timeout, uvlong *ver);
@@ -185,11 +187,16 @@ int	vobjrightsfromo(int rights);
 int	vobjinstallohand(Ohand*, int kind);
 Ohand*	vobjholdohand(int handle, int kind, int rights);
 Ohand*	osopenspace(char *name, int n);
+Ohand*	osopenspacek(char *name, int n);
 void	oshandput(Ohand*);
 long	osreadhand(Ohand*, uvlong oid, void *buf, long n, uvlong *ver);
 long	osgetobjecthand(Ohand*, uvlong oid, uchar **bp, long max, uvlong *ver);
+long	osgetobjecthandk(Ohand*, uvlong oid, uchar **bp, long max, uvlong *ver);
 void	oswritehand(Ohand*, uvlong oid, void *buf, long n);
 long	oscreatehand(Ohand*, void *buf, long n, uvlong *oid);
+long	oscreatehandowner(Ohand*, void *buf, long n, uvlong *oid, uvlong owner);
+void	osownercheck(Ohand*, uvlong oid);
+uvlong	osownerof(Ohand*, uvlong oid);
 long	oscommithand(Ohand*, uvlong *ver);
 Ohand*	oscopycap(Ohand*, uvlong oid);
 Ohand*	oscopycapdelegate(Ohand*, int rights);

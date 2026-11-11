@@ -8,6 +8,7 @@
 
 #include	<a.out.h>
 #include	"kbuildid.h"
+#include	"../core/owner.h"
 
 /*
  * The single native O-server bootstrap.
@@ -186,8 +187,11 @@ ouserproc(void *arg)
 	}
 	up->egrp = newegrp();
 	/* Explicit boot role: privileged lifecycle status is never inferred
-	 * from ancestry or from a zero parent PID. */
+	 * from ancestry or from a zero parent PID.  The first userspace
+	 * process is an ordinary named owner (root), not a kernel override. */
+	ownerinit();
 	up->boot = 1;
+	up->owner = ownerroot();
 
 	ts = newseg(SG_TEXT|SG_RONLY, UTZERO, 1);
 	ts->flushme = 1;
@@ -368,6 +372,10 @@ o_user_bootstrap(void)
 		obootcpu = (int)v;
 	}
 
+	if(bootkernelonly)
+		ownerprogrambootprepare(0);
+	else
+		ownerprogrambootprepare(bootoid);
 	up = nil;
 	if(eve == nil)
 		kstrdup(&eve, "");

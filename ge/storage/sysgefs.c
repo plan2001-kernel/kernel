@@ -40,6 +40,11 @@ void	onativeput(void*, uvlong, void*, long);
 long	onativecreate(void*, void*, long, uvlong*);
 uvlong	onativecommit(void*);
 void	onativeclose(void*);
+void	ospaceownerget(void*, uvlong, uvlong*);
+void	ospaceownerput(void*, uvlong, uvlong);
+extern uvlong ownerroot(void);
+extern void ownerprogrambootregister(void);
+void	osownercheck(Ohand*, uvlong oid);
 
 /*
  * Plan2001: the volumes started through OVOLOPEN, for the direct
@@ -306,6 +311,9 @@ osvolumeopen(char *p, int n)
  }
 	bootowner = up;
 	bootpid = up->pid;
+	/* Trusted boot registration: the actual autostart action remains the
+	 * loader's in-place OEXECUTE; this records the launchable entry. */
+	ownerprogrambootregister();
 	free(spec);
 	poperror();
 	return 1;
@@ -433,8 +441,8 @@ oprocexec(Proc *p)
  * reference.  The name is a bounded Space name, not a pathname; bootstrap
  * authority (the mounted O volume owner) is still required.
  */
-Ohand*
-osopenspace(char *p, int n)
+static Ohand*
+osopenspacecore(char *p, int n, int user)
 {
 	char name[256];
 	Ohand *oh;
@@ -442,7 +450,8 @@ osopenspace(char *p, int n)
 	if(!oboot()) error(Eperm);
 	if(ovol == nil || p == nil || n <= 0 || n >= (int)sizeof name)
 		error(Ebadarg);
-	validaddr((uintptr)p, n, 0);
+	if(user)
+		validaddr((uintptr)p, n, 0);
 	memmove(name, p, n);
 	name[n] = 0;
 	if(memchr(name, 0, n) != nil) error(Ebadarg);
@@ -458,6 +467,20 @@ osopenspace(char *p, int n)
 	return oh;
 }
 
+Ohand*
+osopenspace(char *p, int n)
+{
+	return osopenspacecore(p, n, 1);
+}
+
+/* Trusted kernel/registered-program Space open; the name is a kernel
+ * string and no user-address validation is performed. */
+Ohand*
+osopenspacek(char *p, int n)
+{
+	return osopenspacecore(p, n, 0);
+}
+
 enum {
 	Objexecmax	= 8*MiB,
 };
@@ -469,8 +492,9 @@ enum {
  * helper does not drop it, because the OBJ Space provider keeps its own
  * pinned capability.  No Ospace or disk handle escapes.
  */
-long
-osgetobjecthand(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
+static long
+osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
+	int checkowner)
 {
 	uchar *buf = nil;
 	uvlong v;
@@ -485,6 +509,8 @@ osgetobjecthand(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 		nexterror();
 	}
 	oauthorize(oh, oid, Oexecute);
+	if(checkowner)
+		osownercheck(oh, oid);
 	if((buf = malloc(max)) == nil) error(Enomem);
 	n = onativeget(oh->sp, oid, buf, max, &v);
 	if(n < 0) error("oexec: no such object");
@@ -493,6 +519,20 @@ osgetobjecthand(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 	poperror();
 	qunlock(ohgate(oh));
 	return n;
+}
+
+long
+osgetobjecthand(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
+{
+	return osgetobjecthandcore(oh, oid, bp, max, ver, 1);
+}
+
+/* Trusted kernel/registered-program load: bypass the process owner check.
+ * The caller must already hold registry/installation authority. */
+long
+osgetobjecthandk(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
+{
+	return osgetobjecthandcore(oh, oid, bp, max, ver, 0);
 }
 
 /* Space Handle form used by OEXECUTE. It resolves the unified process-local
@@ -550,6 +590,7 @@ oscopycap(Ohand *src, uvlong oid)
  qlock(ohgate(src));
  if(waserror()){qunlock(ohgate(src));nexterror();}
  oauthorize(src, oid, 0);
+	osownercheck(src, oid);
 	if(ovol == nil)
 		error("O: no volume");
 	n = smalloc(sizeof *n);
@@ -658,6 +699,31 @@ oscheckhand(Ohand *h)
  poperror();qunlock(ohgate(h));
 }
 
+/*
+ * The persistent object's immutable owner.  A missing Kowner record is a
+ * seeded object owned by root.  Knowing a SpaceID/OID never selects or
+ * changes this value.
+ */
+uvlong
+osownerof(Ohand *oh, uvlong oid)
+{
+	uvlong owner;
+
+	owner = ownerroot();
+	if(oh != nil && oh->sp != nil && oid != 0)
+		ospaceownerget(oh->sp, oid, &owner);
+	return owner;
+}
+
+void
+osownercheck(Ohand *oh, uvlong oid)
+{
+	if(oid == 0 || up == nil || up->kp)
+		return;
+	if(up->owner != osownerof(oh, oid))
+		error(Eperm);
+}
+
 long
 osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 {
@@ -678,6 +744,7 @@ osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 		nexterror();
 	}
 	oauthorize(oh, oid, Oread);
+	osownercheck(oh, oid);
 	r = onativeget(oh->sp, oid, buf, n, &v);
 	poperror();
 	qunlock(ohgate(oh));
@@ -701,6 +768,7 @@ oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
 		nexterror();
 	}
 	oauthorize(oh, oid, Owrite);
+	osownercheck(oh, oid);
 	onativeput(oh->sp, oid, buf, n);
 	poperror();
 	qunlock(ohgate(oh));
@@ -711,8 +779,8 @@ oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
  * keep the same Ohand authority and per-Space gate as the historical
  * OSPACECREATE/OSPACECOMMIT calls, but take kernel-validated buffers.
  */
-long
-oscreatehand(Ohand *oh, void *buf, long n, uvlong *oid)
+static long
+oscreatehandcore(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
 {
 	uvlong v;
 
@@ -720,8 +788,6 @@ oscreatehand(Ohand *oh, void *buf, long n, uvlong *oid)
 		error(Ebadarg);
 	if(n < 0 || n > 64*MiB || (n > 0 && buf == nil))
 		error(Ebadarg);
-	if(n > 0)
-		validaddr((uintptr)buf, n, 0);
 	qlock(ohgate(oh));
 	if(waserror()){
 		qunlock(ohgate(oh));
@@ -730,10 +796,27 @@ oscreatehand(Ohand *oh, void *buf, long n, uvlong *oid)
 	oauthorize(oh, oh->oid, Ocreate);
 	v = 0;
 	onativecreate(oh->sp, buf, n, &v);
+	ospaceownerput(oh->sp, v, owner);
 	poperror();
 	qunlock(ohgate(oh));
 	*oid = v;
 	return 0;
+}
+
+/* Trusted installation creates an owner-owned object from a kernel buffer. */
+long
+oscreatehandowner(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
+{
+	return oscreatehandcore(oh, buf, n, oid, owner);
+}
+
+long
+oscreatehand(Ohand *oh, void *buf, long n, uvlong *oid)
+{
+	if(n > 0)
+		validaddr((uintptr)buf, n, 0);
+	return oscreatehandcore(oh, buf, n, oid,
+		up != nil ? up->owner : ownerroot());
 }
 
 long

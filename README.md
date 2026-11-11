@@ -11,9 +11,11 @@ The [target architecture](docs/ARCHITECTURE.md) assigns each object one
 immutable named owner. Registered programs own their executable and data;
 launching one creates an independent process under the program's owner.
 Owners offer data to other owners through the existing region-based IPC,
-not ownership or direct access to their objects. Current capability-based
-Handles and region-scoped WAIT/WAKE are implementation facts, not the
-completed single-owner model. MicroPython is the userspace proof of concept.
+not ownership or direct access to their objects. The AMD64 implementation
+enforces immutable `OwnerID` and registered-program launch; existing Handles
+and region-scoped WAIT/WAKE remain addressing, attenuation and publication
+mechanisms, never cross-owner authority. MicroPython is the userspace proof
+of concept.
 
 The current **AMD64** kernel has a working full-system path, including GE/O
 and MicroPython. The **ARM64** implementation has an early UEFI/QEMU boot

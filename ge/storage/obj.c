@@ -667,6 +667,99 @@ ospacetx(Ospace *sp)
 	return tx;
 }
 
+enum {
+	Objownerksz	= 1+8+8,
+	Objownerlen	= 1+8+8,
+	Objownervallen	= 8+8,
+};
+static char objownermagic[8] = "OOWNER01";
+
+/*
+ * Immutable per-object OwnerID.  The record is a separate Kowner key so the
+ * object payload remains opaque bytes.  A missing record is the seeded
+ * volume owner (root); boot/installation records one for every object it
+ * creates for a named program owner.  Owner metadata is never rewritten.
+ */
+void
+ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner)
+{
+	char kb[Objownerksz], buf[Kvmax];
+	Key k;
+	Kvp kv;
+
+	if(sp == nil || owner == nil)
+		error(Ebadarg);
+	qlock(&sp->lk);
+	if(waserror()){
+		qunlock(&sp->lk);
+		nexterror();
+	}
+	kb[0] = Kowner;
+	PACK64(kb+1, sp->sid);
+	PACK64(kb+9, oid);
+	k.k = kb;
+	k.nk = sizeof kb;
+	if(!btlookup(&sp->fs->snap, &k, &kv, buf, sizeof buf)){
+		poperror();
+		qunlock(&sp->lk);
+		return;
+	}
+	if(kv.val.nv != Objownervallen ||
+	   memcmp(kv.val.v, objownermagic, sizeof objownermagic) != 0)
+		error(Ecorrupt);
+	*owner = UNPACK64(kv.val.v+8);
+	poperror();
+	qunlock(&sp->lk);
+}
+
+void
+ospaceownerput(Ospace *sp, uvlong oid, uvlong owner)
+{
+	char kb[Objownerksz], vb[Objownervallen];
+	Otx *tx;
+	Msg m;
+	Gefs *fs;
+
+	if(sp == nil)
+		error(Ebadarg);
+	fs = sp->fs;
+	qlock(&sp->lk);
+	if(waserror()){
+		qunlock(&sp->lk);
+		nexterror();
+	}
+	tx = ospacetx(sp);
+	if(tx->ver != 0)
+		error("O: owner metadata with a pending transaction");
+	qlock(&fs->mutlk);
+	if(waserror()){
+		if(!waserror()){
+			objtxabort(tx);
+			poperror();
+		}
+		qunlock(&fs->mutlk);
+		nexterror();
+	}
+	kb[0] = Kowner;
+	PACK64(kb+1, sp->sid);
+	PACK64(kb+9, oid);
+	memmove(vb, objownermagic, sizeof objownermagic);
+	PACK64(vb+8, owner);
+	m.op = Oinsert;
+	m.kv.key.k = kb;
+	m.kv.key.nk = sizeof kb;
+	m.kv.val.v = vb;
+	m.kv.val.nv = sizeof vb;
+	objtxbegin(tx);
+	txupsert(tx, &m, 1);
+	objtxcommit(tx);
+	qunlock(&fs->mutlk);
+	poperror();
+	gesync(fs, 0);
+	qunlock(&sp->lk);
+	poperror();
+}
+
 static void
 ospaceputdata(Otx *tx, uvlong oid, void *data, long n)
 {

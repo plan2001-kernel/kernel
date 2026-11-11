@@ -129,6 +129,9 @@ enum {
 	ObjOpProcessInfo = 49,
 	ObjOpProcessWait = 50,
 	ObjOpProcessTerminate = 51,
+	/* Any object/process Handle: immutable owner metadata.  This reports
+	 * identity only; it never grants management of another owner's object. */
+	ObjOpOwnerInfo = 52,
 };
 
 /* ObjOpRegionMap arg1 flags. */
@@ -496,6 +499,17 @@ typedef struct ObjProcessInfo {
 	unsigned int		reserved3;
 } ObjProcessInfo;
 
+/* ObjOpOwnerInfo result.  owner is the immutable OwnerID; name is valid
+ * (flags bit 0) when the current boot has a registered name for it. */
+#define OBJ_OWNER_NAME_MAX 32
+typedef struct ObjOwnerInfo {
+	unsigned int		version;	/* OBJ_ABI_VERSION */
+	unsigned int		flags;		/* bit 0: name valid */
+	unsigned long long	owner;
+	unsigned long long	reserved;
+	char			name[OBJ_OWNER_NAME_MAX];
+} ObjOwnerInfo;
+
 #define PROCESS_WAIT_INFINITE ((unsigned long long)-1)
 
 /* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
@@ -512,6 +526,7 @@ typedef struct ObjProcessInfo {
 
 /* Process-lifecycle adapters over the VkindProcess Handle. */
 long obj_process_info(int handle, ObjProcessInfo *out);
+long obj_owner_info(int handle, ObjOwnerInfo *out);
 long obj_process_wait(int handle, ObjProcessInfo *out, long long timeout);
 long obj_process_terminate(int handle);
 long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,

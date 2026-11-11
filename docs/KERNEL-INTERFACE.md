@@ -41,7 +41,8 @@ object permissions.
 
 The capability handles, mapping rights and revocation in CURRENT
 IMPLEMENTATION remain accurate descriptions of the presently implemented
-ABI, **not** target permission requirements.
+ABI, **not** target permission requirements. The implemented owner gate makes
+those rights unable to authorize cross-owner management.
 
 ## Process lifecycle and registered launch (target)
 
@@ -60,11 +61,49 @@ permission-grant model or IPC transport is required by this design.
 
 ## CURRENT IMPLEMENTATION
 
+Immutable single-owner identity is implemented on AMD64. Every process has a
+trusted `OwnerID`; children created by fork/spawn inherit the caller's owner,
+while a registered-program launch uses the program's owner. `OwnerID` 0 is
+reserved for kernel-internal execution; user-visible owners, including
+`root`, are ordinary named identities (a stable identity derived from the
+trusted name). Structs `Proc`, `Procstat` and `Vobj` carry the owner, and
+`ObjOpOwnerInfo` (52) reports owner identity for any object or process
+Handle; `SysctlOwnerInfo` reports the caller's own owner. Owner identity is
+never selectable by a process, an OID, a Handle, a namespace role or a right
+mask.
+
+Direct management of bytes, GE/O, process control and device objects requires
+`process.owner == object.owner`. Existing Handle rights remain an attenuation
+and addressing mechanism, but possession of another owner's Handle no longer
+authorizes management: GE/O open/read/write, creation, device operations,
+region revocation and process termination are denied across owners.
+Completion observation, `ObjOpInfo` metadata, owner metadata and read-only
+region publication remain separately auditable operations. A read-only region
+mapping is a publication view, not ownership of the publisher's region or
+source object; the unique writable mapping requires the region owner.
+
+Trusted boot registration (`PROGRAMREGISTER(149)`) records
+`{program name, OwnerID, executable GE/O object, startup policy}` in a bounded
+kernel registry. It is accepted only from the explicit boot process. For an
+explicit registration the kernel installs a private executable copy owned by
+the program owner, so a later launch never borrows the requester's authority
+or exposes the image. The boot entry itself binds the already-loaded boot
+executable.
+`PROGRAMLAUNCH(150)` resolves only a registered launchable name and starts an
+independent process under that program's owner; the requester receives an
+observation-only process Handle and no control or launcher ancestry. The boot
+MicroPython entry is recorded as the default autostart entry by the volume-open
+path; the loader's in-place `OEXECUTE` remains the autostart action.
+Unregistered names, non-boot registration and cross-owner termination are
+rejected. The optional `Ospawn`/`Oinherit`/`Oinheritv` layout is unchanged and
+is an explicit IPC-reference/CPU/budget declaration, not an ownership grant.
+
 The AMD64 ABI currently includes object calls 136–140, `SPAWN(146)`,
-`RFORKEX(143)`, `OEXECUTE`, `SYSCTL(144)`, `IOCTL(145)`, `REGIONWAIT(147)`
-and `REGIONWAKE(148)`. `PROCWAIT(142)` and `OTERMINATE(93)` are reserved and
-have no handler. `BRK_`, `SEGBRK`,
-`SEGATTACH/DETACH/FREE/FLUSH` provide existing VM operations. The retired
+`RFORKEX(143)`, `OEXECUTE`, `SYSCTL(144)`, `IOCTL(145)`, `REGIONWAIT(147)`,
+`REGIONWAKE(148)`, `PROGRAMREGISTER(149)` and `PROGRAMLAUNCH(150)`.
+`PROCWAIT(142)` and `OTERMINATE(93)` are reserved and have no handler.
+`BRK_`, `SEGBRK`, `SEGATTACH/DETACH/FREE/FLUSH` provide existing VM
+operations. The retired
 public `RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` calls and
 their user wrappers are gone; no old number is kept as a compatibility
 entry. Internal scheduler `Rendez`/sleep/wakeup remains.

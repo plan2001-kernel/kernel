@@ -64,6 +64,9 @@ enum {
 
 	/* Plan2001: native O volume records (docs/O-FORMAT.md) */
 	Ko,	/* name[] => value[]: catalog and volume records */
+
+	/* Plan2001: immutable per-object owner metadata. */
+	Kowner,	/* store[8] oid[8] => magic[8] owner[8] */
 };
 
 enum {

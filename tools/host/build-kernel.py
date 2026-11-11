@@ -144,6 +144,7 @@ KERNEL_SOURCES = {
     "mtrr": "kernel/amd64/mtrr.c",
     "ouser": "kernel/amd64/ouser.c",
     "oplanboot": "kernel/core/oplanboot.c",
+    "owner": "kernel/core/owner.c",
     "page": "kernel/core/page.c",
     "parse": "kernel/core/parse.c",
     "pci": "kernel/core/pci.c",

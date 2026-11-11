@@ -28,6 +28,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/namespace.h"
+#include	"owner.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 #include	"lifediag.h"
@@ -265,7 +266,25 @@ vobjalloc(int kind, uvlong space, ulong size)
 	o->space = space;
 	o->incarnation = vincarnationget();
 	o->oid = voidget();
+	o->owner = up != nil ? up->owner : 0;
 	return o;
+}
+
+/*
+ * Direct object management requires the caller's immutable OwnerID to equal
+ * the object's.  Kernel-internal callers retain their separate authority.
+ * Namespace/Space, region mapping and process observation are handled at
+ * their own call sites because they are data/lookup and IPC mechanisms, not
+ * object ownership.
+ */
+static int
+ownercanmanage(Vobj *o)
+{
+	if(o == nil)
+		return 0;
+	if(up == nil || up->kp)
+		return 1;
+	return o->owner != 0 && up->owner == o->owner;
 }
 
 static int
@@ -481,6 +500,7 @@ vobjprocinstall(Procstat *st)
 		vobjput(o);
 		nexterror();
 	}
+	o->owner = st->owner;
 	o->priv = st;
 	procstatref(st);
 	h = vobjinstallobj(o, Vobserve|Vcontrol|Vmeta|Vdelegate);
@@ -546,6 +566,10 @@ vobjprocterminate(int handle)
 	if(o->kind != VkindProcess){
 		vobjput(o);
 		error(Ebadarg);
+	}
+	if(!ownercanmanage(o)){
+		vobjput(o);
+		error(Eperm);
 	}
 	if(waserror()){
 		vobjput(o);
@@ -789,6 +813,12 @@ vobjregionmap(int handle, uintptr va, int flags)
 	len = npages*BY2PG;
 	write = (h->rights & Vwrite) != 0 &&
 		(flags & ObjRegionMapReadonly) == 0;
+	/* A read-only observer may consume published data across owners.  The
+	 * unique writable publisher slot requires direct ownership. */
+	if(write && !ownercanmanage(o)){
+		vhandput(h);
+		error(Eperm);
+	}
 	if(va != 0 && (va >= USTKTOP || (va & (BY2PG-1)) != 0)){
 		vhandput(h);
 		error(Ebadarg);
@@ -1993,6 +2023,10 @@ vobjcommit(int handle, uvlong *ver)
 		vobjput(o);
 		error(Ebadarg);
 	}
+	if(kind == VkindGe && !ownercanmanage(o)){
+		vobjput(o);
+		error(Eperm);
+	}
 	if(waserror()){
 		vobjput(o);
 		nexterror();
@@ -2028,6 +2062,51 @@ vobjputoid(int handle, uvlong oid, void *buf, long n)
 	oswritehand(o->priv, oid, buf, n);
 	poperror();
 	vobjput(o);
+	return 0;
+}
+
+int
+vobjownerinfo(int handle, ObjOwnerInfo *out)
+{
+	Vhand *h;
+	Vobj *o;
+	Procstat *st;
+	uvlong owner;
+	unsigned int flags;
+	char name[OBJ_OWNER_NAME_MAX];
+
+	if(out == nil)
+		error(Ebadarg);
+	validaddr((uintptr)out, sizeof *out, 1);
+	h = vlookup(handle, Vmeta);
+	o = h->obj;
+	owner = o->owner;
+	switch(o->kind){
+	case VkindGe:
+	case VkindSpace:
+		if(o->priv != nil)
+			owner = osownerof((Ohand*)o->priv, o->oid);
+		break;
+	case VkindProcess:
+		st = o->priv;
+		if(st != nil){
+			lock(&st->lk);
+			owner = st->owner;
+			unlock(&st->lk);
+		}
+		break;
+	default:
+		break;
+	}
+	memset(out, 0, sizeof *out);
+	out->version = OBJ_ABI_VERSION;
+	flags = 0;
+	name[0] = 0;
+	ownerinfo(owner, &flags, name, sizeof name);
+	out->flags = flags;
+	out->owner = owner;
+	memmove(out->name, name, sizeof out->name);
+	vhandput(h);
 	return 0;
 }
 
@@ -2106,6 +2185,10 @@ vobjrevoke(int handle)
 
     h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
+    if(!ownercanmanage(h->obj) && h->obj->kind != VkindSpace &&
+       h->obj->kind != VkindNamespaceView){
+        error(Eperm);
+    }
     if(h->obj->kind == VkindRegion){
         r = h->obj->priv;
         if(r == nil || (h->rights & Vcontrol) == 0)
@@ -3538,6 +3621,11 @@ vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 		vobjput(o);
 		nexterror();
 	}
+	if(o->kind != VkindSpace && o->kind != VkindRegion &&
+	   o->kind != VkindProcess && !ownercanmanage(o)){
+		vobjput(o);
+		error(Eperm);
+	}
 	switch(o->kind){
 	case VkindUart:
 		if(n < 0 || n > OBJ_STREAM_MAXIO)
@@ -3709,6 +3797,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		o->provider = VopenSpace;
 		o->space = ossid(oh);
 		o->oid = 0;
+		o->owner = osownerof(oh, 0);
 		vobjsetpriv(o, oh);
 	}else if(provider == VopenGeSpace){
 		Vhand *sh;
@@ -3751,6 +3840,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		o->provider = VopenGe;
 		o->oid = gr.oid;
 		o->space = ossid(oh);
+		o->owner = osownerof(oh, gr.oid);
 		vobjsetpriv(o, oh);
 	}else
 		error("vobj: provider not supported");

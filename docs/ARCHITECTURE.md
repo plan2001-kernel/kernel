@@ -135,11 +135,16 @@ limitations. This document keeps the target architecture and the maturity
 summary below rather than maintaining a second copy.
 
 AMD64 has a functional full-system path with GE/O, MicroPython and device
-providers. ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff,
-mappings, console, timer interrupts and physical-page allocation, not a
-full-system scheduler, GE/O, syscalls, userspace or device parity.
-MicroPython is the proof-of-concept userspace. Source and tests govern exact
-current behavior.
+providers. It implements immutable process/object `OwnerID`, trusted
+boot/installation program registration, owner-checked direct object access,
+registered-program launch under the program's owner, and owner-offered data
+through the existing region publication IPC. Existing Handle rights remain
+an addressing/attenuation mechanism in the current ABI; they cannot authorize
+management of another owner's object. ARM64 has an early UEFI/QEMU boot
+foundation with BootInfo handoff, mappings, console, timer interrupts and
+physical-page allocation, not a full-system scheduler, GE/O, syscalls,
+userspace or device parity. MicroPython is the proof-of-concept userspace.
+Source and tests govern exact current behavior.
 
 ## Completed six-stage implementation roadmap (historical)
 

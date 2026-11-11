@@ -414,6 +414,7 @@ struct Procstat
 	int	cause;
 	ulong	pid;
 	uvlong	generation;
+	uvlong	owner;		/* immutable program/process OwnerID */
 	ulong	time[3];	/* user, sys, real (ms) */
 	char	msg[128];
 	Proc	*proc;		/* live target, nil after completion */
@@ -549,6 +550,7 @@ struct Proc
 
 	Procstat *stat;		/* completion resource, nil only before creation */
 	int	boot;		/* explicit initial/boot process, never ancestry */
+	uvlong	owner;		/* immutable process/program OwnerID */
 
 	QLock	seglock;	/* locked whenever seg[] changes */
 	Segment	*seg[NSEG];

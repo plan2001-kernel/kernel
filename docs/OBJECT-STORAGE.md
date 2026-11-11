@@ -17,6 +17,12 @@ uninterpreted occurrence; a contextual object is its interpretation or role.
 - Native object records use `Kobj` records, SpaceIDs, OIDs, versions and
   chunks. Values are opaque bytes, not POSIX file metadata or application
   class instances.
+- Immutable owner metadata is a separate `Kowner` record keyed by
+  `store[8] oid[8]` with a small magic plus the 64-bit `OwnerID`. It does not
+  wrap or reinterpret the object payload. A missing record denotes the
+  seeded volume owner (`root`); trusted installation records an explicit
+  owner for each object it creates for a program owner. The owner is never
+  rewritten by object content writes.
 - The native O opener rejects an FS-profile volume. Opening a volume must
   not implicitly reformat it.
 
@@ -30,6 +36,11 @@ that is an implementation fact, not the single-owner target. GE/O may store
 namespace definitions as ordinary object data for future userspace
 interpretation; the format and loader are not implemented, and loading
 such data cannot grant access to objects it references.
+
+The `(SpaceID, OID)` pair locates an object but never selects or changes its
+owner. The current kernel checks the persistent owner record on GE/O
+open/read/write and exposes it through `ObjOpOwnerInfo`; a read-only
+publication mapping does not grant access to the stored object.
 
 Persistent GE/O objects may also represent object sets and OID membership
 relations as separate data. Those are not process namespaces and are not

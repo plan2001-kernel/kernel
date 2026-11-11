@@ -72,6 +72,8 @@ Tree*	txroot(Otx*);
 int	gethdr(Tree*, vlong, Ohdr*);
 uvlong	keyver(char*);
 void	objtxsweep(Otx*, char*, int, int (*)(char*, int, void*), void*);
+void	ospaceownerget(Ospace*, uvlong, uvlong*);
+void	ospaceownerput(Ospace*, uvlong, uvlong);
 void	objtxaddmsg(Otx*, int, char*, int, char*, int);
 void	objtxbegin(Otx*);
 void	objtxputchunk(Otx*);
