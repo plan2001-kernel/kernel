@@ -1,32 +1,26 @@
 /*
- * Volatile objects and ObjectFIFO.
+ * Volatile objects, capability regions and native device capabilities.
  *
  * A volatile object has RAM-only state and a scope-qualified identity
  * (incarnation, space, oid).  Creating one never reads or writes GE/O.  The
  * identity is allocated monotonically for this boot; the incarnation changes
  * on every boot, so a stale identity can never resolve to a new object.
  *
- * ObjectFIFO is a general message-framed channel of object references.  A
- * published message is one authorized reference plus an optional opaque
- * envelope; the core does not parse IP, TCP, USB or application payloads.
- * Each subscription has an independent bounded queue (TEE/fanout), so one
- * slow subscriber cannot block a fast one or the sender.  Overflow drops the
- * oldest queued reference for that subscription and is counted.
+ * Device receive channels and console sessions use capability-mapped regions
+ * with release/acquire publication and REGIONWAIT/REGIONWAKE notification.
+ * The kernel does not queue or parse device payloads in a generic message
+ * FIFO.  Byte-stream UART/KBD providers retain bounded staged I/O.
  *
  * Handles are process-local, generation-tagged and rights-bearing.  They are
  * not OIDs, pointers or ambient authority.  Process exec/exit releases all
- * handles.  A FIFO can be shut down explicitly; this marks every subscription
- * closed and wakes blocked receivers.  FIFO shutdown is a transport
- * operation, not capability revocation of a GE/O grant.
- */
-#include	"u.h"
+ * handles.
+ */#include	"u.h"
 #include	"../core/lib.h"
 #include	"mem.h"
 #include	"dat.h"
 #include	"fns.h"
 #include	"io.h"
 #include	"../core/error.h"
-#include	"../core/pipe/pipecore.h"
 #include	"../drivers/uart/uartnative.h"
 #include	"../drivers/usb/usbcore.h"
 #include	"../amd64/kbdapi.h"
@@ -34,6 +28,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/namespace.h"
+#include	"owner.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 #include	"lifediag.h"
@@ -53,16 +48,12 @@ injectfault(char *point)
 enum {
 	Vobjmax		= 4096,
 	Vobjbytesmax	= 32*1024*1024,
-	Vfifomax	= 256,
-	Vfifosubsmax	= 64,
-	Vglobalmsgs	= 65536,
 	Venvmax		= 64,
-	Vsubcapdef	= 64,
+	Vregionmax	= 16*1024*1024,
 	Vgenmax		= 0x7fffff,
 	Vnamemax	= 32,
 	/* Native-family compatibility limits, now enforced over the one
 	 * process-local Vhand table instead of separate tables. */
-	Vpipeendmax	= 32,
 	Vuartslotmax	= 16,
 	Vkbdslotmax	= 4,
 	Vusbslotmax	= 4,
@@ -80,67 +71,25 @@ _Static_assert(sizeof(ObjOpenDeviceReq) == 32 + OBJ_DEVICE_OPTMAX,
 	"device open ABI");
 _Static_assert(OBJ_DEVICE_OPTMAX >= sizeof(ObjDeviceOpenOptions),
 	"device option bound");
+_Static_assert(ObjProcCreated == PstatCreated &&
+	ObjProcRunning == PstatRunning && ObjProcCompleted == PstatCompleted,
+	"process state ABI");
+_Static_assert(ObjProcCauseExit == PcauseExit &&
+	ObjProcCauseTerminated == PcauseTerminated &&
+	ObjProcCauseFault == PcauseFault, "process cause ABI");
 
 typedef struct Vobj	Vobj;
-typedef struct Vmsg	Vmsg;
-typedef struct Vsub	Vsub;
-typedef struct Vfifo	Vfifo;
 typedef struct Vhand	Vhand;
 typedef struct Vhslot	Vhslot;
 typedef struct Vhtab	Vhtab;
-typedef struct Vpipe	Vpipe;
 typedef struct Vuart	Vuart;
 typedef struct Vkbd	Vkbd;
 typedef struct Vusbep	Vusbep;
 
-struct Vmsg {
-	Vmsg	*next;
-	Vobj	*obj;
-	int rights; /* immutable sender authority ceiling */
-	ulong	envlen;
-	uchar	env[Venvmax];
-};
-
-struct Vsub {
-	Ref	ref;
-	Lock	lk;		/* protects queue, counters and closed */
-	QLock	recvlk;	/* one receiver per subscription */
-	Rendez	rd;
-	Vsub	*next;		/* fifo attachment under Vfifo.lk */
-	Vfifo	*fifo; /* immutable after attachment; a Vhand pins its FIFO */
-	int	capacity;
-	int	len;
-	int	closed;
-	ulong	dropped;
-	Vmsg	*head;
-	Vmsg	*tail;
-};
-
-struct Vfifo {
-	QLock	lk;		/* protects subs list and closed */
-	Vsub	*subs;
-	int	nsubs;
-	int	closed;
-	int	capacity;
-	uvlong	sends;
-	uvlong	drops;
-};
-
 struct Vhand {
 	Ref	ref;
 	Vobj	*obj;
-	Vsub	*sub;
 	int	rights;
-};
-
-/* One endpoint of a native Pipe pair.  pipecorepair() accounts two endpoint
- * closes; the peer Vobj takes the other close when its Handle is installed,
- * or is released here if end 0 is closed first. */
-struct Vpipe {
-	Pipe	*p;
-	int	end;
-	Vobj	*peer;		/* end 0 only: not-yet-opened peer object */
-	Lock	lk;
 };
 
 struct Vuart {
@@ -161,6 +110,42 @@ struct Vusbep {
 	int	mode;
 };
 
+typedef struct Wwait Wwait;
+typedef struct Vregion Vregion;
+struct Wwait {
+	Rendez	rz;		/* sleep point; the waiter owns this record */
+	Vregion	*r;
+	uvlong	offset;		/* region-relative publication word */
+	int	woken;
+	int	writer;		/* woken by writer-slot release */
+	int	onlist;
+	Wwait	*next;
+	Wwait	*prev;
+};
+struct Vregion {
+	/*
+	 * Lock order is lk -> waitlk.  lk serializes mapping admission and
+	 * revocation so a successful revoke cannot race with a new mapping;
+	 * waitlk protects the state observed by WAIT.  waitlk is never held
+	 * while taking lk, and no code sleeps while holding either.
+	 * writeractive, writergen, revoked and the wait queue share waitlk so
+	 * the writer-presence check, word compare and waiter enrollment are
+	 * one linearizable step with writer-slot acquisition and release.
+	 */
+	QLock	lk;		/* serializes mapping admission and revocation */
+	Lock	waitlk;		/* protects writeractive, writergen, revoked, waiters */
+	Page	**pages;	/* one reference per backing page */
+	ulong	npages;
+	int	writeractive;	/* a writable mapping is installed */
+	unsigned writergen;	/* increments on every writer acquire/release */
+	int	revoked;	/* no further mappings through any Handle */
+	Wwait	*waiters;	/* queue of blocked publication waiters */
+	Wwait	*waittail;
+	Proc	*chargeproc;	/* creator charged for the backing, for comparison */
+	ulong	chargepid;	/* creator's PID, for comparison only */
+	ulong	chargepages;	/* pages charged at creation, 0 if uncharged */
+};
+
 typedef struct Vdevice Vdevice;
 struct Vdevice {
     int family;
@@ -169,7 +154,7 @@ struct Vdevice {
     Ep *ep;
     int opened;
     int failed;            /* hardware outcome uncertain: close/reopen */
-    Vobj *reply;           /* one immutable completion; not a FIFO */
+    Vobj *reply;           /* one immutable completion */
     uvlong sequence;
 };
 
@@ -188,8 +173,6 @@ struct Vstats {
 	Lock	lk;
 	int	nobj;
 	uvlong	nbytes;
-	int	nfifo;
-	int	nmsg;
 };
 
 static Vstats vstats;
@@ -233,54 +216,25 @@ voidget(void)
 }
 
 static int
-vreserve(ulong bytes, int fifo)
+vreserve(ulong bytes)
 {
 	lock(&vstats.lk);
-	if(vstats.nobj >= Vobjmax || vstats.nbytes + bytes > Vobjbytesmax
-	|| (fifo && vstats.nfifo >= Vfifomax)){
+	if(vstats.nobj >= Vobjmax || vstats.nbytes + bytes > Vobjbytesmax){
 		unlock(&vstats.lk);
 		return -1;
 	}
 	vstats.nobj++;
 	vstats.nbytes += bytes;
-	if(fifo)
-		vstats.nfifo++;
 	unlock(&vstats.lk);
 	return 0;
 }
 
 static void
-vrelease(ulong bytes, int fifo)
+vrelease(ulong bytes)
 {
 	lock(&vstats.lk);
 	vstats.nobj--;
 	vstats.nbytes -= bytes;
-	if(fifo)
-		vstats.nfifo--;
-	unlock(&vstats.lk);
-}
-
-static int
-vmsgreserve(int n)
-{
-	int rc = 0;
-
-	lock(&vstats.lk);
-	if(vstats.nmsg + n > Vglobalmsgs)
-		rc = -1;
-	else
-		vstats.nmsg += n;
-	unlock(&vstats.lk);
-	return rc;
-}
-
-static void
-vmsgrelease(int n)
-{
-	lock(&vstats.lk);
-	vstats.nmsg -= n;
-	if(vstats.nmsg < 0)
-		vstats.nmsg = 0;
 	unlock(&vstats.lk);
 }
 
@@ -289,31 +243,20 @@ vobjalloc(int kind, uvlong space, ulong size)
 {
 	Vobj *o;
 
-	if(vreserve(size, kind == VkindFifo) != 0)
+	if(vreserve(size) != 0)
 		return nil;
 	o = mallocz(sizeof *o, 1);
 	if(o == nil){
-		vrelease(size, kind == VkindFifo);
+		vrelease(size);
 		return nil;
 	}
-	if(size != 0){
+	if(size != 0 && kind != VkindRegion){
 		o->data = mallocz(size, 0);
 		if(o->data == nil){
 			free(o);
-			vrelease(size, kind == VkindFifo);
+			vrelease(size);
 			return nil;
 		}
-	}
-	if(kind == VkindFifo){
-		Vfifo *f = mallocz(sizeof *f, 1);
-		if(f == nil){
-			free(o->data);
-			free(o);
-			vrelease(size, 1);
-			return nil;
-		}
-		f->capacity = Vsubcapdef;
-		o->fifo = f;
 	}
 	o->ref.ref = 1;
 	o->kind = kind;
@@ -323,13 +266,27 @@ vobjalloc(int kind, uvlong space, ulong size)
 	o->space = space;
 	o->incarnation = vincarnationget();
 	o->oid = voidget();
+	o->owner = up != nil ? up->owner : 0;
 	return o;
 }
 
-static void
-vsubput(Vsub*);
-static void
-vsubshutd(Vsub*);
+/*
+ * Direct object management requires the caller's immutable OwnerID to equal
+ * the object's.  Kernel-internal callers retain their separate authority.
+ * Namespace/Space, region mapping and process observation are handled at
+ * their own call sites because they are data/lookup and IPC mechanisms, not
+ * object ownership.
+ */
+static int
+ownercanmanage(Vobj *o)
+{
+	if(o == nil)
+		return 0;
+	if(up == nil || up->kp)
+		return 1;
+	return o->owner != 0 && up->owner == o->owner;
+}
+
 static int
 vinstall(Vhtab*, Vhand*);
 static Vhand*
@@ -342,42 +299,7 @@ vobjput(Vobj *o)
 {
 	if(o == nil || decref(&o->ref) != 0)
 		return;
-	if(o->kind == VkindFifo && o->fifo != nil){
-		Vfifo *f = o->fifo;
-		Vsub *s, *next;
-
-		/* The creator is the last holder; detach any surviving subs. */
-		qlock(&f->lk);
-		s = f->subs;
-		f->subs = nil;
-		f->nsubs = 0;
-		f->closed = 1;
-		for(next = s; next != nil; next = next->next)
-			next->fifo = nil;	/* detach from the FIFO being freed */
-		qunlock(&f->lk);
-		while(s != nil){
-			next = s->next;
-			s->next = nil;
-			vsubshutd(s);
-			vsubput(s);
-			s = next;
-		}
-		free(f);
-	}else if(o->kind == VkindPipe && o->priv != nil){
-		Vpipe *vp = o->priv;
-		Vobj *peer;
-
-		o->priv = nil;
-		lock(&vp->lk);
-		peer = vp->peer;
-		vp->peer = nil;
-		unlock(&vp->lk);
-		if(peer != nil)
-			vobjput(peer);
-		if(vp->p != nil)
-			pipecoreclose(vp->p, vp->end);
-		free(vp);
-	}else if(o->kind == VkindUart && o->priv != nil){
+	if(o->kind == VkindUart && o->priv != nil){	}else if(o->kind == VkindUart && o->priv != nil){
 		Vuart *vu = o->priv;
 
 		o->priv = nil;
@@ -425,6 +347,30 @@ vobjput(Vobj *o)
 			ve->ep = nil;
 		}
 		free(ve);
+	}else if(o->kind == VkindRegion && o->priv != nil){
+		Vregion *r = o->priv;
+		ulong i;
+
+		o->priv = nil;
+		for(i = 0; i < r->npages; i++)
+			if(r->pages[i] != nil)
+				putpage(r->pages[i]);
+		/*
+		 * Backing pages are charged once to the creating process.
+		 * Refund only in that same process; a region that outlived its
+		 * creator must not consume another process's budget, and the
+		 * creator's charge disappears with its Proc.
+		 */
+		if(r->chargepages != 0 && up != nil &&
+		   up == r->chargeproc && up->pid == r->chargepid)
+			procmemdecommit(up, r->chargepages);
+		free(r->pages);
+		free(r);
+	}else if(o->kind == VkindProcess && o->priv != nil){
+		Procstat *st = o->priv;
+
+		o->priv = nil;
+		procstatput(st);
 	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
 		lifecontrol(o->priv, -1);
 		closepgrp(o->priv);
@@ -434,87 +380,29 @@ vobjput(Vobj *o)
 	}
 	{
 		ulong size = o->size;
-		int fifo = o->kind == VkindFifo;
 		free(o->data);
 		free(o);
-		vrelease(size, fifo);
+		vrelease(size);
 	}
 }
 
 static void
-vhandinit(Vhand *h, Vobj *o, Vsub *s, int rights)
+vhandinit(Vhand *h, Vobj *o, int rights)
 {
 	h->ref.ref = 1;
 	h->obj = o;
 	incref(&o->ref);
-	h->sub = s;
-	if(s != nil)
-		incref(&s->ref);
 	h->rights = rights;
 }
 
 static Vhand*
-vhandalloc(Vobj *o, Vsub *s, int rights)
+vhandalloc(Vobj *o, int rights)
 {
 	Vhand *h;
 
 	h = smalloc(sizeof *h);
-	vhandinit(h, o, s, rights);
+	vhandinit(h, o, rights);
 	return h;
-}
-
-static void
-vsubshutd(Vsub *s)
-{
-	Vmsg *m, *next;
-
-	if(s == nil)
-		return;
-	lock(&s->lk);
-	if(s->closed){
-		unlock(&s->lk);
-		return;
-	}
-	s->closed = 1;
-	m = s->head;
-	s->head = s->tail = nil;
-	s->len = 0;
-	unlock(&s->lk);
-	while(m != nil){
-		next = m->next;
-		vobjput(m->obj);
-		free(m);
-		vmsgrelease(1);
-		m = next;
-	}
-	wakeup(&s->rd);
-}
-
-static void
-vsudetach(Vsub *s)
-{
- Vfifo *f;
- Vsub **l;
- int removed = 0;
- /* The caller's Vhand pins its FIFO object until this returns. */
- if(s == nil || (f = s->fifo) == nil) return;
- qlock(&f->lk);
- if(s->fifo == f){
-  for(l=&f->subs; *l; l=&(*l)->next) if(*l==s){
-   *l=s->next;s->next=nil;f->nsubs--;removed=1;break;
-  }
- }
- qunlock(&f->lk);
- if(removed) vsubput(s); /* exactly the attachment reference */
-}
-
-static void
-vsubput(Vsub *s)
-{
-	if(s == nil || decref(&s->ref) != 0)
-		return;
-	vsubshutd(s);
-	free(s);
 }
 
 static void
@@ -524,11 +412,6 @@ vhandput(Vhand *h)
 		return;
 	if(decref(&h->ref) != 0)
 		return;
-	if(h->sub != nil){
-		vsudetach(h->sub);
-		vsubshutd(h->sub);
-		vsubput(h->sub);
-	}
 	vobjput(h->obj);
 	free(h);
 }
@@ -588,13 +471,1026 @@ vobjinstallobj(Vobj *o, int rights)
 		error(Ebadarg);
 	if((t = vgettab(1)) == nil)
 		error(Enomem);
-	h = vhandalloc(o, nil, rights);
+	h = vhandalloc(o, rights);
 	handle = vinstall(t, h);
 	if(handle < 0){
 		vhandput(h);
 		error("vobj: too many handles");
 	}
 	return handle;
+}
+
+/*
+ * Install one initial VkindProcess Handle in the caller.  The completion
+ * record is reference-counted independently of the Proc, so the Handle is
+ * valid before the process is published and remains valid after it exits.
+ */
+int
+vobjprocinstall(Procstat *st)
+{
+	Vobj *o;
+	int h;
+
+	if(st == nil)
+		error(Ebadarg);
+	o = vobjalloc(VkindProcess, 0, 0);
+	if(o == nil)
+		error(Enomem);
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	o->owner = st->owner;
+	o->priv = st;
+	procstatref(st);
+	h = vobjinstallobj(o, Vobserve|Vcontrol|Vmeta|Vdelegate);
+	poperror();
+	vobjput(o);
+	return h;
+}
+
+int
+vobjprocinfo(int handle, ObjProcessInfo *out)
+{
+	Vobj *o;
+
+	if(out == nil)
+		error(Ebadarg);
+	validaddr((uintptr)out, sizeof *out, 1);
+	o = vobjholdobj(handle, Vmeta);
+	if(o->kind != VkindProcess){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	procstatinfo(o->priv, out);
+	poperror();
+	vobjput(o);
+	return 0;
+}
+
+long
+vobjprocesswait(int handle, ObjProcessInfo *out, long timeout)
+{
+	Vobj *o;
+	long r;
+
+	if(out == nil)
+		error(Ebadarg);
+	validaddr((uintptr)out, sizeof *out, 1);
+	o = vobjholdobj(handle, Vobserve);
+	if(o->kind != VkindProcess){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	r = procstatwait(o->priv, out, timeout);
+	poperror();
+	vobjput(o);
+	return r;
+}
+
+int
+vobjprocterminate(int handle)
+{
+	Vobj *o;
+	int r;
+
+	o = vobjholdobj(handle, Vcontrol);
+	if(o->kind != VkindProcess){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	if(!ownercanmanage(o)){
+		vobjput(o);
+		error(Eperm);
+	}
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	r = procstatterminate(o->priv);
+	poperror();
+	vobjput(o);
+	return r;
+}
+
+/*
+ * Volatile capability regions.
+ *
+ * A region owns its Page backing and one writer slot.  Each mapping is a
+ * distinct SG_REGION Segment in one address space, holding a region reference
+ * and its own PTE set; writer mappings lack SG_RONLY and readers carry it, so
+ * the MMU enforces the split even though the Page objects are shared.  A
+ * mapping is independent of its Handle and survives Handle close; process
+ * exit or obj_region_unmap() releases it.  The writer slot is never
+ * transferred automatically; while any writable mapping exists another
+ * writer request is rejected.
+ */
+Vobj*
+vobjregionalloc(uvlong size)
+{
+	Vobj *o;
+	Vregion *r;
+	Page *p;
+	ulong npages, i;
+	int charged;
+
+	if(size == 0 || size > Vregionmax || (size % BY2PG) != 0)
+		error(Ebadarg);
+	npages = (ulong)(size / BY2PG);
+	charged = 0;
+	/*
+	 * Region backing is allocated eagerly, so commit it to the creating
+	 * process's budget here rather than only when someone maps it.  A
+	 * process that creates many regions cannot consume unbounded physical
+	 * memory without mapping them.
+	 */
+	if(up != nil){
+		if(procmemcommit(up, npages) < 0)
+			error(Enomem);
+		charged = 1;
+	}
+	o = vobjnewkind(VkindRegion, (ulong)size);
+	if(o == nil){
+		if(charged)
+			procmemdecommit(up, npages);
+		error(Enomem);
+	}
+	r = nil;
+	if(waserror()){
+		if(r != nil){
+			if(r->pages != nil)
+				for(i = 0; i < npages; i++)
+					if(r->pages[i] != nil)
+						putpage(r->pages[i]);
+			free(r->pages);
+			free(r);
+			o->priv = nil;
+		}
+		if(charged)
+			procmemdecommit(up, npages);
+		vobjput(o);
+		nexterror();
+	}
+	r = mallocz(sizeof *r, 1);
+	if(r == nil)
+		error(Enomem);
+	r->npages = npages;
+	r->pages = mallocz(npages*sizeof(Page*), 1);
+	if(r->pages == nil)
+		error(Enomem);
+	for(i = 0; i < npages; i++){
+		/*
+		 * Explicit allocation has an error return: do not sleep
+		 * indefinitely for reclaim under memory pressure.
+		 */
+		p = newpagenowait(0);
+		if(p == nil)
+			error(Enomem);
+		r->pages[i] = fillpage(p, 0);
+	}
+	o->priv = r;
+	o->flags = 0;			/* a region payload is mutable */
+	o->provider = VkindRegion;
+	r->chargeproc = up;
+	r->chargepid = up != nil ? up->pid : 0;
+	r->chargepages = charged ? npages : 0;
+	charged = 0;
+	poperror();
+	return o;
+}
+
+int
+vobjregioncreate(uvlong size, VobjId *id)
+{
+	Vobj *o;
+	Vhtab *t;
+	Vhand *h;
+	int handle;
+
+	if((t = vgettab(1)) == nil)
+		error(Enomem);
+	o = vobjregionalloc(size);
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
+	h = vhandalloc(o, Vread|Vwrite|Vmeta|Vdelegate|Vcontrol);
+	handle = vinstall(t, h);
+	if(handle < 0){
+		vhandput(h);
+		error("vobj: too many handles");
+	}
+	if(id != nil){
+		id->incarnation = o->incarnation;
+		id->space = o->space;
+		id->oid = o->oid;
+	}
+	poperror();
+	vobjput(o);			/* the installed Handle owns the object */
+	return handle;
+}
+
+/*
+ * Clear the writer-active state and notify every registered waiter as one
+ * linearizable step.  This is the writer-slot release path: a waiter either
+ * enrolled before this critical section (and is marked writer/3 here) or
+ * observes writeractive == 0 and writergen != 0 afterwards and returns 3
+ * immediately.  A replacement writer acquiring the slot later cannot erase
+ * the notification because the woken/writer flags are already set.  Wakeup
+ * never sleeps, so holding the queue spinlock cannot deadlock the sleeper:
+ * the sleeper releases the queue before it sleeps.
+ */
+static void
+regionnotify(Vregion *r, int writer)
+{
+	Wwait *w;
+
+	for(w = r->waiters; w != nil; w = w->next){
+		if(w->woken)
+			continue;
+		w->woken = 1;
+		w->writer = writer;
+		coherence();
+		wakeup(&w->rz);
+	}
+}
+
+static void
+regionwriterdown(Vregion *r)
+{
+	lock(&r->waitlk);
+	r->writeractive = 0;
+	r->writergen++;
+	regionnotify(r, 1);
+	unlock(&r->waitlk);
+}
+
+/* Called from putseg() when the last reference to a region mapping goes. */
+void
+regionsegput(Segment *s)
+{
+	Vobj *o;
+	Vregion *r;
+
+	if(s == nil || (o = s->region) == nil)
+		return;
+	s->region = nil;
+	r = o->priv;
+	if(r != nil && s->regionwriter){
+		s->regionwriter = 0;
+		/* Writer death must not strand observers.  This is a lifecycle
+		 * notification, not a publication: callers still recheck. */
+		regionwriterdown(r);
+	}else
+		s->regionwriter = 0;
+	vobjput(o);
+}
+
+static void
+regionfillseg(Segment *s, Vregion *r)
+{
+	Pte **pte, *etp;
+	Page **pg, *p;
+	uintptr off;
+	ulong i;
+
+	qlock(&s->qlk);
+	if(waserror()){
+		qunlock(&s->qlk);
+		nexterror();
+	}
+	for(i = 0; i < r->npages; i++){
+		off = (uintptr)i*BY2PG;
+		pte = &s->map[off/PTEMAPMEM];
+		if((etp = *pte) == nil){
+			etp = ptealloc();
+			if(etp == nil)
+				error(Enomem);
+			*pte = etp;
+		}
+		pg = &etp->pages[(off&(PTEMAPMEM-1))/BY2PG];
+		p = r->pages[i];
+		incref(&p->ref);
+		*pg = p;
+		s->used++;
+		if(pg < etp->first)
+			etp->first = pg;
+		if(pg > etp->last)
+			etp->last = pg;
+	}
+	qunlock(&s->qlk);
+	poperror();
+}
+
+uintptr
+vobjregionmap(int handle, uintptr va, int flags)
+{
+	Vhand *h;
+	Vobj *o;
+	Vregion *r;
+	Segment *s, *os;
+	ulong npages, len;
+	int sno, write, writerheld;
+
+	if((flags & ~ObjRegionMapFlags) != 0)
+		error(Ebadarg);
+	h = vlookup(handle, Vread);
+	o = h->obj;
+	if(o->kind != VkindRegion || o->priv == nil){
+		vhandput(h);
+		error(Ebadarg);
+	}
+	r = o->priv;
+	npages = r->npages;
+	len = npages*BY2PG;
+	write = (h->rights & Vwrite) != 0 &&
+		(flags & ObjRegionMapReadonly) == 0;
+	/* A read-only observer may consume published data across owners.  The
+	 * unique writable publisher slot requires direct ownership. */
+	if(write && !ownercanmanage(o)){
+		vhandput(h);
+		error(Eperm);
+	}
+	if(va != 0 && (va >= USTKTOP || (va & (BY2PG-1)) != 0)){
+		vhandput(h);
+		error(Ebadarg);
+	}
+	writerheld = 0;
+	s = nil;
+	qlock(&up->seglock);
+	if(waserror()){
+		if(s != nil)
+			putseg(s);	/* also releases the writer slot */
+		else if(writerheld)
+			regionwriterdown(r);
+		qunlock(&up->seglock);
+		vhandput(h);
+		nexterror();
+	}
+	for(sno = 0; sno < NSEG; sno++)
+		if(up->seg[sno] == nil && sno != ESEG)
+			break;
+	if(sno == NSEG)
+		error(Enovmem);
+	if(va == 0){
+		for(os = up->seg[SSEG]; os != nil; os = isoverlap(va, len)){
+			va = os->base;
+			if(len >= va)
+				error(Enovmem);
+			va -= len;
+		}
+	}
+	va &= ~(BY2PG-1);
+	if(va == 0 || va+len > USTKTOP || va+len < va)
+		error(Ebadarg);
+	if(isoverlap(va, len) != nil)
+		error(Esoverlap);
+	/*
+	 * The backing pages were committed when the region was created; a
+	 * mapping only installs PTEs over those pages and does not allocate
+	 * more memory, so it is not charged a second time.
+	 */
+	s = newseg(SG_REGION|SG_NOEXEC|(write? 0: SG_RONLY), va, npages);
+	s->region = o;
+	incref(&o->ref);
+	s->regionwriter = 0;
+	regionfillseg(s, r);
+	/*
+	 * The revoked check, writer-slot reservation and Segment publication
+	 * are one critical section so a successful revoke can never race with
+	 * a new mapping.  Existing mappings are deliberately unaffected.
+	 * waitlk makes the writer-presence check and enrollment linearizable
+	 * with this acquisition and with WAIT.
+	 */
+	qlock(&r->lk);
+	lock(&r->waitlk);
+	if(r->revoked){
+		unlock(&r->waitlk);
+		qunlock(&r->lk);
+		error(Eperm);
+	}
+	if(write && r->writeractive){
+		unlock(&r->waitlk);
+		qunlock(&r->lk);
+		error(Einuse);
+	}
+	if(write){
+		r->writeractive = 1;
+		r->writergen++;
+		s->regionwriter = 1;
+		writerheld = 1;
+	}
+	unlock(&r->waitlk);
+	up->seg[sno] = s;
+	s = nil;
+	writerheld = 0;			/* the installed Segment owns the slot */
+	qunlock(&r->lk);
+	qunlock(&up->seglock);
+	poperror();
+	vhandput(h);
+	flushmmu();
+	return va;
+}
+
+int
+vobjregionunmap(uintptr va)
+{
+	Segment *s;
+	int i;
+
+	if(va == 0 || va >= USTKTOP || (va & (BY2PG-1)) != 0)
+		error(Ebadarg);
+	qlock(&up->seglock);
+	if(waserror()){
+		qunlock(&up->seglock);
+		nexterror();
+	}
+	for(i = 0; i < NSEG; i++){
+		s = up->seg[i];
+		if(s != nil && (s->type&SG_TYPE) == SG_REGION &&
+		   va == s->base)
+			break;
+	}
+	if(i == NSEG)
+		error(Ebadarg);
+	up->seg[i] = nil;
+	putseg(s);
+	qunlock(&up->seglock);
+	poperror();
+	flushmmu();
+	return 0;
+}
+
+/*
+ * Publication WAIT/WAKE.
+ *
+ * Authority comes from the caller's installed SG_REGION mapping, not from a
+ * Handle or a raw pointer.  This is why an RO observer can wait even after its
+ * Handle is closed, and why a guessed address or a Handle from another process
+ * conveys nothing.  A writable mapping is the unique writer slot and is
+ * required for WAKE.
+ *
+ * WAIT order is fixed.  Validate the mapping and word; compare the word and
+ * return 0 immediately if it differs (even with no writer).  If it still
+ * matches and no writer mapping is active, distinguish the two temporal
+ * states with writergen: a writer that was present and released (or a
+ * revoked region) returns 3 immediately, while a region that has never had a
+ * writer enrolls and blocks so the reader does not have to poll for writer
+ * appearance.  If a writer is active and timeout == 0, return 2; otherwise
+ * enroll and sleep.  Status 3 is therefore "the previous writer was released
+ * or revocation ended this mapping set", not permanent region destruction: a
+ * new writer may map later unless revocation denies new maps.
+ *
+ * The queue is keyed by the live region object plus its region-relative
+ * offset.  A mapping reference keeps the region alive for the whole wait, so
+ * a Vregion address cannot be reused behind a registered waiter (no ABA).
+ * waitlk protects writeractive, writergen, revoked, the word compare and
+ * enrollment, so a writer acquisition or release cannot interleave between
+ * the check and the sleep.  lk may be held while taking waitlk (mapping
+ * admission); waitlk is never held while taking lk, and no path sleeps
+ * holding either.
+ */
+static Segment*
+regionmaplookup(uintptr addr)
+{
+	Segment *s;
+	int i;
+
+	if(addr == 0 || (addr & (BY2PG-1)) != 0)
+		error(Ebadarg);
+	qlock(&up->seglock);
+	for(i = 0; i < NSEG; i++){
+		s = up->seg[i];
+		if(s == nil || addr < s->base || addr >= s->top)
+			continue;
+		if((s->type & SG_TYPE) != SG_REGION || addr != s->base ||
+		   s->region == nil ||
+		   ((Vobj*)s->region)->kind != VkindRegion ||
+		   ((Vobj*)s->region)->priv == nil){
+			qunlock(&up->seglock);
+			error(Ebadarg);
+		}
+		incref(&s->ref);
+		qunlock(&up->seglock);
+		return s;
+	}
+	qunlock(&up->seglock);
+	error(Ebadarg);
+	return nil;
+}
+
+static int
+regionbadoffset(Vobj *o, uvlong off)
+{
+	uvlong size = (uvlong)o->size;
+
+	return (off & (sizeof(uvlong)-1)) != 0 || off >= size ||
+		size - off < sizeof(uvlong);
+}
+
+static uvlong*
+regionmapword(Vregion *r, uvlong off, KMap **kp)
+{
+	KMap *k;
+
+	k = kmap(r->pages[off/BY2PG]);
+	*kp = k;
+	return (uvlong*)((uchar*)k + (off & (BY2PG-1)));
+}
+
+static int
+regionwoke(void *arg)
+{
+	Wwait *w = arg;
+
+	coherence();
+	return w->woken;
+}
+
+static void
+waitadd(Vregion *r, Wwait *w)
+{
+	w->next = nil;
+	w->prev = r->waittail;
+	if(r->waittail != nil)
+		r->waittail->next = w;
+	else
+		r->waiters = w;
+	r->waittail = w;
+	w->onlist = 1;
+}
+
+static void
+waitdel(Vregion *r, Wwait *w)
+{
+	if(w->prev != nil)
+		w->prev->next = w->next;
+	else
+		r->waiters = w->next;
+	if(w->next != nil)
+		w->next->prev = w->prev;
+	else
+		r->waittail = w->prev;
+	w->next = nil;
+	w->prev = nil;
+	w->onlist = 0;
+}
+
+uintptr
+sysregionwait(sysva_list list)
+{
+	uintptr addr;
+	uvlong off, expected;
+	vlong timeout;
+	Segment *s;
+	Vobj *o;
+	Vregion *r;
+	Wwait w;
+	KMap *k;
+	volatile uvlong *wp;
+	int ret;
+
+	addr = sysva_arg(list, uintptr);
+	off = sysva_arg(list, uvlong);
+	expected = sysva_arg(list, uvlong);
+	timeout = sysva_arg(list, vlong);
+
+	s = regionmaplookup(addr);
+	o = s->region;
+	r = o->priv;
+	if(regionbadoffset(o, off)){
+		putseg(s);
+		error(Ebadarg);
+	}
+	memset(&w, 0, sizeof w);
+	w.r = r;
+	w.offset = off;
+	wp = regionmapword(r, off, &k);
+
+	lock(&r->waitlk);
+	coherence();
+	if(*wp != expected){
+		unlock(&r->waitlk);
+		kunmap(k);
+		putseg(s);
+		return 0;			/* value already changed */
+	}
+	if(!r->writeractive){
+		/*
+		 * A region that has never had a writer may get one later, so
+		 * block instead of forcing the reader to poll for it.  A
+		 * released writer or a revoked region can never supply this
+		 * word through the current mapping set, so report that state
+		 * immediately.  writergen distinguishes the two cases.
+		 */
+		if(r->writergen != 0 || r->revoked || timeout == 0){
+			unlock(&r->waitlk);
+			kunmap(k);
+			putseg(s);
+			return (r->writergen == 0 && !r->revoked) ? 2 : 3;
+		}
+	}
+	else if(timeout == 0){
+		unlock(&r->waitlk);
+		kunmap(k);
+		putseg(s);
+		return 2;			/* non-blocking check: still equal */
+	}
+	waitadd(r, &w);
+	unlock(&r->waitlk);
+	kunmap(k);
+
+	if(waserror()){
+		lock(&r->waitlk);
+		if(w.onlist)
+			waitdel(r, &w);
+		unlock(&r->waitlk);
+		putseg(s);
+		nexterror();			/* e.g. Eintr from a note */
+	}
+	if(timeout < 0)
+		sleep(&w.rz, regionwoke, &w);
+	else
+		tsleep(&w.rz, regionwoke, &w,
+			timeout > 0x7fffffff ? 0x7fffffff : (ulong)timeout);
+	poperror();
+
+	lock(&r->waitlk);
+	if(w.onlist)
+		waitdel(r, &w);
+	unlock(&r->waitlk);
+	putseg(s);
+
+	if(w.woken == 0)
+		ret = 2;			/* timeout */
+	else if(w.writer)
+		ret = 3;			/* writer mapping released */
+	else
+		ret = 1;			/* woken, possibly spurious */
+	return ret;
+}
+
+/* Wake waiters on one region-relative publication word.  The userspace
+ * REGIONWAKE path and kernel publication require an active writer; the kernel
+ * consumer acknowledgement is trusted to wake its own cursor even when the
+ * userspace writer has unmapped.  The queue lock makes each wake and the
+ * enrollment check linearizable; no payload is copied. */
+static uvlong
+regionwakeq(Vregion *r, uvlong off, uvlong count, int needwriter)
+{
+	Wwait *w;
+	uvlong n;
+
+	n = 0;
+	lock(&r->waitlk);
+	if(needwriter && !r->writeractive){
+		unlock(&r->waitlk);
+		error(Eperm);
+	}
+	for(w = r->waiters; w != nil && n < count; w = w->next){
+		if(w->offset != off || w->woken)
+			continue;
+		w->woken = 1;
+		coherence();
+		wakeup(&w->rz);
+		n++;
+	}
+	unlock(&r->waitlk);
+	return n;
+}
+
+static uvlong
+regionwakego(Vregion *r, uvlong off, uvlong count)
+{
+	return regionwakeq(r, off, count, 1);
+}
+
+uintptr
+sysregionwake(sysva_list list)
+{
+	uintptr addr;
+	uvlong off, count;
+	Segment *s;
+	Vobj *o;
+	Vregion *r;
+
+	addr = sysva_arg(list, uintptr);
+	off = sysva_arg(list, uvlong);
+	count = sysva_arg(list, uvlong);
+
+	s = regionmaplookup(addr);
+	o = s->region;
+	r = o->priv;
+	if((s->type & SG_RONLY) != 0 || !s->regionwriter){
+		putseg(s);
+		error(Eperm);			/* only the writable mapping wakes */
+	}
+	if(count == 0 || regionbadoffset(o, off)){
+		putseg(s);
+		error(Ebadarg);
+	}
+	if(waserror()){
+		putseg(s);
+		nexterror();
+	}
+	count = regionwakego(r, off, count);
+	poperror();
+	putseg(s);
+	return count;
+}
+
+/* Kernel writer authority for a capability region.  The kernel publishes
+ * device/console records without installing a user-visible writable mapping:
+ * holding the single writer slot makes every user mapping read-only and makes
+ * REGIONWAIT block instead of returning the no-writer status. */
+int
+vobjregionwriterhold(Vobj *o)
+{
+	Vregion *r;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil)
+		return -1;
+	qlock(&r->lk);
+	lock(&r->waitlk);
+	if(r->revoked || r->writeractive){
+		unlock(&r->waitlk);
+		qunlock(&r->lk);
+		return -1;
+	}
+	r->writeractive = 1;
+	r->writergen++;
+	unlock(&r->waitlk);
+	qunlock(&r->lk);
+	return 0;
+}
+
+void
+vobjregionwriterrelease(Vobj *o)
+{
+	Vregion *r;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil)
+		return;
+	regionwriterdown(r);
+}
+
+static void
+regionkio(Vregion *r, uvlong off, void *buf, ulong n, int write)
+{
+	uchar *p;
+	KMap *k;
+	uvlong left, chunk;
+	ulong page;
+
+	p = buf;
+	while(n != 0){
+		page = (ulong)(off / BY2PG);
+		if(page >= r->npages)
+			error(Ebadarg);
+		left = BY2PG - (off & (BY2PG-1));
+		chunk = n < left ? n : left;
+		k = kmap(r->pages[page]);
+		if(waserror()){
+			kunmap(k);
+			nexterror();
+		}
+		if(write)
+			memmove((uchar*)k + (off & (BY2PG-1)), p, chunk);
+		else
+			memmove(p, (uchar*)k + (off & (BY2PG-1)), chunk);
+		kunmap(k);
+		poperror();
+		p += chunk;
+		off += chunk;
+		n -= chunk;
+	}
+}
+
+static void
+regionkstore64(Vregion *r, uvlong off, uvlong v)
+{
+	KMap *k;
+	uvlong *w;
+
+	if((off & 7) != 0 || off + 8 > (uvlong)r->npages*BY2PG)
+		error(Ebadarg);
+	k = kmap(r->pages[off/BY2PG]);
+	w = (uvlong*)((uchar*)k + (off & (BY2PG-1)));
+	*w = v;
+	coherence();
+	kunmap(k);
+}
+
+static uvlong
+regionkload64(Vregion *r, uvlong off)
+{
+	KMap *k;
+	uvlong v;
+
+	if((off & 7) != 0 || off + 8 > (uvlong)r->npages*BY2PG)
+		error(Ebadarg);
+	k = kmap(r->pages[off/BY2PG]);
+	v = *(uvlong*)((uchar*)k + (off & (BY2PG-1)));
+	coherence();
+	kunmap(k);
+	return v;
+}
+
+
+/* Initialize the kernel-owned ring header.  Pages are already zeroed and no
+ * mapping may exist yet: a receive/console region is initialized before the
+ * kernel takes the writer slot, and a transmit region before its Handle is
+ * installed. */
+int
+vobjregionringinit(Vobj *o)
+{
+	Vregion *r;
+	char hdr[OBJ_RING_HEADER];
+
+	_Static_assert(sizeof(ObjRingHeader) == 40, "ring header ABI");
+	_Static_assert(__builtin_offsetof(ObjRingHeader, write_seq) ==
+		OBJ_RING_PUBOFF, "ring publication offset");
+	_Static_assert(__builtin_offsetof(ObjRingHeader, ack_seq) ==
+		OBJ_RING_ACKOFF, "ring acknowledgement offset");
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| o->size < OBJ_RING_BYTES)
+		return -1;
+	memset(hdr, 0, sizeof hdr);
+	((ObjRingHeader*)hdr)->version = OBJ_RING_VERSION;
+	((ObjRingHeader*)hdr)->magic = OBJ_RING_MAGIC;
+	((ObjRingHeader*)hdr)->slot_size = OBJ_RING_SLOT;
+	((ObjRingHeader*)hdr)->slots = OBJ_RING_SLOTS;
+	regionkio(r, 0, hdr, sizeof hdr, 1);
+	coherence();
+	return 0;
+}
+
+/* Publish one complete record into the fixed ring and wake every waiter on
+ * the publication word.  The caller must hold the kernel writer slot. */
+int
+vobjregionringpublish(Vobj *o, uvlong *seqp, void *data, ulong len)
+{
+	Vregion *r, *rr;
+	uvlong seq, off;
+	char hdr[16];
+
+	_Static_assert(sizeof(ObjRingHeader) == 40, "ring header ABI");
+	_Static_assert(__builtin_offsetof(ObjRingHeader, write_seq) ==
+		OBJ_RING_PUBOFF, "ring publication offset");
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| o->size < OBJ_RING_BYTES || seqp == nil || len > OBJ_RING_DATA)
+		return -1;
+	rr = r;
+	seq = ++*seqp;
+	memset(hdr, 0, sizeof hdr);
+	off = OBJ_RING_HEADER + ((seq-1) % OBJ_RING_SLOTS)*OBJ_RING_SLOT;
+	regionkstore64(rr, off, 2*seq-1);
+	memmove(hdr, &len, sizeof(unsigned int));
+	regionkio(rr, off+8, hdr, 8, 1);
+	regionkio(rr, off+16, data, len, 1);
+	coherence();
+	regionkstore64(rr, off, 2*seq);
+	coherence();
+	regionkstore64(rr, OBJ_RING_PUBOFF, seq);
+	regionwakego(rr, OBJ_RING_PUBOFF, ~0ULL);
+	return 0;
+}
+
+/* Kernel consumer side of a userspace-published ring.  These helpers never
+ * expose a user pointer: the kernel maps its own reference to the region and
+ * validates every slot before any frame reaches the L2 driver. */
+
+uvlong
+vobjregionringload(Vobj *o, uvlong off)
+{
+	Vregion *r;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| regionbadoffset(o, off))
+		return 0;
+	return regionkload64(r, off);
+}
+
+/* Consume one published slot.  Returns 1 with *lenp on a complete, untorn
+ * record, and 0 for an empty, overwritten, torn or invalid record.  The
+ * caller acknowledges the sequence either way so the producer cannot stall. */
+int
+vobjregionringconsume(Vobj *o, uvlong seq, void *buf, ulong max, ulong *lenp)
+{
+	Vregion *r;
+	uvlong off, want;
+	unsigned int hdr[2];
+	ulong len;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| buf == nil || lenp == nil || seq == 0 || seq > 0x7fffffffffffffffULL)
+		return 0;
+	off = OBJ_RING_HEADER + ((seq-1) % OBJ_RING_SLOTS)*OBJ_RING_SLOT;
+	if(off + OBJ_RING_SLOT > o->size)
+		return 0;
+	want = seq << 1;
+	if(regionkload64(r, off) != want)
+		return 0;
+	regionkio(r, off+8, hdr, sizeof hdr, 0);
+	len = hdr[0];
+	if(len > OBJ_RING_DATA || len > max)
+		return 0;
+	regionkio(r, off+16, buf, len, 0);
+	coherence();
+	if(regionkload64(r, off) != want)
+		return 0;			/* overwritten while copying */
+	*lenp = len;
+	return 1;
+}
+
+/* Publish the consumed sequence and wake a producer blocked on the ring-full
+ * condition.  This is a kernel-side cursor update, not frame data and not a
+ * userspace writer authority grant. */
+int
+vobjregionringack(Vobj *o, uvlong seq)
+{
+	Vregion *r;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| seq > 0x7fffffffffffffffULL)
+		return -1;
+	regionkstore64(r, OBJ_RING_ACKOFF, seq);
+	coherence();
+	regionwakeq(r, OBJ_RING_ACKOFF, ~0ULL, 0);
+	return 0;
+}
+
+/* Blocking publication wait for a kernel consumer.  The userspace path uses
+ * REGIONWAIT(147); this is the same enrollment and lost-wakeup ordering for a
+ * kernel context that has no SG_REGION mapping of its own.  The caller holds
+ * a strong Vobj reference for the whole call. */
+int
+vobjregionwaitkern(Vobj *o, uvlong off, uvlong expected, int timeout)
+{
+	Vregion *r;
+	Wwait w;
+	KMap *k;
+	volatile uvlong *wp;
+	int ret;
+
+	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil
+	|| regionbadoffset(o, off))
+		return -1;
+	memset(&w, 0, sizeof w);
+	w.r = r;
+	w.offset = off;
+	wp = regionmapword(r, off, &k);
+
+	lock(&r->waitlk);
+	coherence();
+	if(*wp != expected){
+		unlock(&r->waitlk);
+		kunmap(k);
+		return 0;
+	}
+	if(!r->writeractive && (r->writergen != 0 || r->revoked)){
+		unlock(&r->waitlk);
+		kunmap(k);
+		return 3;
+	}
+	waitadd(r, &w);
+	unlock(&r->waitlk);
+	kunmap(k);
+
+	if(waserror()){
+		lock(&r->waitlk);
+		if(w.onlist)
+			waitdel(r, &w);
+		unlock(&r->waitlk);
+		nexterror();
+	}
+	if(timeout < 0)
+		sleep(&w.rz, regionwoke, &w);
+	else
+		tsleep(&w.rz, regionwoke, &w,
+			timeout > 0x7fffffff ? 0x7fffffff : (ulong)timeout);
+	poperror();
+
+	lock(&r->waitlk);
+	if(w.onlist)
+		waitdel(r, &w);
+	unlock(&r->waitlk);
+
+	if(w.woken == 0)
+		ret = 2;			/* timeout */
+	else if(w.writer)
+		ret = 3;			/* writer mapping released */
+	else
+		ret = 1;			/* woken, possibly spurious */
+	return ret;
 }
 
 Vobj*
@@ -706,14 +1602,6 @@ vlookup(int handle, int need)
 	return vlookupin(up, handle, need);
 }
 
-static Vfifo*
-vgetfifo(Vhand *h)
-{
-	if(h->obj->kind != VkindFifo || h->obj->fifo == nil)
-		return nil;
-	return h->obj->fifo;
-}
-
 void
 vobjprocexit(Proc *p)
 {
@@ -775,8 +1663,6 @@ vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 	}
 	for(i = 0; i < n; i++){
 		h = vlookup(list[i].handle, Vdelegate);
-		if(h->sub != nil)
-			error("object: subscriptions cannot be inherited");
 		rights = list[i].rights == 0 ? (uvlong)h->rights : list[i].rights;
 		if((rights & ~(uvlong)h->rights) != 0 ||
 		   (rights & ~(uvlong)Vall) != 0)
@@ -897,7 +1783,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			}
 #endif
 			/* Keep cleanup armed until the new Vhand is installed. */
-			h = vhandalloc(o, nil, vi->e[i].rights);
+			h = vhandalloc(o, vi->e[i].rights);
 			vi->e[i].gen = gen;
 			t->s[vi->e[i].slot].h = h;
 			t->s[vi->e[i].slot].gen = gen;
@@ -905,7 +1791,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			poperror();
 			vobjput(o);		/* the installed Vhand owns O */
 		}else{
-			h = vhandalloc(src, nil, vi->e[i].rights);
+			h = vhandalloc(src, vi->e[i].rights);
 			vi->e[i].gen = gen;
 			t->s[vi->e[i].slot].h = h;
 			t->s[vi->e[i].slot].gen = gen;
@@ -926,7 +1812,7 @@ vobjinheritchildhandle(Vinherit *vi, int index)
 
 /* Resolve a named parent Handle to its unique plan destination.  Returns the
  * child Handle, 0 when the source is absent, or -1 when it appears more than
- * once (ambiguous).  SPAWN's stdoutpipe uses this and rejects both absent and
+ * once (ambiguous).  SPAWN's explicit Handle plan rejects both absent and
  * ambiguous sources instead of silently choosing the first match. */
 int
 vobjinheritsrchandle(Vinherit *vi, int srchandle)
@@ -966,33 +1852,25 @@ vobjcreat(int kind, uvlong space, void *buf, long n, VobjId *id)
 	Vhand *h;
 	int handle, rights;
 
-	if(kind != VkindBytes && kind != VkindFifo)
+	if(kind != VkindBytes)
 		error(Ebadarg);
 	if(id != nil)
 		validaddr((uintptr)id, sizeof *id, 1);
-	if(kind == VkindFifo){
-		if(buf != nil || n < 0 || n > Vsubcapmax)
-			error(Ebadarg);
-	}else if(n < 0 || n > Vobjpaymax || (n > 0 && buf == nil))
+	if(n < 0 || n > Vobjpaymax || (n > 0 && buf == nil))
 		error(Ebadarg);
 	if((t = vgettab(1)) == nil)
 		error(Enomem);
-	o = vobjalloc(kind, space, kind == VkindFifo ? 0 : n);
+	o = vobjalloc(kind, space, n);
 	if(o == nil)
 		error(Enomem);
 	if(waserror()){
 		vobjput(o);
 		nexterror();
 	}
-	if(kind == VkindFifo){
-		((Vfifo*)o->fifo)->capacity = n == 0 ? Vsubcapdef : (int)n;
-		rights = Vsend|Vsubscribe|Vmeta|Vcontrol|Vdelegate;
-	}else{
-		if(n > 0)
-			memmove(o->data, buf, n);
-		rights = Vread|Vmeta|Vsend|Vdelegate;
-	}
-	h = vhandalloc(o, nil, rights);
+	if(n > 0)
+		memmove(o->data, buf, n);
+	rights = Vread|Vmeta|Vsend|Vdelegate;
+	h = vhandalloc(o, rights);
 	handle = vinstall(t, h);
 	if(handle < 0){
 		vhandput(h);
@@ -1105,7 +1983,7 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  o=vobjalloc(VkindGe,ossid(cap),0);
  if(o==nil) error(Enomem);
  o->provider=VopenGe;o->priv=cap;cap=nil;
- h=vhandalloc(o,nil,rights);
+ h=vhandalloc(o, rights);
  if(vgettab(1)==nil){vhandput(h);error(Enomem);}
  handle=vinstall(vgettab(1),h);
  if(handle<0){vhandput(h);error("vobj: too many handles");}
@@ -1144,6 +2022,10 @@ vobjcommit(int handle, uvlong *ver)
 	if(kind != VkindGe && kind != VkindSpace){
 		vobjput(o);
 		error(Ebadarg);
+	}
+	if(kind == VkindGe && !ownercanmanage(o)){
+		vobjput(o);
+		error(Eperm);
 	}
 	if(waserror()){
 		vobjput(o);
@@ -1184,6 +2066,51 @@ vobjputoid(int handle, uvlong oid, void *buf, long n)
 }
 
 int
+vobjownerinfo(int handle, ObjOwnerInfo *out)
+{
+	Vhand *h;
+	Vobj *o;
+	Procstat *st;
+	uvlong owner;
+	unsigned int flags;
+	char name[OBJ_OWNER_NAME_MAX];
+
+	if(out == nil)
+		error(Ebadarg);
+	validaddr((uintptr)out, sizeof *out, 1);
+	h = vlookup(handle, Vmeta);
+	o = h->obj;
+	owner = o->owner;
+	switch(o->kind){
+	case VkindGe:
+	case VkindSpace:
+		if(o->priv != nil)
+			owner = osownerof((Ohand*)o->priv, o->oid);
+		break;
+	case VkindProcess:
+		st = o->priv;
+		if(st != nil){
+			lock(&st->lk);
+			owner = st->owner;
+			unlock(&st->lk);
+		}
+		break;
+	default:
+		break;
+	}
+	memset(out, 0, sizeof *out);
+	out->version = OBJ_ABI_VERSION;
+	flags = 0;
+	name[0] = 0;
+	ownerinfo(owner, &flags, name, sizeof name);
+	out->flags = flags;
+	out->owner = owner;
+	memmove(out->name, name, sizeof out->name);
+	vhandput(h);
+	return 0;
+}
+
+int
 vobjinfo(int handle, VobjInfo *out)
 {
 	Vhand *h;
@@ -1210,8 +2137,6 @@ vobjinfo(int handle, VobjInfo *out)
 		out->oid = o->oid;
 		osvolumeid((Ohand*)o->priv, out->volume);
 	}
-	/* Generic metadata only.  FIFO/subscription counters are the separate
-	 * VobjFifostat contract (ObjOpStat); Info never duplicates them. */
 	vhandput(h);
 	return 0;
 }
@@ -1245,413 +2170,48 @@ vobjclosehandle(int handle)
 	return 0;
 }
 
-int
-vobjfifosub(int fifoh, uvlong rights, long capacity)
-{
-	Vhand *fh;
-	Vfifo *f;
-	Vsub *s;
-	Vhand *h;
-	Vhtab *t;
-	int handle, allow;
-
-	fh = vlookup(fifoh, Vsubscribe);
-	f = vgetfifo(fh);
-	if(f == nil){
-		vhandput(fh);
-		error(Ebadarg);
-	}
-	if(rights == 0)
-		rights = Vrecv|Vmeta;
-	allow = Vrecv|Vmeta|Vsend|Vread|Vwrite|Vaccept|Vconnect|Vdelegate|Vclose|Vcreate|Vcommit;
-	if(rights & ~(uvlong)allow || !(rights & (Vrecv|Vsend))){
-		vhandput(fh);
-		error(Ebadarg);
-	}
-	if((rights & Vsend) && (fh->rights & Vsend) == 0){
-		vhandput(fh);
-		error(Eperm);
-	}
-	if(capacity == 0)
-		capacity = f->capacity;
-	if(capacity < 1 || capacity > Vsubcapmax){
-		vhandput(fh);
-		error(Ebadarg);
-	}
-	if((t = vgettab(1)) == nil){
-		vhandput(fh);
-		error(Enomem);
-	}
-	s = mallocz(sizeof *s, 1);
-	if(s == nil){
-		vhandput(fh);
-		error(Enomem);
-	}
-	s->ref.ref = 1;
-	s->capacity = (int)capacity;
-	h = vhandalloc(fh->obj, s, (int)rights);
-	qlock(&f->lk);
-	if(f->closed){
-		qunlock(&f->lk);
-		vhandput(h);
-		vsubput(s);
-		vhandput(fh);
-		error("vobj: FIFO is closed");
-	}
-	if(f->nsubs >= Vfifosubsmax){
-		qunlock(&f->lk);
-		vhandput(h);
-		vsubput(s);
-		vhandput(fh);
-		error("vobj: FIFO subscription limit");
-	}
-	s->next = f->subs;
-	f->subs = s;
-	f->nsubs++;
-	incref(&s->ref);		/* fifo attachment reference */
-	s->fifo = f;
-	qunlock(&f->lk);
-	/* The handle owns one reference; the fifo list owns the other. */
-	vsubput(s);
-	handle = vinstall(t, h);
-	if(handle < 0){
-		vhandput(h);
-		vhandput(fh);
-		error("vobj: too many handles");
-	}
-	vhandput(fh);
-	return handle;
-}
-
-int
-vobjfifopublish(Vobj *fifo, Vobj *object, int rights, void *env, long envlen)
-{
-    Vfifo *f;
-    Vsub *s;
-    Vmsg *nodes[Vfifosubsmax];
-    int n, i, active;
-    uchar envbuf[Venvmax];
-
-    if(fifo == nil || fifo->kind != VkindFifo || fifo->fifo == nil
-    || object == nil || object->kind == VkindFifo || envlen < 0
-    || envlen > Venvmax || (envlen != 0 && env == nil))
-        error(Ebadarg);
-    f = fifo->fifo;
-    if(envlen != 0)
-        memmove(envbuf, env, envlen);
-	/* Reserve all message nodes before publishing anything. */
-	qlock(&f->lk);
-	if(f->closed){
-		qunlock(&f->lk);
-		error("vobj: FIFO is closed");
-	}
-	active = f->nsubs;
-	if(active > Vfifosubsmax)
-		active = Vfifosubsmax;
-	for(n = 0; n < active; n++){
-		nodes[n] = mallocz(sizeof **nodes, 0);
-		if(nodes[n] == nil){
-			for(i = 0; i < n; i++){
-    vobjput(nodes[i]->obj);free(nodes[i]);
-   }
-			qunlock(&f->lk);
-			error(Enomem);
-		}
-		nodes[n]->next = nil;
-		nodes[n]->obj = object;
- nodes[n]->rights = rights;
-		incref(&object->ref);
-		nodes[n]->envlen = (ulong)envlen;
-		if(envlen > 0)
-			memmove(nodes[n]->env, envbuf, envlen);
-	}
-	if(vmsgreserve(active) != 0){
-		for(i = 0; i < active; i++)
-			vobjput(nodes[i]->obj), free(nodes[i]);
-		qunlock(&f->lk);
-		error(Enomem);
-	}
-	f->sends++;
-	i = 0;
-	for(s = f->subs; s != nil && i < active; s = s->next, i++){
-		Vmsg *m = nodes[i];
-		lock(&s->lk);
-		if(s->closed){
-			/* Queue is drained; this message would be invisible. */
-			unlock(&s->lk);
-			vobjput(m->obj);
-			free(m);
-			vmsgrelease(1);
-			continue;
-		}
-		while(s->len >= s->capacity && s->head != nil){
-			Vmsg *old = s->head;
-			s->head = old->next;
-			if(s->head == nil)
-				s->tail = nil;
-			s->len--;
-			s->dropped++;
-			f->drops++;
-			unlock(&s->lk);
-			vobjput(old->obj);
-			free(old);
-			vmsgrelease(1);
-			lock(&s->lk);
-		}
-		if(s->tail != nil)
-			s->tail->next = m;
-		else
-			s->head = m;
-		s->tail = m;
-		s->len++;
-		unlock(&s->lk);
-		wakeup(&s->rd);
-	}
-	/* If a sub vanished while we held the fifo lock, free unused nodes. */
-	for(; i < active; i++){
-		vobjput(nodes[i]->obj);
-		free(nodes[i]);
-		vmsgrelease(1);
-	}
-	qunlock(&f->lk);
-	return 0;
-}
-
-int
-vobjfifosend(int fifoh, int objh, void *env, long envlen)
-{
-    Vhand *fh, *oh;
-    uchar envelope[Venvmax];
-
-    if(envlen < 0 || envlen > Venvmax || (envlen != 0 && env == nil))
-        error(Ebadarg);
-    if(envlen != 0){
-        validaddr((uintptr)env, envlen, 0);
-        memmove(envelope, env, envlen);
-    }
-    fh = vlookup(fifoh, Vsend);
-    if(waserror()){
-        vhandput(fh);
-        nexterror();
-    }
-    if(vgetfifo(fh) == nil)
-        error(Ebadarg);
-    oh = vlookup(objh, Vdelegate);
-    if(waserror()){
-        vhandput(oh);
-        nexterror();
-    }
-    if(oh->obj == fh->obj)
-        error(Ebadarg);
-    if(oh->obj->kind == VkindFifo)
-        error("vobj: FIFO references are not transferable");
-    vobjfifopublish(fh->obj, oh->obj, oh->rights, envelope, envlen);
-    poperror();
-    vhandput(oh);
-    poperror();
-    vhandput(fh);
-    return 0;
-}
-
-static int
-vsubready(void *a)
-{
-	Vsub *s = a;
-	int ready;
- lock(&s->lk);ready=s->len>0 || s->closed;unlock(&s->lk);
- return ready;
-}
-
-int
-vobjfiforecv(int subh, void *env, long envlen, int timeout, long *got)
-{
-	Vhand *h;
-	Vsub *s;
-	Vmsg *m;
-	Vhtab *t;
-	Vhand *nh;
-	ulong start, now;
-	int handle = -1, grant;
- Vobj *placeholder;
-
-	if(envlen < 0 || envlen > Venvmax || (envlen > 0 && env == nil))
-		error(Ebadarg);
-	if(envlen > 0)
-		validaddr((uintptr)env, envlen, 1);
-	if((t = vgettab(0)) == nil)
-		error(Ebadarg);
-	h = vlookup(subh, Vrecv);
-	if((s = h->sub) == nil){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	/* One receiver per subscription: no publish can be missed by a
-	 * second sleeper, and TEE separation is expressed by subscriptions. */
-	qlock(&s->recvlk);
-	if(waserror()){
-		if(handle>=0) vobjclosehandle(handle);
-  qunlock(&s->recvlk);
-		vhandput(h);
-		nexterror();
-	}
-	/* Reserve resources BEFORE removing a message. Exhaustion never needs
-  * to reinsert into a queue that may have been revoked or overflowed. */
- nh = vhandalloc(h->obj, nil, 0);
- handle = vinstall(t, nh);
- if(handle<0){vhandput(nh);error("vobj: too many handles");}
- start = TK2MS(MACHP(0)->pmach.ticks);
-	for(;;){
-		lock(&s->lk);
-		if(s->head != nil){
-			m = s->head;
-			s->head = m->next;
-			if(s->head == nil)
-				s->tail = nil;
-			s->len--;
-			unlock(&s->lk);
-			break;
-		}
-		if(s->closed){
-			unlock(&s->lk);
-			error(Ehungup);
-		}
-		unlock(&s->lk);
-		if(timeout == 0)
-			error("vobj: receive would block");
-		if(timeout > 0){
-			now = TK2MS(MACHP(0)->pmach.ticks);
-			if((long)(now - start) >= timeout)
-				error("vobj: receive timed out");
-			tsleep(&s->rd, vsubready, s, timeout - (long)(now - start));
-		}else
-			tsleep(&s->rd, vsubready, s, 0x7fffffff);
-	}
- /* Legacy default subscriptions receive readable metadata. Explicit
-  * provider rights only restrict a sender's ceiling; they never add it. */
- grant = m->rights & (Vread|Vmeta| (h->rights &
-  (Vwrite|Vaccept|Vconnect|Vdelegate|Vcreate|Vcommit)));
-
- /* Transfer the existing message reference into the reserved slot. No
-  * allocations, blocking calls or fallible publication after dequeue. */
- placeholder = nh->obj;
- lock(&t->lk);nh->obj=m->obj;nh->rights=grant;unlock(&t->lk);
- m->obj=nil;
- vobjput(placeholder);
-
-	if(envlen > 0 && m->envlen > 0)
-		memmove(env, m->env, m->envlen < (ulong)envlen ? m->envlen : (ulong)envlen);
-	if(got != nil){
-		long gl = (long)m->envlen;
-		memmove(got, &gl, sizeof gl);
-	}
-	poperror();
-	qunlock(&s->recvlk);
-	vobjput(m->obj);		/* message reference transferred to the handle */
-	vmsgrelease(1);
-	free(m);
-	vhandput(h);
-	return handle;
-}
-
-int
-vobjfifostat(int handle, VobjFifostat *out)
-{
-	Vhand *h;
-	Vsub *s;
-	Vfifo *f;
-
-	if(out == nil)
-		error(Ebadarg);
-	validaddr((uintptr)out, sizeof *out, 1);
-	h = vlookup(handle, Vmeta);
-	memset(out, 0, sizeof *out);
-	f = vgetfifo(h);
-	if(f == nil){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	qlock(&f->lk);
-	out->subscribers = f->nsubs;
-	out->capacity = f->capacity;
-	out->fifo_closed = f->closed;
-	out->sends = f->sends;
-	out->drops = f->drops;
-	qunlock(&f->lk);
-	if((s = h->sub) != nil){
-		lock(&s->lk);
-		out->queued = s->len;
-		out->capacity = s->capacity;
-		out->sub_closed = s->closed;
-		out->sub_dropped = s->dropped;
-		unlock(&s->lk);
-	}
-	vhandput(h);
-	return 0;
-}
-
-static void
-vfifoclose(Vobj *o, int strict)
-{
-    Vfifo *f;
-    Vsub *s, *next;
-
-    if(o == nil || o->kind != VkindFifo || o->fifo == nil)
-        error(Ebadarg);
-    f = o->fifo;
-    qlock(&f->lk);
-    if(f->closed){
-        qunlock(&f->lk);
-        if(strict) error("vobj: FIFO is already closed");
-        return;
-    }
-    f->closed = 1;
-    s = f->subs;
-    f->subs = nil;
-    f->nsubs = 0;
-    qunlock(&f->lk);
-    for(; s != nil; s = next){
-        next = s->next;
-        s->next = nil;
-        vsubshutd(s);
-        vsubput(s);
-    }
-}
-
-void
-vobjfifoclose(Vobj *o)
-{
-    vfifoclose(o, 0);
-}
-
-/* GE/O capability revocation only.  A FIFO channel shutdown is explicitly
- * vobjfifoshutdown(); closing one Handle just releases its reference. */
+/*
+ * Capability revocation.  For GE/O this revokes the grant lineage; for a
+ * volatile region it permanently blocks new mappings through every existing
+ * Handle.  Already installed mappings survive until unmap/exit, and the
+ * pages remain until the last Handle/mapping reference.  Region revocation
+ * requires Vcontrol, so a read-only observer cannot revoke another party.
+ */
 int
 vobjrevoke(int handle)
 {
     Vhand *h;
+    Vregion *r;
 
-    h = vlookup(handle, Vdelegate);
+    h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
-    if(h->obj->kind != VkindGe || h->obj->priv == nil)
+    if(!ownercanmanage(h->obj) && h->obj->kind != VkindSpace &&
+       h->obj->kind != VkindNamespaceView){
+        error(Eperm);
+    }
+    if(h->obj->kind == VkindRegion){
+        r = h->obj->priv;
+        if(r == nil || (h->rights & Vcontrol) == 0)
+            error(Eperm);
+        qlock(&r->lk);
+        lock(&r->waitlk);
+        r->revoked = 1;
+        /*
+         * With no writer installed, no future writer may appear either, so
+         * release waiters that were blocking for one.  An installed writer
+         * keeps its slot: installed mappings remain usable by design.
+         */
+        if(!r->writeractive)
+            regionnotify(r, 1);
+        unlock(&r->waitlk);
+        qunlock(&r->lk);
+    }else if(h->obj->kind == VkindGe && h->obj->priv != nil){
+        if((h->rights & Vdelegate) == 0)
+            error(Eperm);
+        osrevokehand(h->obj->priv);
+    }else{
         error(Ebadarg);
-    osrevokehand(h->obj->priv);
-    poperror();
-    vhandput(h);
-    return 0;
-}
-
-/* Close the FIFO transport for every subscriber.  This does not revoke any
- * GE/O capability and does not invalidate unrelated Handles. */
-int
-vobjfifoshutdown(int handle)
-{
-    Vhand *h;
-
-    h = vlookup(handle, Vcontrol);
-    if(waserror()){vhandput(h);nexterror();}
-    if(h->obj->kind != VkindFifo)
-        error(Ebadarg);
-    vfifoclose(h->obj, 1);
+    }
     poperror();
     vhandput(h);
     return 0;
@@ -1684,237 +2244,6 @@ vobjclosekind(int handle, int kind)
 	unlock(&t->lk);
 	vhandput(h);
 	return 0;
-}
-
-static Vobj*
-vpipealloc(Pipe *p, int end)
-{
-	Vpipe *vp;
-	Vobj *o;
-
-	vp = mallocz(sizeof *vp, 1);
-	if(vp == nil)
-		return nil;
-	o = vobjnewkind(VkindPipe, 0);
-	if(o == nil){
-		free(vp);
-		return nil;
-	}
-	vp->p = p;
-	vp->end = end;
-	o->provider = ObjOpenPipe;
-	vobjsetpriv(o, vp);
-	return o;
-}
-
-static int
-vpipedefrights(void)
-{
-	return Vread|Vwrite|Vmeta|Vdelegate;
-}
-
-/* Create a pair and install only end 0.  The peer stays pinned by end 0 and
- * is released by ObjOpPipePeer, or closed with end 0 if never requested. */
-int
-vobjpipecreate(VobjId *id)
-{
-	Pipe *p;
-	Vobj *o0, *o1;
-	Vpipe *vp;
-	int handle;
-
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	if(vobjhandlesbykind(up, VkindPipe) + 2 > Vpipeendmax)
-		error("Pipe: too many handles");
-	p = pipecorepair();
-	o0 = vpipealloc(p, 0);
-	if(o0 == nil){
-		pipecoreclose(p, 0);
-		pipecoreclose(p, 1);
-		error(Enomem);
-	}
-	o1 = vpipealloc(p, 1);
-	if(o1 == nil){
-		vobjput(o0);		/* closes end 0 */
-		pipecoreclose(p, 1);
-		error(Enomem);
-	}
-	vp = o0->priv;
-	vp->peer = o1;
-	if(waserror()){
-		lock(&vp->lk);
-		vp->peer = nil;
-		unlock(&vp->lk);
-		vobjput(o0);
-		vobjput(o1);
-		nexterror();
-	}
-	handle = vobjinstallobj(o0, vpipedefrights());
-	poperror();
-	if(id != nil){
-		id->incarnation = o0->incarnation;
-		id->space = o0->space;
-		id->oid = o0->oid;
-	}
-	vobjput(o0);			/* creation reference */
-	return handle;
-}
-
-int
-vobjpipepeer(int handle)
-{
-	Vhand *h, *nh;
-	Vhtab *t;
-	Vpipe *vp;
-	Vobj *peer;
-	int r;
-
-	h = vlookup(handle, Vdelegate);
-	if(h->obj->kind != VkindPipe || (vp = h->obj->priv) == nil
-	|| vp->end != 0){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	if((t = vgettab(1)) == nil){
-		vhandput(h);
-		error(Enomem);
-	}
-	/*
-	 * smalloc() may sleep in resrcwait(), so allocate the Vhand before
-	 * taking vp->lk.  vinstall() only takes non-sleeping locks, which
-	 * keeps the pending-peer check and the handle publication atomic
-	 * without blocking while vp->lk is held.
-	 */
-	nh = smalloc(sizeof *nh);
-	lock(&vp->lk);
-	if(vp->peer == nil){
-		unlock(&vp->lk);
-		free(nh);
-		vhandput(h);
-		error("Pipe: peer already opened");
-	}
-	peer = vp->peer;
-	vhandinit(nh, peer, nil, h->rights);
-	r = vinstall(t, nh);
-	if(r < 0){
-		unlock(&vp->lk);
-		vhandput(nh);
-		vhandput(h);
-		error("vobj: too many handles");
-	}
-	vp->peer = nil;
-	unlock(&vp->lk);
-	vobjput(peer);			/* drop the pending-peer reference */
-	vhandput(h);
-	return r;
-}
-
-/* Staged byte I/O keeps the kernel from holding a user pointer across a
- * blocking native queue operation.  The staging copy is wiped on all paths. */
-static long
-pipestream(Vpipe *vp, int op, void *buf, long n)
-{
-	char *kb;
-	long r;
-
-	if(n == 0)
-		return 0;
-	kb = smalloc(n);
-	if(waserror()){
-		memset(kb, 0, n);
-		free(kb);
-		nexterror();
-	}
-	if(op == VioRead){
-		validaddr((uintptr)buf, n, 1);
-		r = pipecoreread(vp->p, vp->end, kb, n);
-		if(r < 0)
-			error(up->errstr[0] != 0 ? up->errstr : Eio);
-		if(r > n)
-			r = n;
-		memmove(buf, kb, r);
-	}else{
-		validaddr((uintptr)buf, n, 0);
-		memmove(kb, buf, n);
-		r = pipecorewrite(vp->p, vp->end, kb, n);
-		if(r < 0)
-			error(up->errstr[0] != 0 ? up->errstr : Eio);
-	}
-	memset(kb, 0, n);
-	free(kb);
-	poperror();
-	return r;
-}
-
-void
-vobjpipeoutputset(Proc *p, int handle)
-{
-	Vhand *h;
-
-	h = vlookupin(p, handle, 0);
-	if(h->obj->kind != VkindPipe || (h->rights & Vwrite) == 0){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	p->stdoutpipe = handle;
-	vhandput(h);
-}
-
-long
-vobjpipeoutputwrite(int handle, void *data, long n)
-{
-	Vhand *h;
-	Vpipe *vp;
-	long r;
-
-	h = vlookup(handle, 0);
-	if(h->obj->kind != VkindPipe || (vp = h->obj->priv) == nil
-	|| (h->rights & Vwrite) == 0){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	if(n < 0 || n > OBJ_STREAM_MAXIO){
-		vhandput(h);
-		error(Ebadarg);
-	}
-	if(waserror()){
-		vhandput(h);
-		nexterror();
-	}
-	r = n == 0 ? 0 : pipecorewrite(vp->p, vp->end, data, n);
-	if(r < 0)
-		error(up->errstr[0] != 0 ? up->errstr : Eio);
-	poperror();
-	vhandput(h);
-	return r;
-}
-
-/* Trusted bootstrap install of one already-open native endpoint.  Ownership
- * transfers on success; on failure the caller still owns the Pipe. */
-int
-vobjpipekernelinstall(Proc *proc, void *pipe, int end)
-{
-	Vobj *o;
-	Vpipe *vp;
-	int h;
-
-	if(proc != up || !obootstrap(proc) || (end != 0 && end != 1))
-		error(Eperm);
-	o = vpipealloc(pipe, end);
-	if(o == nil)
-		error(Enomem);
-	if(waserror()){
-		vp = o->priv;
-		vp->p = nil;		/* caller keeps its endpoint ownership */
-		vp->peer = nil;
-		vobjput(o);
-		nexterror();
-	}
-	h = vobjinstallobj(o, vpipedefrights());
-	poperror();
-	vobjput(o);
-	return h;
 }
 
 static long
@@ -2119,7 +2448,7 @@ vobjkbddevice(uvlong rights, VobjId *id)
 		error(Einuse);
 	}
 	vk->held = 1;
-	vhandinit(nh, o, nil, (int)rights);
+	vhandinit(nh, o, (int)rights);
 	h = vinstall(t, nh);
 	if(h < 0){
 		vhandput(nh);
@@ -2653,7 +2982,7 @@ vusbreadonly(Ep *ep, uchar *m)
 }
 
 long
-vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
+vobjdevicesend(int handle, void *in, long len)
 {
 	Vhand *h;
 	Vdevice *d;
@@ -2663,19 +2992,11 @@ vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
 	long got;
 	uvlong seq;
 
-    if(kind != nil)
-        *kind = 0;
     h = vlookup(handle, Vsend);
     if(waserror()){vhandput(h);nexterror();}
     d = vdevice(h);
-    if(d->family == ObjDeviceEthernet){
-        got = vethersend(d->ether, in, len);
-        poperror();
-        vhandput(h);
-        if(kind != nil)
-            *kind = ObjDeviceSendAcceptedBytes;
-        return got;
-    }
+    if(d->family == ObjDeviceEthernet)
+        error("ether: frame send uses the transmit region");
     poperror();
     vhandput(h);
 
@@ -2759,12 +3080,10 @@ vobjdevicesend(int handle, void *in, long len, unsigned int *kind)
 	vhandput(h);
 	poperror();
 	free(message);
-	if(kind != nil)
-		*kind = ObjDeviceSendSequence;
 	return (long)seq;
 }
 
-/* Ethernet receive-channel acquisition: return the ObjectFIFO capability.
+/* Ethernet receive-channel acquisition: return the read-only region Handle.
  * This is deliberately not the completed-message receive path. */
 int
 vobjdevicerx(int handle)
@@ -2783,9 +3102,35 @@ vobjdevicerx(int handle)
 		error(Ebadarg);
 	if(!(h->rights & Vsubscribe))
 		error(Eperm);
-	rights = Vsubscribe|Vmeta;
-	rights |= h->rights & (Vdelegate|Vcontrol);
-	result = vobjinstallobj(vetherfifo(d->ether), rights);
+	rights = Vread|Vmeta;
+	rights |= h->rights & Vdelegate;
+	result = vobjinstallobj(vetherrxregion(d->ether), rights);
+	poperror();
+	vhandput(h);
+	return result;
+}
+
+/* Ethernet transmit-channel acquisition: return the region Handle whose
+ * unique writable mapping is the frame publisher.  Vsend is the device
+ * authority; the region's writer slot enforces one publisher at a time. */
+int
+vobjdevicetx(int handle)
+{
+	Vhand *h;
+	Vdevice *d;
+	int rights, result;
+
+	h = vlookup(handle, Vsend);
+	if(waserror()){
+		vhandput(h);
+		nexterror();
+	}
+	d = vdevice(h);
+	if(d->family != ObjDeviceEthernet)
+		error(Ebadarg);
+	rights = Vread|Vwrite|Vmeta;
+	rights |= h->rights & Vdelegate;
+	result = vobjinstallobj(vethertxregion(d->ether), rights);
 	poperror();
 	vhandput(h);
 	return result;
@@ -3010,8 +3355,8 @@ vobjioctl(int handle, uvlong op, void *data, long len, uvlong arg0)
 /*
  * Native console provider.  It replaces the retired IOWRITE(62) entry point
  * with an ordinary process-local capability.  Authority comes from the same
- * Proc iomask (or an explicit stdout Pipe for Iohout) that sysiowrite used;
- * the provider adds no ambient output authority.  The Handle carries Vwrite
+ * Proc iomask that sysiowrite used; the provider adds no ambient output
+ * authority.  The Handle carries Vwrite
  * only, and its private state is the stream number in o->size.
  */
 int
@@ -3257,35 +3602,6 @@ vobjnamespacevisible(int control, void *out, long bytes)
 	return count;
 }
 
-/*
- * Process-lifecycle OBJINVOKE providers.  Each validates the same
- * process-local capability that the retired direct number would have
- * trusted and then calls the one shared kernel core.  No raw syscall
- * dispatch is re-entered and no second scheduler/exit path exists.
- */
-long
-vobjprocwait(ProcWait *out)
-{
-	Waitmsg w;
-	ulong pid;
-	ulong n;
-
-	if(out == nil)
-		error(Ebadarg);
-	pid = pwait(&w);
-	memset(out, 0, sizeof *out);
-	out->pid = (long long)pid;
-	out->time[0] = w.time[0];
-	out->time[1] = w.time[1];
-	out->time[2] = w.time[2];
-	n = strlen(w.msg);
-	if(n > PROCWAIT_MSG_MAX)
-		n = PROCWAIT_MSG_MAX;
-	memmove(out->msg, w.msg, n);
-	out->msglen = (unsigned int)n;
-	return 0;
-}
-
 static long
 vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 {
@@ -3305,12 +3621,12 @@ vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 		vobjput(o);
 		nexterror();
 	}
+	if(o->kind != VkindSpace && o->kind != VkindRegion &&
+	   o->kind != VkindProcess && !ownercanmanage(o)){
+		vobjput(o);
+		error(Eperm);
+	}
 	switch(o->kind){
-	case VkindPipe:
-		if(n < 0 || n > OBJ_STREAM_MAXIO)
-			error(Ebadarg);
-		r = pipestream(o->priv, (int)op, buf, n);
-		break;
 	case VkindUart:
 		if(n < 0 || n > OBJ_STREAM_MAXIO)
 			error(Ebadarg);
@@ -3481,6 +3797,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		o->provider = VopenSpace;
 		o->space = ossid(oh);
 		o->oid = 0;
+		o->owner = osownerof(oh, 0);
 		vobjsetpriv(o, oh);
 	}else if(provider == VopenGeSpace){
 		Vhand *sh;
@@ -3523,6 +3840,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		o->provider = VopenGe;
 		o->oid = gr.oid;
 		o->space = ossid(oh);
+		o->owner = osownerof(oh, gr.oid);
 		vobjsetpriv(o, oh);
 	}else
 		error("vobj: provider not supported");
@@ -3556,13 +3874,6 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 	if(id != nil)
 		validaddr((uintptr)id, sizeof *id, 1);
 	s = vlookup(src, Vdelegate);
-	/* A subscription has at most one receiver.  Duplicating its Handle
-	 * would create a second receiver on the same queue; callers must take
-	 * an independent subscription instead. */
-	if(s->sub != nil){
-		vhandput(s);
-		error("vobj: subscription handles cannot be duplicated");
-	}
 	if(rights == 0)
 		rights = (uvlong)s->rights;
 	if((rights & ~(uvlong)s->rights) != 0){
@@ -3573,7 +3884,7 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 		vhandput(s);
 		error(Enomem);
 	}
-	nh = vhandalloc(s->obj, s->sub, (int)rights);
+	nh = vhandalloc(s->obj, (int)rights);
 	handle = vinstall(t, nh);
 	if(handle < 0){
 		vhandput(nh);
@@ -3644,7 +3955,6 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
  if(m>ObjBindShare) error(Ebadarg);
  h=vlookup(handle,Vdelegate);
  if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
- if(h->sub) error(Eperm);
  if(h->obj->kind==VkindNamespaceControl) error(Eperm);
  if(rights==0) rights=h->rights;
  if(rights & ~(uvlong)h->rights) error(Eperm);
@@ -3657,10 +3967,10 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
   bound->oid=h->obj->oid;
   bound->space=ossid(cap);
   bound->priv=cap;cap=nil;
-  nh=vhandalloc(bound,nil,(int)rights);
+  nh=vhandalloc(bound, (int)rights);
   vobjput(bound);bound=nil;
  }else
-  nh=vhandalloc(h->obj,nil,(int)rights);
+  nh=vhandalloc(h->obj, (int)rights);
  /* RFNOMNT forbids namespace extension, not removal of an existing role.
   * Admission and the bind are one step against pgrpsealnamespace(). */
  if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
@@ -3683,7 +3993,7 @@ vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id)
  if(bh->obj->kind==VkindGe || bh->obj->kind==VkindSpace) oscheckhand(bh->obj->priv);
  if(rights==0) rights=bh->rights;
  if(rights & ~(uvlong)bh->rights) error(Eperm);
- nh=vhandalloc(bh->obj,nil,(int)rights);
+ nh=vhandalloc(bh->obj, (int)rights);
  if(vgettab(1)==nil){vhandput(nh);error(Enomem);}
  handle=vinstall(vgettab(1),nh);
  if(handle<0){vhandput(nh);error("vobj: too many handles");}

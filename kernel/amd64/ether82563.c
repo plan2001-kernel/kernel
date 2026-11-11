@@ -800,7 +800,7 @@ procerror(Ctlr *ctlr, Proc **p)
 
 	*p = nil;
 
-	pexit("", 1);
+	pexit("");
 }
 
 static void
@@ -1480,7 +1480,7 @@ Again:
 
 	ctlr->wproc = nil;
 	i82563recover(ctlr);
-	pexit("", 1);
+	pexit("");
 }
 
 static void

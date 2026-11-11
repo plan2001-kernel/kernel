@@ -17,23 +17,46 @@ uninterpreted occurrence; a contextual object is its interpretation or role.
 - Native object records use `Kobj` records, SpaceIDs, OIDs, versions and
   chunks. Values are opaque bytes, not POSIX file metadata or application
   class instances.
+- Immutable owner metadata is a separate versioned `Kowner` record keyed by
+  `store[8] oid[8] ~ver[8]` with a small magic plus the 64-bit `OwnerID`. It
+  does not wrap or reinterpret the object payload. The owner record, the
+  initial payload, and the allocator high-water mark are staged in the same
+  transaction and become visible with its one published version. A record
+  above the published `N` is not authority; aborted or interrupted creations
+  are ignored and swept by the next transaction. The owner is creation-only
+  and is never rewritten by content writes, commit, reopen, fork/spawn/exec
+  or restart, and there is no independent ownership-mutation call.
+- A Space that predates owner metadata is upgraded once, in the first
+  owner-aware write transaction: every object published at that point is
+  recorded as owned by the seeded volume owner (`root`), and the Space
+  header records that owner metadata is now required. Before that upgrade a
+  missing record means the seeded legacy owner; afterwards a missing record
+  for a live object is corruption, never an implicit `root` grant. A first
+  write to an unused OID is a creation and records the writer's trust-domain
+  owner atomically; it cannot select or attach an arbitrary owner number.
 - The native O opener rejects an FS-profile volume. Opening a volume must
   not implicitly reformat it.
 
 ## Stored definitions versus runtime namespaces
 
-A process namespace is a volatile, reference-counted `Pgrp`/`OContext`
-capability view, not a GE/O object and not a persistent OID. GE/O may store
-a namespace *definition* as ordinary object content, to be interpreted by
-an authorized userspace loader when constructing or modifying that view.
-The definition's format and loader are not yet implemented. A definition
-is neither a snapshot of live Handles nor an authority token: loading it
-does not grant access to the objects it mentions.
+A target namespace is a lookup/data view independent of process ancestry,
+not a source of ownership. Objects have one named owner from creation until
+destruction; an OID or namespace label grants no ownership. The current
+AMD64 implementation uses capability-based reference-counted `Pgrp/OContext`;
+that is an implementation fact, not the single-owner target. GE/O may store
+namespace definitions as ordinary object data for future userspace
+interpretation; the format and loader are not implemented, and loading
+such data cannot grant access to objects it references.
+
+The `(SpaceID, OID)` pair locates an object but never selects or changes its
+owner. The current kernel checks the persistent owner record on GE/O
+open/read/write and exposes it through `ObjOpOwnerInfo`; a read-only
+publication mapping does not grant access to the stored object.
 
 Persistent GE/O objects may also represent object sets and OID membership
 relations as separate data. Those are not process namespaces and are not
 currently an implemented general set/relation engine. Stored object identity,
-versions and lifetime are independent of a process group's `OContext`, role
+versions and lifetime are independent of volatile namespace views, role
 removal, or last-Handle close.
 
 ## Writes and visibility

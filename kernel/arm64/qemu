@@ -3,7 +3,6 @@ dev
 	cons
 	swap
 	env
-	pipe
 	proc
 	mnt
 	srv
@@ -13,8 +12,6 @@ dev
 	cap
 	fs
 	ether	netif
-	bridge	log
-	ip	arp chandial ip ipv6 ipaux iproute netlog nullmedium pktmedium inferno
 	uart
 	rtc
 	pci	pci
@@ -25,19 +22,8 @@ link
 	ethervirtio10	pci virtio10mem
 	ethersink
 	ethermedium
-	loopbackmedium
-	netdevmedium
 	pciqemu		pci
 
-ip
-	tcp
-	udp
-	il
-	ipifc
-	icmp
-	icmp6
-	igmp
-	ipmux
 misc
 	bootinfo
 	bootarch

@@ -7,10 +7,10 @@
  * identity, Handle, capability, provider backing and namespace binding are
  * distinct concepts.
  *
- * READ/WRITE, PUBLISH/SUBSCRIBE/RECEIVE and ACCEPT/CONNECT are userland
- * adapters over OBJINVOKE.  READ of a byte-stream provider returns a byte
- * count; RECEIVE of an ObjectFIFO returns one authorized object Handle plus
- * an optional small opaque envelope.  The two are not the same semantics.
+ * READ/WRITE and device frame/record operations are userland adapters over
+ * OBJINVOKE.  READ of a byte-stream provider returns a byte count; a device
+ * receive channel is a capability-mapped region ring described below.  There
+ * is no generic kernel message FIFO, Pipe or payload-copy IPC endpoint.
  *
  * All fields are fixed-width and little-endian for amd64.  The kernel
  * validates version, operation, length, alignment and address before using
@@ -23,32 +23,31 @@
 
 struct Ospawn;
 
-/* obj_open providers.  Numbers 1, 2, 3, 8, 10, 11, 12 and 14 are reserved
+/* obj_open providers.  Numbers 1, 2, 3, 8, 9, 10, 11, 12 and 14 are reserved
  * historical identifiers for the retired TCP6/UDP6 object interface, the old
- * ObjOpenGe alias, ObjOpenUart, ObjOpenKbd, ObjOpenUsb and the synthetic
- * ProcessSelf handle.  They have no provider, declaration or handler.  All
- * physical device kinds are opened through ObjOpenDevices/ObjOpenDevice. */
+ * ObjOpenGe alias, the retired Pipe provider, ObjOpenUart, ObjOpenKbd,
+ * ObjOpenUsb and the synthetic ProcessSelf handle.  They have no provider,
+ * declaration or handler.  All physical device kinds are opened through
+ * ObjOpenDevices/ObjOpenDevice. */
 enum {
 	ObjOpenHandle		= 4,
 	ObjOpenBinding		= 5,
 	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */
 	ObjOpenGeSpace		= 7,	/* Space handle + OID -> persistent object */
-	ObjOpenPipe		= 9,	/* provider tag for a native Pipe endpoint */
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
 	ObjOpenNamespaceCurrent = 17,	/* caller's namespace control */
 };
 
-/* obj_create kinds.  The first two are volatile and ObjKindPipe is a native
- * byte-stream pair; ObjKindGe is explicitly persistent and requires an
- * authorized open Space handle, never a silent promotion of a volatile
- * identity. */
+/* obj_create kinds.  ObjKindBytes is volatile immutable content and
+ * ObjKindRegion is a volatile capability-mapped region; ObjKindGe is
+ * explicitly persistent and requires an authorized open Space handle, never
+ * a silent promotion of a volatile identity. */
 enum {
 	ObjKindBytes		= 0,
-	ObjKindFifo		= 1,
 	ObjKindGe		= 2,
-	ObjKindPipe		= 3,	/* create one pair; peer via ObjOpPipePeer */
+	ObjKindRegion		= 4,	/* volatile capability-mapped pages */
 	ObjCreateKindMask	= 0xff,
 };
 
@@ -62,29 +61,26 @@ enum {
 	ObjBindRemove		= 0x100,
 };
 
-/* OBJINVOKE operations.  Numbers 8, 11, 14, 15, 17, 18, 19, 20, 21, 22, 23,
- * 24, 33, 35 and 40 are reserved historical identifiers for the retired
- * TCP6/UDP6 object interface, handle-less process listing/count, USB service
- * list/endpoint open, the one-shot Pipe selection, the ProcessSelf wait, the
- * former OSPAWN route and the UART/KBD/device-control operations that are now
- * IOCTL(145).  They have no dispatch handler.
+/* OBJINVOKE operations.  Numbers 4, 5, 6, 7, 8, 11, 14, 15, 16, 17, 18, 19,
+ * 20, 21, 22, 23, 24, 33, 35, 40 and 46 are reserved historical identifiers
+ * for the retired FIFO/Pipe interface, the retired TCP6/UDP6 object
+ * interface, handle-less process listing/count, USB service list/endpoint
+ * open, the one-shot Pipe selection, the ProcessSelf wait, the former OSPAWN
+ * route and the UART/KBD/device-control operations that are now IOCTL(145).
+ * They have no dispatch handler.
  *
- * Process Handle-table introspection is SYSCTL(144) SysctlHandleList; child
- * wait is the direct typed PROCWAIT(142) call; spawn is the direct SPAWN(146)
- * call; device control is IOCTL(145). */
+ * Process Handle-table introspection is SYSCTL(144) SysctlHandleList;
+ * completion observation and control are VkindProcess OBJINVOKE operations;
+ * creation is SPAWN(146) or RFORKEX(143); device control is IOCTL(145). */
 enum {
 	ObjOpInfo	= 1,	/* generic identity/type/size/rights metadata */
 	ObjOpRead	= 2,
 	ObjOpWrite	= 3,
-	ObjOpStat	= 4,	/* FIFO/subscription statistics only */
-	ObjOpSend	= 5,	/* FIFO publish */
-	ObjOpRecv	= 6,	/* FIFO receive one completed message */
-	ObjOpSubscribe	= 7,
 	ObjOpGrant	= 9,	/* RETIRED: OBJOPEN(ObjOpenHandle) */
-	ObjOpRevoke	= 10,	/* GE/O capability revocation only */
+	ObjOpRevoke	= 10,	/* GE/O grant or volatile-region map revocation */
 	ObjOpCreatePersist = 12,	/* RETIRED: OBJCREATE(ObjKindGe) */
 	ObjOpCommit	= 13,	/* Space transaction commit (via Space/GE handle) */
-	ObjOpPipePeer	= 16,	/* Pipe end 0: install and return the peer Handle */
+	/* 16 is reserved: retired Pipe peer installation. */
 	/* 17, 18 and 19 are reserved: UART configuration/status and KBD LED
 	 * control moved to IOCTL(145). */
 	/* 20 and 21 are reserved: retired USB service list and endpoint open.
@@ -103,7 +99,7 @@ enum {
 	ObjOpOspawn	= 33,	/* RETIRED: direct SPAWN(146) is used */
 	ObjOpOterminate	= 34,	/* RETIRED: direct OTERMINATE(93) is used */
 	ObjOpDeviceList = 37,	/* catalog: bounded discovery records */
-	ObjOpDeviceSend = 38,	/* device: one complete provider message */
+	ObjOpDeviceSend = 38,	/* USB device: one complete provider message */
 	ObjOpDeviceRecv = 39,	/* device: one USB completion Handle */
 	/* 40 is reserved: device control moved to IOCTL(145). */
 	ObjOpExit	= 36,	/* RETIRED: direct EXITS(8) is used */
@@ -111,26 +107,56 @@ enum {
 	ObjOpNamespaceAttach = 42,	/* view Handle + mode -> attachment token */
 	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
 	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
-	ObjOpDeviceRx	= 45,	/* device: acquire the receive FIFO channel */
-	ObjOpFifoShutdown = 46,	/* FIFO handle: close the channel */
+	ObjOpDeviceRx	= 45,	/* device: acquire the receive region Handle */
+	ObjOpDeviceTx	= 46,	/* device: acquire the transmit region Handle */
+	/* VkindRegion: install this region at arg0 (0 = choose) and return the
+	 * process-local virtual address.  arg1 is a bitmask of ObjRegionMap*
+	 * flags (0 keeps the default).  Without a flag a Handle carrying Vwrite
+	 * requests the single writable mapping and Vread alone requests a
+	 * read-only mapping; ObjRegionMapReadonly requests a read-only mapping
+	 * even from a Vwrite Handle without consuming the writer slot.  Unmap
+	 * takes the exact mapping base returned by the map call and affects only
+	 * the caller's address space. */
+	ObjOpRegionMap	= 47,
+	ObjOpRegionUnmap = 48,
+	/* VkindProcess: durable, repeatable completion observation.  WAIT takes
+	 * an optional timeout in arg0 (-1 = infinite, 0 = poll) and copies an
+	 * ObjProcessInfo to out; it does not consume the completion.  TERMINATE
+	 * requires Vcontrol and requests non-cancellable termination at the target
+	 * boundary, independently of user note handlers. Repeated requests before
+	 * exit begins are idempotent; exiting/completed targets reject requests.
+	 * INFO requires Vmeta and never waits for completion. */
+	ObjOpProcessInfo = 49,
+	ObjOpProcessWait = 50,
+	ObjOpProcessTerminate = 51,
+	/* Any object/process Handle: immutable owner metadata.  This reports
+	 * identity only; it never grants management of another owner's object. */
+	ObjOpOwnerInfo = 52,
+};
+
+/* ObjOpRegionMap arg1 flags. */
+enum {
+	ObjRegionMapReadonly = 1<<0,	/* map read-only even with Vwrite */
+	ObjRegionMapFlags = ObjRegionMapReadonly,
 };
 
 /* Classification after the SYSCTL/IOCTL/object/scalar split:
  *  - Object-bound (real Handle + identity/rights/lifetime): GE/O read/write/
- *    commit, Space+OID PutOid, ObjectFIFO, namespace views, Pipe, and common
- *    device payload sessions (UART bytes, Ethernet frames, USB transfers).
+ *    commit, Space+OID PutOid, namespace views, capability regions, and
+ *    common device payload sessions (UART bytes, Ethernet frames, USB
+ *    transfers).
  *  - SYSCTL(144): system snapshot, own-process Handle list, environment,
  *    privileged volume activation and own-process CPU/memory introspection.
  *  - IOCTL(145): UART configuration/status, KBD LED control and supported
  *    provider-specific device control.
- *  - Direct primitives: SPAWN/EXITS/OTERMINATE/PROCWAIT, RFORKEX, memory,
- *    time, synchronization, NOTIFY/NOTED and ERRSTR.
+ *  - Direct primitives: SPAWN/EXITS/RFORKEX, memory, time, synchronization,
+ *    NOTIFY/NOTED and ERRSTR.  Process observation/control use OBJINVOKE.
  *  - Discovery and opening: every supported physical family is an
  *    ObjOpDeviceList record opened through ObjOpenDevice with an authorized
  *    catalog Handle.  Selectors are hints, never authority.
- *  - Removed: the TCP6/UDP6 object interface and the separate UART, KBD and
- *    USB opening providers.  Raw Ethernet and ObjectFIFO remain; upper-layer
- *    protocols are userspace.
+ *  - Removed: the TCP6/UDP6 object interface, the separate UART, KBD and
+ *    USB opening providers, FIFO, and Pipe.  Raw Ethernet L2 remains;
+ *    upper-layer protocols and frame fan-out are userspace.
  */
 
 /* Namespace operations require ObjOpenNamespaceCurrent with Vcontrol.
@@ -161,7 +187,7 @@ enum {
 
 enum {
     ObjDeviceUsbControl = 1,       /* synchronous control session (SEND/RECV) */
-    ObjDeviceEthernet = 2,         /* raw L2 SEND + ObjectFIFO RECV */
+    ObjDeviceEthernet = 2,         /* raw L2 region-ring TX and RX */
     ObjDeviceUart = 3,             /* authorized bounded byte stream */
     ObjDeviceKbd = 4,              /* exclusive PS/2 scan-code stream */
     ObjDeviceUsbEndpoint = 5,      /* referenced DATA or CTL endpoint */
@@ -181,11 +207,13 @@ typedef struct ObjDeviceOpenOptions {
 } ObjDeviceOpenOptions;
 
 /* Ethernet: complete L2 octets, including MACs/EtherType, excluding FCS.
- * SEND returns accepted/enqueued bytes, not wire/DMA completion. RX
- * (ObjOpDeviceRx) obtains the existing ObjectFIFO capability; subscribe/
- * receive then use the ordinary OBJ operations.  Receiving the FIFO channel
- * is distinct from retrieving one completed USB message.  No USB setup or
- * synchronous USB completion is implied. */
+ * RX (ObjOpDeviceRx) returns one read-only VkindRegion Handle carrying an
+ * ObjRingHeader and fixed slots; the kernel is the only writer mapping.
+ * TX (ObjOpDeviceTx) returns one VkindRegion Handle whose unique writable
+ * mapping is the authorized userspace publisher; the kernel consumes complete
+ * published frames and advances header.ack_seq.  Neither direction is a
+ * completed-message receive and no USB setup or synchronous USB completion is
+ * implied. */
 typedef struct ObjEtherRxMeta {
     unsigned int version;
     unsigned int controller;
@@ -211,9 +239,60 @@ typedef struct ObjEtherStatus {
     unsigned long long highwater;
     unsigned int handoff_capacity;
     unsigned int handoff_queued;
+    unsigned long long tx_dropped;
+    unsigned long long tx_errors;
 } ObjEtherStatus;
 
 long obj_device_ether_status(int device, ObjEtherStatus *status);
+
+/* Capability-region ring transport (device receive/transmit channels and
+ * console session streams).  One writer owns the unique writable mapping; any
+ * number of authorized readers map the region read-only.  The writer stores a
+ * complete immutable record into slot (seq-1)%slots, publishes the slot with
+ * the even value 2*seq, then publishes header.write_seq = seq with release
+ * ordering and calls REGIONWAKE(base, OBJ_RING_PUBOFF, ...).  Readers load
+ * header.write_seq with acquire ordering and treat a slot whose sequence is
+ * not the expected even value as overwritten and therefore dropped.
+ *
+ * For kernel-published receive/console rings the kernel owns the writer
+ * mapping.  For an Ethernet transmit ring the authorized publisher owns the
+ * unique writable mapping and the kernel is the read-only consumer: it loads
+ * write_seq, copies complete frames into NIC-owned Blocks and publishes
+ * header.ack_seq = consumed sequence with release ordering, then wakes
+ * REGIONWAIT observers of OBJ_RING_ACKOFF.  A publisher must not reuse a slot
+ * before it is acknowledged; the ring is full when
+ * write_seq - ack_seq == slots.  A publisher that overruns the acknowledgement
+ * loses the older slots, which the kernel skips.
+ *
+ * Publication word: byte offset OBJ_RING_PUBOFF (8-byte aligned) in the
+ * region.  Consumed-sequence word: byte offset OBJ_RING_ACKOFF (8-byte
+ * aligned).  Slot data starts at OBJ_RING_HEADER + index*OBJ_RING_SLOT + 16.
+ * The header is zeroed and preinitialized by the kernel. */
+#define OBJ_RING_VERSION 1u
+#define OBJ_RING_MAGIC   0x5250324fu /* "RP2O" little-endian */
+#define OBJ_RING_PUBOFF  16u
+#define OBJ_RING_ACKOFF  32u
+#define OBJ_RING_HEADER  4096u
+#define OBJ_RING_SLOTS   64u
+#define OBJ_RING_SLOT    2048u
+#define OBJ_RING_DATA    (OBJ_RING_SLOT - 16u)
+#define OBJ_RING_BYTES   (OBJ_RING_HEADER + OBJ_RING_SLOTS*OBJ_RING_SLOT)
+
+typedef struct ObjRingHeader {
+    unsigned int version;
+    unsigned int magic;
+    unsigned int slot_size;
+    unsigned int slots;
+    unsigned long long write_seq;   /* publication word at OBJ_RING_PUBOFF */
+    unsigned long long drops;
+    unsigned long long ack_seq;     /* consumed sequence at OBJ_RING_ACKOFF */
+} ObjRingHeader;
+
+typedef struct ObjRingSlot {
+    unsigned long long seq;         /* 0 empty, odd writing, even published */
+    unsigned int length;
+    unsigned int flags;
+} ObjRingSlot;
 
 typedef struct ObjDeviceEntry {
     unsigned int version;          /* OBJ_DEVICE_ABI_VERSION */
@@ -242,9 +321,8 @@ typedef struct ObjOpenDeviceReq {
 /* USB control RECV (ObjOpDeviceRecv) installs one Vread|Vmeta|Vdelegate
  * bytes Handle as result, and copies this completion into out.  A failed
  * install leaves the completion pending.  A USB SEND completes
- * synchronously and returns a positive session-local sequence; an Ethernet
- * SEND returns accepted bytes.  ObjCall.aux carries the ObjDeviceSend*
- * discriminator so the two meanings are never silently interchangeable.
+ * synchronously and returns a positive session-local sequence.  Ethernet
+ * frames use the transmit region, never SEND.
  * Exactly one unreceived USB completion is permitted; another SEND is Einuse.
  * USB input is the original 8-byte setup followed by exactly wLength OUT
  * bytes (none for IN).  IN response may be shorter than wLength.  OUT's
@@ -277,10 +355,10 @@ typedef struct ObjId {
 } ObjId;
 
 /* obj_open(ObjOpenConsole): bind one native process output stream.  stream
- * is Iohout=1 or Iohdiag=2; the authority is the Proc's existing iomask (or,
- * for Iohout, an explicit stdout Pipe).  The returned Handle carries Vwrite
- * and is the replacement for the retired IOWRITE(62) number.  It is not a
- * file descriptor, pathname or Chan. */
+ * is Iohout=1 or Iohdiag=2; the authority is the Proc's existing iomask.
+ * The returned Handle carries Vwrite and is the replacement for the retired
+ * IOWRITE(62) number.  It is not a file descriptor, pathname or Chan.  A
+ * console owner may route its bytes into a region session instead. */
 typedef struct ObjOpenConsoleReq {
 	int			stream;
 	unsigned int		reserved;
@@ -339,12 +417,12 @@ typedef struct ObjOpenGeSpaceReq {
 #define OBJ_USB_EP_DATA  0
 #define OBJ_USB_EP_CTL   1
 
-/* Byte-stream bound shared by the native Pipe, UART and KBD providers. */
+/* Byte-stream bound shared by the UART and KBD providers. */
 #define OBJ_STREAM_MAXIO 65536
 #define OBJ_KBD_MAXREAD 4096
 #define OBJ_UART_STATMAX 65536
 
-/* Pipe inheritance is never armed through OBJINVOKE.  Use the direct
+/* Handle inheritance is never armed through OBJINVOKE.  Use the direct
  * RFORKEX(143) call, whose options record declares the crossing Handles and
  * their rights in the same atomic operation as child creation. */
 
@@ -362,7 +440,7 @@ typedef struct ObjOpenGeSpaceReq {
  * authority from the Handle, never from a caller claim.  in/inlen and
  * out/outlen are validated according to the operation direction.  result is
  * a byte count, a Handle or 0 depending on the operation; aux carries a
- * secondary value (ObjectFIFO envelope length, for example).
+ * secondary value (a device SEND result discriminator, for example).
  */
 typedef struct ObjCall {
 	unsigned int		version;
@@ -381,20 +459,58 @@ typedef struct ObjCall {
 	unsigned int		reserved;
 } ObjCall;
 
-/* RFORKEX(143), SPAWN(146), OTERMINATE(93), EXITS(8) and PROCWAIT(142) are
- * direct primitives.  RFORKEX keeps the RFPROC child/PID return and the
- * group-only form; OTERMINATE keeps the direct-child, parentpid, kp and
- * exiting checks.  Child wait is the direct typed PROCWAIT call; none of
- * these has an OBJINVOKE variant. */
-#define PROCWAIT_MSG_MAX 128
+/* Process lifecycle is capability-based.  SPAWN and RFORKEX return a
+ * process-local VkindProcess Handle carrying Vobserve|Vcontrol|Vmeta|
+ * Vdelegate; a child sees 0 from RFORKEX.  The Handle is the authority, not
+ * a PID.  Observation is repeatable and independent of launcher lifetime.
+ * Control requires a separate Vcontrol grant. */
 
-typedef struct ProcWait {
-	long long		pid;
+/* Coherent observable lifecycle.  CREATED covers construction before the
+ * process is schedulable; RUNNING is a live execution context; COMPLETED is
+ * an immutable result.  A completion record is retained while any Handle or
+ * transient publication reference exists and is released at the last one. */
+enum {
+	ObjProcCreated		= 0,
+	ObjProcRunning		= 1,
+	ObjProcCompleted	= 2,
+};
+
+enum {
+	ObjProcCauseNone	= 0,
+	ObjProcCauseExit	= 1,	/* voluntary EXITS */
+	ObjProcCauseTerminated	= 2,	/* authorized control termination */
+	ObjProcCauseFault	= 3,	/* unhandled fault or fatal note */
+};
+
+#define OBJ_PROCESS_MSG_MAX 128
+
+typedef struct ObjProcessInfo {
+	unsigned int		version;	/* OBJ_ABI_VERSION */
+	unsigned int		state;		/* ObjProc* state */
+	unsigned int		cause;		/* ObjProcCause* (COMPLETED) */
+	unsigned int		reserved;
+	long long		pid;		/* identifier only, not authority */
+	unsigned long long	generation;	/* boot-local identity generation */
 	unsigned long long	time[3];	/* user, sys, real (ms) */
 	unsigned int		msglen;		/* bytes in msg, no NUL */
-	unsigned int		reserved;
-	char			msg[PROCWAIT_MSG_MAX];
-} ProcWait;
+	unsigned int		reserved2;
+	char			msg[OBJ_PROCESS_MSG_MAX];
+	unsigned int		waiters;	/* observers enrolled at snapshot time */
+	unsigned int		reserved3;
+} ObjProcessInfo;
+
+/* ObjOpOwnerInfo result.  owner is the immutable OwnerID; name is valid
+ * (flags bit 0) when the current boot has a registered name for it. */
+#define OBJ_OWNER_NAME_MAX 32
+typedef struct ObjOwnerInfo {
+	unsigned int		version;	/* OBJ_ABI_VERSION */
+	unsigned int		flags;		/* bit 0: name valid */
+	unsigned long long	owner;
+	unsigned long long	reserved;
+	char			name[OBJ_OWNER_NAME_MAX];
+} ObjOwnerInfo;
+
+#define PROCESS_WAIT_INFINITE ((unsigned long long)-1)
 
 /* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
  * struct Ospawn *options) creates one static x86-64 ELF child from an
@@ -403,14 +519,16 @@ typedef struct ProcWait {
  * authorization as OEXECUTE remain in force.  argv/options are validated by
  * the shared spawn core, including the Ospawn and optional
  * Oinherit/Oinheritv blocks.  The child receives the same registers, stack,
- * argv, CPU affinity, memory budget, namespace/view, Pipe, environment and
+ * argv, CPU affinity, memory budget, namespace/view, environment and
  * Vhand inheritance semantics.  The result is the child PID. */
 
 #define OBJ_EXITMSG_MAX 128
 
-/* Process-lifecycle adapters.  Wait is the direct typed PROCWAIT call;
- * spawn is the direct SPAWN call; rfork, oterminate and exits are direct. */
-long proc_wait(ProcWait *w);
+/* Process-lifecycle adapters over the VkindProcess Handle. */
+long obj_process_info(int handle, ObjProcessInfo *out);
+long obj_owner_info(int handle, ObjOwnerInfo *out);
+long obj_process_wait(int handle, ObjProcessInfo *out, long long timeout);
+long obj_process_terminate(int handle);
 long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 		struct Ospawn *options);
 
@@ -447,17 +565,11 @@ long obj_read_version(int handle, void *buf, unsigned long long len,
 long obj_write(int handle, void *buf, unsigned long long len,
 		unsigned long long timeout);
 long obj_info(int handle, void *info);
-long obj_stat(int handle, void *stat);
-long obj_subscribe(int fifo, unsigned long long rights,
-		unsigned long long capacity);
-long obj_publish(int fifo, int object, void *env, unsigned long long envlen);
-long obj_receive(int subscription, void *env, unsigned long long envcap,
-		unsigned long long timeout, unsigned long long *got);
 long obj_grant(int handle, unsigned long long rights);
-/* GE/O capability revocation only.  Closing a FIFO channel is a distinct
- * operation (obj_fifo_shutdown); it is not capability revocation. */
+/* GE/O capability revocation and volatile-region map revocation.  A region
+ * Handle needs Vcontrol to revoke; existing mappings survive, new mappings
+ * through any Handle are denied. */
 long obj_revoke(int handle);
-long obj_fifo_shutdown(int handle);
 /* Own-process Handle-table introspection over SYSCTL, not an INVOKE
  * operation.  It reports only the caller's own table and copies at most
  * count records.  It returns the total live count, so an undersized buffer
@@ -468,8 +580,35 @@ long obj_list_count(void *records, unsigned long long count,
 
 /* Native byte-stream providers over the same five-call ABI.  Device control
  * (UART configuration/status, KBD LEDs) is IOCTL(145), not OBJINVOKE. */
-long obj_pipe_create(ObjId *out);
-long obj_pipe_peer(int handle);
+
+/* Volatile capability regions.  Creation takes a page-multiple size and
+ * returns a Handle carrying Vread|Vwrite|Vmeta|Vdelegate|Vcontrol.  A writer
+ * mapping is unique for the region; read-only mappings are shared.  A Vwrite
+ * Handle maps read-only when flags contains ObjRegionMapReadonly, without
+ * consuming the writer slot.  The mapping survives closing the Handle and is
+ * released by obj_region_unmap() or process exit; unmap takes the exact base
+ * returned by the map call.  obj_revoke() on a Vcontrol Handle blocks all
+ * future mappings; installed mappings and page backing remain until
+ * unmap/exit and the last reference.  Revocation cannot invalidate an
+ * installed mapping or reclaim the writer slot: that still requires unmap,
+ * writer-process exit or termination. */
+long obj_region_create(unsigned long long size, ObjId *out);
+long obj_region_map(int handle, unsigned long long addr);
+long obj_region_map_flags(int handle, unsigned long long addr,
+		unsigned int flags);
+long obj_region_unmap(unsigned long long addr);
+
+/* Region-scoped publication wait/wake over the direct REGIONWAIT(147) and
+ * REGIONWAKE(148) calls.  base is the mapping returned by obj_region_map,
+ * offset is region-relative and 8-byte aligned, and the 64-bit publication
+ * word is compared only for equality.  An RO mapping may wait; only the
+ * writable mapping may wake.  See runtime/abi/sys.h for status values and
+ * ordering rules.  Userland acquires/stores the word with its own native
+ * atomic operations; the kernel never copies the payload. */
+long region_wait(unsigned long long base, unsigned long long offset,
+		unsigned long long expected, long long timeout);
+long region_wake(unsigned long long base, unsigned long long offset,
+		unsigned long long count);
 long obj_uart_ctl(int handle, void *cfg);
 long obj_uart_status(int handle, void *buf, unsigned long long len);
 long obj_kbd_leds(int handle, unsigned int leds);
@@ -489,22 +628,18 @@ long obj_catalog_device_open(unsigned int family, int selector0,
 		int selector1, unsigned long long rights, void *options,
 		unsigned long long optlen);
 
-/* Device SEND result kinds.  An Ethernet SEND reports accepted/enqueued L2
- * bytes; a USB control SEND reports a session-local completion sequence.
- * They are never silently interchangeable. */
-enum {
-	ObjDeviceSendAcceptedBytes	= 1,
-	ObjDeviceSendSequence		= 2,
-};
-
+/* Device SEND: one complete USB control request.  Ethernet frames use the
+ * transmit region instead, so a SEND return is always a session-local USB
+ * completion sequence. */
 long obj_device_send(int device, void *message, unsigned long long length);
-long obj_device_send_kind(int device, void *message, unsigned long long length,
-		unsigned int *kind);
 /* USB control completion retrieval: one completed immutable bytes Handle. */
 long obj_device_recv(int device, ObjDeviceResult *completion);
-/* Ethernet receive-channel acquisition: one ObjectFIFO capability Handle.
- * This is not a completed-message receive. */
+/* Ethernet receive-channel acquisition: one read-only region Handle carrying
+ * an ObjRingHeader.  This is not a completed-message receive. */
 long obj_device_rx(int device);
+/* Ethernet transmit-channel acquisition: one VkindRegion Handle whose unique
+ * writable mapping is the frame publisher.  Not a per-frame syscall. */
+long obj_device_tx(int device);
 /* Typed device control over IOCTL(145). */
 long obj_device_ioctl(int device, unsigned int operation, void *data,
 		unsigned long long len, unsigned long long arg0);

@@ -699,11 +699,9 @@ enum
 	RFNOTEG		= (1<<3),
 	RFPROC		= (1<<4),
 	RFMEM		= (1<<5),
-	RFNOWAIT	= (1<<6),
 	RFCNAMEG	= (1<<10),
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),
-	RFREND		= (1<<13),
 	RFNOMNT		= (1<<14)
 };
 
@@ -734,14 +732,6 @@ struct Dir {
 
 /* keep /sys/src/ape/lib/ap/plan9/sys9.h in sync with this -rsc */
 typedef
-struct Waitmsg
-{
-	int	pid;		/* of loved one */
-	ulong	time[3];	/* of loved one & descendants */
-	char	*msg;
-} Waitmsg;
-
-typedef
 struct IOchunk
 {
 	void	*addr;
@@ -752,7 +742,6 @@ extern	_Noreturn void	_exits(char*);
 
 extern	_Noreturn void	abort(void);
 extern	long	alarm(ulong);
-extern	int	await(char*, int);
 extern	int	bind(char*, char*, int);
 extern	int	brk(void*);
 extern	int	chdir(char*);
@@ -782,22 +771,16 @@ extern	long	readn(int, void*, long);
 extern	long	readv(int, IOchunk*, int);
 extern	int	remove(char*);
 extern	void*	sbrk(usize);
-/* Direct user memory and synchronization services. */
+/* Direct user memory services. */
 extern	long	segattach(int, char*, uintptr, ulong);
 extern	long	segbrk(uintptr, uintptr);
 extern	long	segdetach(uintptr);
 extern	long	segfree(uintptr, ulong);
 extern	long	segflush(void*, ulong);
-extern	long	semacquire(long*, int);
-extern	long	semrelease(long*, long);
-extern	long	tsemacquire(long*, ulong);
-extern	long	rendezvous(void*, void*);
 extern	long	oseek(int, long, int);
 extern	vlong	seek(int, vlong, int);
 extern	int	sleep(long);
 extern	int	stat(char*, uchar*, int);
-extern	Waitmsg*	wait(void);
-extern	int	waitpid(void);
 extern	long	write(int, void*, long);
 extern	long	writev(int, IOchunk*, int);
 extern	int	wstat(char*, uchar*, int);

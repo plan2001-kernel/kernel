@@ -336,10 +336,11 @@ oseed(Bptr *rootp, int *htp)
 {
 	char *env, *p, *e, *q, path[512];
 	char name[128], def[65], mpy[65], oidhex[17], k[Keymax], v[Inlmax], hex[65];
-	uchar *data, *eb, *hb, *ab;
+	uchar *data, *eb, *hb, *ab, *rp, *re;
 	long n, en, hn, an, tot;
 	Seedrec *r;
 	uvlong oid;
+	u32int nk, nv;
 	int nr, ar, off, i;
 
 	r = nil;
@@ -398,6 +399,36 @@ oseed(Bptr *rootp, int *htp)
 	seedfile(&r, &nr, &ar, "rawexec", "rawexecoid");
 	seedfile(&r, &nr, &ar, "mp", "mpoid");
 	seedfile(&r, &nr, &ar, "bad", "badoid");
+
+	/*
+	 * Optional raw Kobj/Kowner fixture records.  The host crash tests use
+	 * this to build a disposable legacy Space with multiple versions and
+	 * tombstones before any owner-aware write.  It is a seed-input format,
+	 * not part of the on-disk O profile.
+	 */
+	snprint(path, sizeof path, "%s/raw", seeddir);
+	if(seedread(path, &ab, &an) >= 0){
+		if(an < 8 || memcmp(ab, "RAWREC01", 8) != 0)
+			sysfatal("seed: raw: bad magic");
+		rp = ab + 8;
+		re = ab + an;
+		while(rp < re){
+			if(re - rp < 8)
+				sysfatal("seed: raw: truncated record");
+			nk = UNPACK32((char*)rp);
+			rp += 4;
+			nv = UNPACK32((char*)rp);
+			rp += 4;
+			if(nk > Keymax || nv > Inlmax ||
+			   (uvlong)(re - rp) < (uvlong)nk + nv)
+				sysfatal("seed: raw: bad record");
+			seedadd(&r, &nr, &ar, (char*)rp, nk,
+				(char*)rp + nk, nv);
+			rp += nk + nv;
+		}
+		free(ab);
+		print("seed: raw fixture records\n");
+	}
 
 	/* the header: version 1, then Environment and next OID */
 	memmove(hex, hb, 64);

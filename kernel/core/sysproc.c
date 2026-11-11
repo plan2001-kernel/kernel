@@ -35,17 +35,19 @@ injectfault(char *point)
 
 /*
  * Shared fork core.  RFORKEX(143) and its empty-plan wrapper use this
- * function, so forkchild, resource copying, rollback and parent/child
- * linkage cannot diverge.  The caller has already validated the Handle or
- * the raw syscall boundary; this function validates only the flag word and
- * resources.  VI is a prepared, pinned Handle plan (or nil); it is not
+ * function, so forkchild, resource copying, rollback and process
+ * publication cannot diverge.  The caller has already validated the Handle
+ * or the raw syscall boundary; this function validates only the flag word
+ * and resources.  VI is a prepared, pinned Handle plan (or nil); it is not
  * mutated and it is committed only after every non-Handle resource has been
- * copied successfully.
+ * copied successfully.  The parent receives an independent VkindProcess
+ * Handle; no child accounting or ancestral wait state is created.
  */
 static ulong
 kernrforkcore(ulong flag, Vinherit *vi)
 {
 	ulong pid;
+	int childhandle;
 	uvlong forkpages;
 	char *text, *user, *args;
 	int n, i, lockup, lockp;
@@ -73,15 +75,13 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if((flag&RFPROC) == 0) {
 		Ref *ofg;
 		Pgrp *opg;
-		Rgrp *org;
 		Egrp *oeg;
 
-		if(flag & (RFMEM|RFNOWAIT))
+		if(flag & RFMEM)
 			error(Ebadarg);
 
 		ofg = up->fdgrp;
 		opg = up->pgrp;
-		org = up->rgrp;
 		oeg = up->egrp;
 
 		if(waserror()){
@@ -92,10 +92,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			if(up->pgrp != opg){
 				closepgrp(up->pgrp);
 				up->pgrp = opg;
-			}
-			if(up->rgrp != org){
-				closergrp(up->rgrp);
-				up->rgrp = org;
 			}
 			if(up->egrp != oeg){
 				closeegrp(up->egrp);
@@ -113,10 +109,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			up->pgrp = newpgrp();
 			pgrpcpy(up->pgrp, opg, flag & RFNAMEG);
 		}
-
-		/* Rendezvous group */
-		if(flag & RFREND)
-			up->rgrp = newrgrp();
 
 		/* Environment group */
 		if(flag & (RFENVG|RFCENVG)) {
@@ -136,8 +128,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			closefdgrp(ofg);
 		if(opg != nil && opg != up->pgrp)
 			closepgrp(opg);
-		if(org != nil && org != up->rgrp)
-			closergrp(org);
 		if(oeg != nil && oeg != up->egrp)
 			closeegrp(oeg);
 
@@ -236,6 +226,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if(up->procctl == Proc_tracesyscall)
 		p->procctl = Proc_tracesyscall;
 	p->kp = 0;
+	p->owner = up->owner;	/* one trust domain across fork */
 
 	/*
 	 * Craft a return frame which will cause the child to pop out of
@@ -263,6 +254,9 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	p->pcycles = -p->kentry;
 
 	pid = pidalloc(p);
+	p->stat = procstatnew(pid);
+	p->stat->owner = p->owner;
+	p->stat->proc = p;
 
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 	/* Third fallible boundary: text/user/args and the PID are initialized,
@@ -293,11 +287,27 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		nexterror();
 	}
 	for(i = 0; i < NSEG; i++)
-		if(up->seg[i] != nil)
+		/*
+		 * An ordinary fork does not inherit capability-region mappings:
+		 * the child receives a region only through explicit Handle
+		 * delegation and maps it itself.  RFMEM shares one address
+		 * space, so it must also share the existing SG_REGION Segments
+		 * (and their writer slot); otherwise a thread would fault on an
+		 * address that is valid in the process it shares memory with.
+		 */
+		if(up->seg[i] != nil &&
+		   (n != 0 || (up->seg[i]->type & SG_TYPE) != SG_REGION))
 			p->seg[i] = dupseg(up->seg, i, n);
 	forkpages = 0;
 	for(i = 0; i < NSEG; i++)
-		if(p->seg[i] != nil) forkpages += p->seg[i]->size;
+		/*
+		 * SG_REGION backing is charged once to the region creator and a
+		 * mapping does not add a per-process commitment; do not charge
+		 * an RFMEM child for the shared mapping either.
+		 */
+		if(p->seg[i] != nil &&
+		   (p->seg[i]->type & SG_TYPE) != SG_REGION)
+			forkpages += p->seg[i]->size;
 	if(procmemreplace(p, forkpages) < 0) error(Enovmem);
 	qunlock(&p->seglock);
 	poperror();
@@ -320,15 +330,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		p->pgrp = up->pgrp;
 		if(up->pgrp != nil)
 			incref(&up->pgrp->ref);
-	}
-
-	/* Rendezvous group */
-	if(flag & RFREND)
-		p->rgrp = newrgrp();
-	else {
-		p->rgrp = up->rgrp;
-		if(up->rgrp != nil)
-			incref(&up->rgrp->ref);
 	}
 
 	/* Environment group */
@@ -355,17 +356,15 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		error("fork: injected post-procfork failure");
 #endif
 
+	/* Install the process capability before publication.  If it fails the
+	 * prepublication error region discards the child and its completion
+	 * record; no partially installed authority is possible. */
+	childhandle = vobjprocinstall(p->stat);
+
 	poperror();	/* prepublication error region */
 
 	if(flag & RFNOMNT)
 		pgrpsealnamespace(p->pgrp);
-
-	if((flag&RFNOWAIT) == 0){
-		p->parent = up;
-		lock(&up->exl);
-		up->nchild++;
-		unlock(&up->exl);
-	}
 
 	/*
 	 *  since the bss/data segments are now shareable,
@@ -378,9 +377,10 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if(up->wired)
 		procwired(p, up->affinity);
 
+	procstatstart(p->stat);
 	ready(p);
 	sched();
-	return pid;
+	return childhandle;
 }
 
 /*
@@ -394,7 +394,7 @@ ulong
 kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 {
 	Vinherit vi;
-	ulong pid;
+	ulong handle;
 	int i;
 
 	if((flag & RFPROC) == 0){
@@ -408,7 +408,7 @@ kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 		nexterror();
 	}
 	vobjinheritprepare(&vi, list, n);
-	pid = kernrforkcore(flag, &vi);
+	handle = kernrforkcore(flag, &vi);
 	/* One result per input entry, in input order.  Do not search by source:
 	 * the same parent Handle may legitimately appear several times. */
 	if(childhandles != nil)
@@ -417,7 +417,7 @@ kernrforkex(ulong flag, Vinhand *list, int n, uvlong *childhandles)
 				(uvlong)vobjinheritchildhandle(&vi, i);
 	vobjinheritrelease(&vi);
 	poperror();
-	return pid;
+	return handle;
 }
 
 ulong
@@ -577,8 +577,6 @@ execcommit(Segment *ts, Segment *ds, Segment *bs, uintptr tstk,
 		up->procctl = Proc_stopme;
 	oprocexec(up);
 	vobjprocexec(up);
-	pipeprocexec(up);
-	espctl_bootstrap(up);
 	kbdprocexec(up);
 	uartprocexec(up);
 }
@@ -870,7 +868,7 @@ execo(uvlong oid, void *vbuf, long n, char **uargv, int argc)
 			qunlock(&up->seglock);
 		}
 		if(up->seg[SSEG] == nil)
-			pexit(up->errstr, 1);
+			pexit(up->errstr);
 		nexterror();
 	}
 
@@ -1044,8 +1042,8 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
  * Shared spawn: create a real child from a published static x86-64 ELF.
  * The caller's Space handle is used only to read the image. The child
  * gets fresh segments and Egrp plus only the explicitly selected O view,
- * Pipe handles, environment and UDP6 permit. CPU placement is applied
- * before ready(). OTERMINATE may only interrupt a direct child.
+ * Pipe handles, environment and UDP6 permit.  CPU placement is applied
+ * before ready().  The caller receives an independent process Handle.
  */
 /*
  * Shared spawn core.  The explicit GE/O Space capability is supplied by the
@@ -1055,7 +1053,8 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
  * setup) is unchanged.
  */
 long
-kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
+kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
+	uvlong owner, int internal)
 {
 	struct Ospawn opt;
 	Proc *p;
@@ -1073,7 +1072,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	char **kargv, **av;
 	char *uarg[Oargmax];
 	char name[64], ebuf[ERRMAX];
-	int argn, cpu, i, nargs;
+	int argn, cpu, i, nargs, childhandle;
 	struct Oinherit *inh;
 	struct Oinheritv *inhv;
 	Vinhand plan[24];
@@ -1179,7 +1178,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		if(inh == nil) error(Enomem);
 		validaddr((uintptr)(uopt+1), sizeof *inh, 0);
 		memmove(inh, uopt+1, sizeof *inh);
-		if(inh->view > 2 || inh->nroles > 32 || inh->npipes > 16 || inh->nenv > 8)
+		if(inh->view > 2 || inh->nroles > 32 || inh->nenv > 8)
 			error(Ebadarg);
 		if(inh->view == 0 && inh->nroles != 0) error(Ebadarg);
 	}
@@ -1209,20 +1208,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 			nplan++;
 		}
 	}
-	if(inh != nil){
-		for(i = 0; i < (int)inh->npipes; i++){
-			int r = inh->pipes[i][1];
-
-			if(nplan >= (int)(sizeof plan/sizeof plan[0]) ||
-			   inh->pipes[i][0] <= 0 || r <= 0 || (r & ~3))
-				error(Ebadarg);
-			plan[nplan].handle = inh->pipes[i][0];
-			plan[nplan].rights = (uvlong)(((r & 1) ? Vread : 0) |
-				((r & 2) ? Vwrite : 0));
-			plan[nplan].dstslot = 0;
-			nplan++;
-		}
-	}
 	vobjinheritprepare(&vi, plan, nplan);
 	cpu = -1;
 	if(opt.cpu != ~0ULL){
@@ -1235,7 +1220,10 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		}
 	}
 
-	n = osgetobjecthand(soh, oid, &buf, Objspawnmax, &ver);
+	if(internal)
+		n = osgetobjecthandk(soh, oid, &buf, Objspawnmax, &ver);
+	else
+		n = osgetobjecthand(soh, oid, &buf, Objspawnmax, &ver);
 	if(n < 0)
 		error("oexec: no such object");
 	if(n > Objspawnmax)
@@ -1287,6 +1275,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->notepending = 0;
 	p->lastnote = nil;
 	p->kp = 0;
+	p->owner = owner;	/* registry owner or caller trust domain */
 	p->procmode = up->procmode;
 	p->privatemem = 0;
 	p->noswap = 0;
@@ -1317,6 +1306,9 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->kentry = up->kentry;
 	p->pcycles = -p->kentry;
 	pid = pidalloc(p);
+	p->stat = procstatnew(pid);
+	p->stat->owner = p->owner;
+	p->stat->proc = p;
 	qunlock(&p->debug);
 	lockp = 0;
 	qunlock(&up->debug);
@@ -1325,7 +1317,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	/* Fresh, empty environment group; no inherited namespace or handles. */
 	p->fdgrp = nil;
 	p->pgrp = nil;
-	p->rgrp = nil;
 	p->egrp = newegrp();
 	/* Empty by default; selected initial values can be set by the child. */
 	p->vobjhandles = nil;
@@ -1336,17 +1327,6 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	vobjinheritcommit(p, &vi);
 	if(inh != nil){
 		ocontextspawn(p, inh->view, inh->roles, inh->nroles);
-		if(inh->stdoutpipe){
-			int ch;
-
-			if(inh->stdoutpipe > 0x7fffffffULL) error(Ebadarg);
-			/* stdoutpipe names one parent Pipe.  It must resolve to
-			 * exactly one plan entry: absent (0) and ambiguous (-1)
-			 * are both rejected rather than picking the first. */
-			ch = vobjinheritsrchandle(&vi, (int)inh->stdoutpipe);
-			if(ch <= 0) error(Ebadarg);
-			pipeoutputset(p, ch);
-		}
 		for(i = 0; i < inh->nenv; i++){
 			if(memchr(inh->env[i].name, 0, 32) == nil || inh->env[i].name[0] == 0 ||
 						memchr(inh->env[i].value, 0, 128) == nil) error(Ebadarg);
@@ -1461,57 +1441,19 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		error("ospawn: injected late child abort");
 #endif
 
-	/* Publication boundary: from here the child is parent-visible and
-	 * must not be rolled back as if it never existed. */
-	lock(&up->exl);
-	p->parent = up;
-	up->nchild++;
-	unlock(&up->exl);
+	/* Install the initial observe+control authority before publication.
+	 * The prepublication error region tears down both the child and the
+	 * completion record if this fails. */
+	childhandle = vobjprocinstall(p->stat);
 
-	print("o: SPAWN pid=%lud oid=%#llux cpu=%d\n", pid, oid, cpu);
+	print("o: SPAWN pid=%lud handle=%d oid=%#llux cpu=%d\n",
+		pid, childhandle, oid, cpu);
 	poperror();
 
+	procstatstart(p->stat);
 	ready(p);
 	sched();
-	return pid;
-}
-
-/*
- * Shared OTERMINATE core.  Only a direct, live child can be named; the
- * caller's own ProcessSelf capability has already been checked by the OBJ
- * provider.  PID reuse, parent/parentpid, kp and exiting are all judged
- * exactly as before.
- */
-int
-kernoterminate(int ipid)
-{
-	Proc *p;
-	char *err;
-	ulong pid;
-	int idx;
-
-	if(ipid <= 0)
-		error(Ebadarg);
-	pid = (ulong)ipid;
-	if(pid == up->pid)
-		error(Ebadarg);
-	if((idx = procindex(pid)) < 0)
-		error(Ebadarg);
-	if((p = proctab(idx)) == nil)
-		error(Ebadarg);
-
-	err = nil;
-	qlock(&p->debug);
-	if(p->pid != pid || p->exiting)
-		err = Ebadarg;
-	else if(p->kp || p->parent != up || p->parentpid != up->pid)
-		err = Eperm;
-	else
-		postnote(p, 0, "terminated", NDebug);
-	qunlock(&p->debug);
-	if(err != nil)
-		error(err);
-	return 0;
+	return childhandle;
 }
 
 int
@@ -1589,7 +1531,7 @@ sysrforkex(sysva_list list)
 	uvlong *uch;
 	Vinhand list_[RFORKEX_MAXHANDLES];
 	ulong flag;
-	ulong pid;
+	ulong handle;
 	int i;
 
 	flag = (ulong)sysva_arg(list, uvlong);
@@ -1620,8 +1562,8 @@ sysrforkex(sysva_list list)
 		list_[i].rights = opt.h[i].rights;
 		list_[i].dstslot = (int)opt.h[i].dstslot;
 	}
-	pid = kernrforkex(flag, list_, (int)opt.count, uch);
-	return pid;
+	handle = kernrforkex(flag, list_, (int)opt.count, uch);
+	return handle;
 }
 
 /*
@@ -1636,7 +1578,7 @@ sysspawn(sysva_list list)
 	char **argv;
 	struct Ospawn *opt;
 	uvlong oid;
-	long pid;
+	long handle;
 	int space, argc;
 
 	space = (int)sysva_arg(list, int);
@@ -1649,16 +1591,10 @@ sysspawn(sysva_list list)
 		oshandput(soh);
 		nexterror();
 	}
-	pid = kernospawn(soh, oid, argv, argc, opt);
+	handle = kernospawn(soh, oid, argv, argc, opt, up->owner, 0);
 	poperror();
 	oshandput(soh);
-	return (uintptr)pid;
-}
-
-uintptr
-sysoterminate(sysva_list list)
-{
-	return kernoterminate((int)sysva_arg(list, int));
+	return (uintptr)handle;
 }
 
 uintptr
@@ -1683,7 +1619,13 @@ sysexits(sysva_list list)
 		}
 
 	}
-	pexit(status, 1);
+	/* An explicit EXITS is voluntary even after a handled note.  A sticky
+	 * capability termination still takes precedence in pexitcause(). */
+	qlock(&up->debug);
+	freenote(up->lastnote);
+	up->lastnote = nil;
+	qunlock(&up->debug);
+	pexit(status);
 }
 
 void
@@ -1763,7 +1705,7 @@ donotify(Ureg *ureg)
 	Ureg *nureg;
 	char *msg;
 
-	if(up->procctl)
+	if(up->terminate || up->procctl)
 		procctl();
 	if(up->nnote == 0)
 		return 0;
@@ -1785,7 +1727,7 @@ donotify(Ureg *ureg)
 	|| (nureg = notify(ureg, msg)) == nil){
 		if(up->lastnote->flag == NDebug)
 			pprint("suicide: %s\n", msg);
-		pexit(msg, up->lastnote->flag!=NDebug);
+		pexit(msg);
 	}
 
 	/* word under Ureg is old ureg */
@@ -1820,7 +1762,7 @@ notecont(int arg)
 	nureg = up->noteureg;
 	if(!okaddr((uintptr)nureg-BY2WD, BY2WD+sizeof(Ureg), 0)){
 		pprint("suicide: bad ureg in noted or call to noted when not notified\n");
-		pexit("Suicide", 0);
+		pexit("Suicide");
 	}
 
 	switch(arg){
@@ -1832,7 +1774,7 @@ notecont(int arg)
 	case NSAVE:
 		if(noted(up->dbgreg, nureg, arg)){
 			pprint("suicide: trap in noted\n");
-			pexit("Suicide", 0);
+			pexit("Suicide");
 		}
 		break;
 	default:
@@ -1842,7 +1784,7 @@ notecont(int arg)
 		noted(up->dbgreg, nureg, arg);	/* for debugging */
 		if(up->lastnote->flag == NDebug)
 			pprint("suicide: %s\n", up->lastnote->msg);
-		pexit(up->lastnote->msg, up->lastnote->flag!=NDebug);
+		pexit(up->lastnote->msg);
 	}
 
 	/* allow next note */
@@ -1867,6 +1809,7 @@ syssegbrk(sysva_list list)
 		case SG_STACK:
 		case SG_PHYSICAL:
 		case SG_FIXED:
+		case SG_REGION:	/* fixed capability backing and writer lifetime */
 		case SG_STICKY:
 			error(Ebadarg);
 		default:
@@ -1930,7 +1873,7 @@ found:
 	/*
 	 * Check we are not detaching the initial stack segment.
 	 */
-	if(s == up->seg[SSEG]){
+	if(s == up->seg[SSEG] || (s->type&SG_TYPE) == SG_REGION){
 		qunlock(&s->qlk);
 		error(Ebadarg);
 	}
@@ -1960,6 +1903,10 @@ syssegfree(sysva_list list)
 	s = seg(up, from, 1);
 	if(s == nil)
 		error(Ebadarg);
+	if((s->type&SG_TYPE) == SG_REGION){
+		qunlock(&s->qlk);
+		error(Ebadarg);
+	}
 	to &= ~(BY2PG-1);
 	from = PGROUND(from);
 	if(from >= to) {
@@ -1981,336 +1928,6 @@ uintptr
 sysbrk_(sysva_list list)
 {
 	return ibrk(sysva_arg(list, uintptr), BSEG);
-}
-
-uintptr
-sysrendezvous(sysva_list list)
-{
-	uintptr tag, val, new;
-	Proc *p, **l;
-
-	tag = sysva_arg(list, uintptr);
-	new = sysva_arg(list, uintptr);
-	if(up->rgrp == nil)
-		error(Ebadarg);
-	l = &REND(up->rgrp, tag);
-
-	lock(&up->rgrp->lk);
-	for(p = *l; p != nil; p = p->rendhash) {
-		if(p->rendtag == tag) {
-			*l = p->rendhash;
-			val = p->rendval;
-			p->rendval = new;
-			unlock(&up->rgrp->lk);
-
-			ready(p);
-
-			return val;
-		}
-		l = &p->rendhash;
-	}
-
-	/* Going to sleep here */
-	up->rendtag = tag;
-	up->rendval = new;
-	up->rendhash = *l;
-	*l = up;
-	up->state = Rendezvous;
-	unlock(&up->rgrp->lk);
-
-	sched();
-
-	return up->rendval;
-}
-
-/*
- * The implementation of semaphores is complicated by needing
- * to avoid rescheduling in syssemrelease, so that it is safe
- * to call from real-time processes.  This means syssemrelease
- * cannot acquire any qlocks, only spin locks.
- *
- * Semacquire and semrelease must both manipulate the semaphore
- * wait list.  Lock-free linked lists only exist in theory, not
- * in practice, so the wait list is protected by a spin lock.
- *
- * The semaphore value *addr is stored in user memory, so it
- * cannot be read or written while holding spin locks.
- *
- * Thus, we can access the list only when holding the lock, and
- * we can access the semaphore only when not holding the lock.
- * This makes things interesting.  Note that sleep's condition function
- * is called while holding two locks - r and up->rlock - so it cannot
- * access the semaphore value either.
- *
- * An acquirer announces its intention to try for the semaphore
- * by putting a Sema structure onto the wait list and then
- * setting Sema.waiting.  After one last check of semaphore,
- * the acquirer sleeps until Sema.waiting==0.  A releaser of n
- * must wake up n acquirers who have Sema.waiting set.  It does
- * this by clearing Sema.waiting and then calling wakeup.
- *
- * There are three interesting races here.
-
- * The first is that in this particular sleep/wakeup usage, a single
- * wakeup can rouse a process from two consecutive sleeps!
- * The ordering is:
- *
- * 	(a) set Sema.waiting = 1
- * 	(a) call sleep
- * 	(b) set Sema.waiting = 0
- * 	(a) check Sema.waiting inside sleep, return w/o sleeping
- * 	(a) try for semaphore, fail
- * 	(a) set Sema.waiting = 1
- * 	(a) call sleep
- * 	(b) call wakeup(a)
- * 	(a) wake up again
- *
- * This is okay - semacquire will just go around the loop
- * again.  It does mean that at the top of the for(;;) loop in
- * semacquire, phore.waiting might already be set to 1.
- *
- * The second is that a releaser might wake an acquirer who is
- * interrupted before he can acquire the lock.  Since
- * release(n) issues only n wakeup calls -- only n can be used
- * anyway -- if the interrupted process is not going to use his
- * wakeup call he must pass it on to another acquirer.
- *
- * The third race is similar to the second but more subtle.  An
- * acquirer sets waiting=1 and then does a final canacquire()
- * before going to sleep.  The opposite order would result in
- * missing wakeups that happen between canacquire and
- * waiting=1.  (In fact, the whole point of Sema.waiting is to
- * avoid missing wakeups between canacquire() and sleep().) But
- * there can be spurious wakeups between a successful
- * canacquire() and the following semdequeue().  This wakeup is
- * not useful to the acquirer, since he has already acquired
- * the semaphore.  Like in the previous case, though, the
- * acquirer must pass the wakeup call along.
- *
- * This is all rather subtle.  The code below has been verified
- * with the spin model /sys/src/9/port/semaphore.p.  The
- * original code anticipated the second race but not the first
- * or third, which were caught only with spin.  The first race
- * is mentioned in /sys/doc/sleep.ps, but I'd forgotten about it.
- * It was lucky that my abstract model of sleep/wakeup still managed
- * to preserve that behavior.
- *
- * I remain slightly concerned about memory coherence
- * outside of locks.  The spin model does not take
- * queued processor writes into account so we have to
- * think hard.  The only variables accessed outside locks
- * are the semaphore value itself and the boolean flag
- * Sema.waiting.  The value is only accessed with cmpswap,
- * whose job description includes doing the right thing as
- * far as memory coherence across processors.  That leaves
- * Sema.waiting.  To handle it, we call coherence() before each
- * read and after each write.		- rsc
- */
-
-/* Add semaphore p with addr a to list in seg. */
-static void
-semqueue(Segment *s, long *a, Sema *p)
-{
-	memset(p, 0, sizeof *p);
-	p->addr = a;
-	lock(&s->sema.rz.lk);	/* Sema -> Rendez -> named Lock */
-	p->next = &s->sema;
-	p->prev = s->sema.prev;
-	p->next->prev = p;
-	p->prev->next = p;
-	unlock(&s->sema.rz.lk);
-}
-
-/* Remove semaphore p from list in seg. */
-static void
-semdequeue(Segment *s, Sema *p)
-{
-	lock(&s->sema.rz.lk);
-	p->next->prev = p->prev;
-	p->prev->next = p->next;
-	unlock(&s->sema.rz.lk);
-}
-
-/* Wake up n waiters with addr a on list in seg. */
-static void
-semwakeup(Segment *s, long *a, long n)
-{
-	Sema *p;
-
-	lock(&s->sema.rz.lk);
-	for(p=s->sema.next; p!=&s->sema && n>0; p=p->next){
-		if(p->addr == a && p->waiting){
-			p->waiting = 0;
-			coherence();
-			wakeup(&p->rz);
-			n--;
-		}
-	}
-	unlock(&s->sema.rz.lk);
-}
-
-/* Add delta to semaphore and wake up waiters as appropriate. */
-static long
-semrelease(Segment *s, long *addr, long delta)
-{
-	long value;
-
-	do
-		value = *addr;
-	while(!cmpswap(addr, value, value+delta));
-	semwakeup(s, addr, delta);
-	return value+delta;
-}
-
-/* Try to acquire semaphore using compare-and-swap */
-static int
-canacquire(long *addr)
-{
-	long value;
-
-	while((value=*addr) > 0)
-		if(cmpswap(addr, value, value-1))
-			return 1;
-	return 0;
-}
-
-/* Should we wake up? */
-static int
-semawoke(void *p)
-{
-	coherence();
-	return !((Sema*)p)->waiting;
-}
-
-/* Acquire semaphore (subtract 1). */
-static int
-semacquire(Segment *s, long *addr, int block)
-{
-	int acquired;
-	Sema phore;
-
-	if(canacquire(addr))
-		return 1;
-	if(!block)
-		return 0;
-	semqueue(s, addr, &phore);
-	if(acquired = !waserror()){
-		for(;;){
-			phore.waiting = 1;
-			coherence();
-			if(canacquire(addr))
-				break;
-			sleep(&phore.rz, semawoke, &phore);
-		}
-		poperror();
-	}
-	semdequeue(s, &phore);
-	coherence();	/* not strictly necessary due to lock in semdequeue */
-	if(!phore.waiting)
-		semwakeup(s, addr, 1);
-	if(!acquired)
-		nexterror();
-	return 1;
-}
-
-/* Acquire semaphore or time-out */
-static int
-tsemacquire(Segment *s, long *addr, ulong ms)
-{
-	int timedout, acquired;
-	ulong t;
-	Sema phore;
-
-	if(canacquire(addr))
-		return 1;
-	if(ms == 0)
-		return 0;
-	timedout = 0;
-	semqueue(s, addr, &phore);
-	if(acquired = !waserror()){
-		for(;;){
-			phore.waiting = 1;
-			coherence();
-			if(canacquire(addr))
-				break;
-			t = MACHP(0)->pmach.ticks;
-			tsleep(&phore.rz, semawoke, &phore, ms);
-			t = TK2MS(MACHP(0)->pmach.ticks - t);
-			if(t >= ms){
-				timedout = 1;
-				break;
-			}
-			ms -= t;
-		}
-		poperror();
-	}
-	semdequeue(s, &phore);
-	coherence();	/* not strictly necessary due to lock in semdequeue */
-	if(!phore.waiting)
-		semwakeup(s, addr, 1);
-	if(!acquired)
-		nexterror();
-	return !timedout;
-}
-
-uintptr
-syssemacquire(sysva_list list)
-{
-	int block;
-	long *addr;
-	Segment *s;
-
-	addr = sysva_arg(list, long*);
-	block = sysva_arg(list, int);
-	evenaddr((uintptr)addr);
-	s = seg(up, (uintptr)addr, 0);
-	if(s == nil || (s->type&SG_RONLY) != 0 || (uintptr)addr+sizeof(long) > s->top){
-		validaddr((uintptr)addr, sizeof(long), 1);
-		error(Ebadarg);
-	}
-	if(*addr < 0)
-		error(Ebadarg);
-	return (uintptr)semacquire(s, addr, block);
-}
-
-uintptr
-systsemacquire(sysva_list list)
-{
-	long *addr;
-	ulong ms;
-	Segment *s;
-
-	addr = sysva_arg(list, long*);
-	ms = sysva_arg(list, ulong);
-	evenaddr((uintptr)addr);
-	s = seg(up, (uintptr)addr, 0);
-	if(s == nil || (s->type&SG_RONLY) != 0 || (uintptr)addr+sizeof(long) > s->top){
-		validaddr((uintptr)addr, sizeof(long), 1);
-		error(Ebadarg);
-	}
-	if(*addr < 0)
-		error(Ebadarg);
-	return (uintptr)tsemacquire(s, addr, ms);
-}
-
-uintptr
-syssemrelease(sysva_list list)
-{
-	long *addr, delta;
-	Segment *s;
-
-	addr = sysva_arg(list, long*);
-	delta = sysva_arg(list, long);
-	evenaddr((uintptr)addr);
-	s = seg(up, (uintptr)addr, 0);
-	if(s == nil || (s->type&SG_RONLY) != 0 || (uintptr)addr+sizeof(long) > s->top){
-		validaddr((uintptr)addr, sizeof(long), 1);
-		error(Ebadarg);
-	}
-	/* delta == 0 is a no-op, not a release */
-	if(delta < 0 || *addr < 0)
-		error(Ebadarg);
-	return (uintptr)semrelease(s, addr, delta);
 }
 
 /* amd64: full nanosecond value in the return register. */

@@ -9,11 +9,11 @@
  * object class hierarchy and contains no network stack.
  *
  * Historical VOBJ* syscall numbers are reserved and have no handlers.  The
- * TCP6/UDP6 object providers are gone: the permitted network boundary is raw
- * device frames/ObjectFIFO plus userspace protocol handling.  Process handle
- * introspection is SYSCTL SysctlHandleList; child wait is the direct typed
- * PROCWAIT call; device control is IOCTL.  None is a synthetic object
- * operation.
+ * TCP6/UDP6 object providers and the legacy FIFO/Pipe providers are gone: the
+ * permitted network boundary is raw device frames plus userspace protocol
+ * handling.  Process handle introspection is SYSCTL SysctlHandleList; process
+ * completion observation and control are VkindProcess INIT operations;
+ * device control is IOCTL.
  */
 #include	"u.h"
 #include	"../core/lib.h"
@@ -55,10 +55,22 @@ sysobjcreate(sysva_list list)
 		error(Ebadarg);
 	kind = (int)(flags & ObjCreateKindMask);
  if(id != nil) validaddr((uintptr)id, sizeof *id, 1);
-	if(kind == ObjKindPipe){
-		if(buf != nil || n != 0)
+	if(kind == ObjKindRegion){
+		VobjId vid;
+		int h;
+
+		if(space != 0 || buf != nil)
 			error(Ebadarg);
-		return vobjpipecreate((VobjId*)id);
+		if(n <= 0)
+			error(Ebadarg);
+		h = vobjregioncreate((uvlong)n, &vid);
+		if(id != nil){
+			validaddr((uintptr)id, sizeof(ObjId), 1);
+			((ObjId*)id)->incarnation = vid.incarnation;
+			((ObjId*)id)->space = vid.space;
+			((ObjId*)id)->oid = vid.oid;
+		}
+		return h;
 	}
 	if(kind == ObjKindGe){
   if(space > 0x7fffffffULL) error(Ebadarg);
@@ -75,10 +87,9 @@ sysobjcreate(sysva_list list)
 		}
 		return h;
 	}
-	if(kind != ObjKindBytes && kind != ObjKindFifo)
+	if(kind != ObjKindBytes)
 		error(Ebadarg);
-	return vobjcreat(kind == ObjKindFifo ? VkindFifo : VkindBytes,
-		space, buf, n, (VobjId*)id);
+	return vobjcreat(VkindBytes, space, buf, n, (VobjId*)id);
 }
 
 uintptr
@@ -162,20 +173,6 @@ sysobjbind(sysva_list list)
 	mode = sysva_arg(list, uvlong);
 	if(rolelen <= 0 || rolelen >= 32 || mode > 0x1ff) error(Ebadarg);
 	return vobjbind(handle, role, (int)rolelen, rights, (uint)mode);
-}
-
-/* Direct typed child wait.  The caller waits on its own children; no
- * synthetic ProcessSelf Handle is created or delegated. */
-uintptr
-sysprocwait(sysva_list list)
-{
-	ProcWait *w;
-
-	w = sysva_arg(list, ProcWait*);
-	if(w == nil)
-		error(Ebadarg);
-	validaddr((uintptr)w, sizeof *w, 1);
-	return vobjprocwait(w);
 }
 
 /* IOCTL(145): device configuration, control and device-specific status.
@@ -270,19 +267,11 @@ sysobjinvoke(sysva_list list)
             bounded(c.outlen, OBJ_DEVICE_LISTMAX*sizeof(ObjDeviceEntry), Ebadarg));
         break;
     case ObjOpDeviceSend:
-    {
-        unsigned int kind;
-
         if(c.out != nil || c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
-        kind = 0;
         c.result = vobjdevicesend(handle, c.in,
-            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg), &kind);
-        /* Accepted L2 bytes and a USB completion sequence are different
-         * typed results even though both fit in the I/O return slot. */
-        c.aux = kind;
+            bounded(c.inlen, OBJ_DEVICE_MAXMESSAGE, Ebadarg));
         break;
-    }
     case ObjOpDeviceRecv:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0
         || c.out == nil || c.outlen != sizeof(ObjDeviceResult))
@@ -295,11 +284,11 @@ sysobjinvoke(sysva_list list)
             error(Ebadarg);
         c.result = vobjdevicerx(handle);
         break;
-    case ObjOpFifoShutdown:
+    case ObjOpDeviceTx:
         if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
            c.arg0 != 0 || c.arg1 != 0)
             error(Ebadarg);
-        c.result = vobjfifoshutdown(handle);
+        c.result = vobjdevicetx(handle);
         break;
     case ObjOpInfo:
 		if(c.out == nil || c.outlen != sizeof(VobjInfo))
@@ -307,10 +296,11 @@ sysobjinvoke(sysva_list list)
 		vobjinfo(handle, (VobjInfo*)c.out);
 		c.result = 0;
 		break;
-	case ObjOpStat:
-		if(c.out == nil || c.outlen != sizeof(VobjFifostat))
+    case ObjOpOwnerInfo:
+		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
+		   c.out == nil || c.outlen != sizeof(ObjOwnerInfo))
 			error(Ebadarg);
-		vobjfifostat(handle, (VobjFifostat*)c.out);
+		vobjownerinfo(handle, (ObjOwnerInfo*)c.out);
 		c.result = 0;
 		break;
 	case ObjOpRead:
@@ -337,29 +327,6 @@ sysobjinvoke(sysva_list list)
 		c.result = vobjio(handle, VioWrite, c.in,
 			bounded(c.inlen, Vobjpaymax, Ebadarg), 0);
 		break;
-	case ObjOpSend:
-  if(c.arg0 > 0x7fffffffULL) error(Ebadarg);
-		c.result = vobjfifosend(handle, (int)c.arg0, c.in,
-			bounded(c.inlen, 0x7fffffff, Ebadarg));
-		break;
-	case ObjOpRecv:
-		/* The historical FIFO timeout is <0 for an infinite wait; the
-		 * OBJ adapter passes it as an unsigned -1.  Accept both signed
-		 * and 32-bit unsigned infinite sentinels and keep finite waits
-		 * bounded to the int-millisecond range. */
-		if(c.arg0 == 0xffffffffffffffffULL || c.arg0 == 0xffffffffULL)
-			tmo = -1;
-		else
-			tmo = (int)bounded(c.arg0, 0x7fffffff, Ebadarg);
-		got = 0;
-		c.result = vobjfiforecv(handle, c.out,
-			bounded(c.outlen, 0x7fffffff, Ebadarg), tmo, &got);
-		c.aux = (uvlong)got;
-		break;
-	case ObjOpSubscribe:
-		c.result = vobjfifosub(handle, c.arg0,
-			bounded(c.arg1, Vsubcapmax, Ebadarg));
-		break;
 	case ObjOpRevoke:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
 		   c.arg0 != 0 || c.arg1 != 0)
@@ -367,10 +334,44 @@ sysobjinvoke(sysva_list list)
 		vobjrevoke(handle);
 		c.result = 0;
 		break;
-	case ObjOpPipePeer:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0)
+	case ObjOpRegionMap:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   (c.arg1 & ~(uvlong)ObjRegionMapFlags) != 0)
 			error(Ebadarg);
-		c.result = vobjpipepeer(handle);
+		c.result = (long long)vobjregionmap(handle, (uintptr)c.arg0,
+			(int)c.arg1);
+		break;
+	case ObjOpRegionUnmap:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg1 != 0)
+			error(Ebadarg);
+		vobjregionunmap((uintptr)c.arg0);
+		c.result = 0;
+		break;
+	case ObjOpProcessInfo:
+		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
+		   c.out == nil || c.outlen != sizeof(ObjProcessInfo))
+			error(Ebadarg);
+		c.result = vobjprocinfo(handle, (ObjProcessInfo*)c.out);
+		break;
+	case ObjOpProcessWait:
+		if(c.in != nil || c.inlen != 0 || c.arg1 != 0 ||
+		   c.out == nil || c.outlen != sizeof(ObjProcessInfo))
+			error(Ebadarg);
+		if(c.arg0 == PROCESS_WAIT_INFINITE)
+			tmo = -1;
+		else if(c.arg0 > 0x7fffffffULL)
+			error(Ebadarg);
+		else
+			tmo = (int)c.arg0;
+		validaddr((uintptr)c.out, sizeof(ObjProcessInfo), 1);
+		c.result = vobjprocesswait(handle, (ObjProcessInfo*)c.out, tmo);
+		break;
+	case ObjOpProcessTerminate:
+		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
+		   c.arg0 != 0 || c.arg1 != 0)
+			error(Ebadarg);
+		c.result = vobjprocterminate(handle);
 		break;
 	case ObjOpPutOid:
 		/* Replace one explicitly named OID through the Space's Owrite

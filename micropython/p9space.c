@@ -21,7 +21,6 @@
 
 // Stage 4: volume bootstrap followed by OBJ Space handles
 extern long ovolopen(char *, int);
-extern long oterminate(long);
 
 /* Shared exact OSPAWN layout, including the optional extension. */
 #ifndef NO_QSTR
@@ -1088,7 +1087,9 @@ static mp_obj_t space_info(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(space_info_obj, space_info);
 
 /*
- * spawn(oid, cpu=None, argv=None, membudget=0) -> child PID.
+ * spawn(oid, cpu=None, argv=None, membudget=0) -> VkindProcess Handle.
+ * The Handle carries Vobserve|Vcontrol|Vmeta|Vdelegate and is the process
+ * authority; a numeric PID is only an identifier obtainable by observation.
  * The Space must be open; oid selects its published executable bytes.
  * cpu is an exact logical kernel CPU, or None/-1 for unpinned.  argv
  * is an iterable of str, at most 32 entries.  membudget is bytes; 0
@@ -1104,13 +1105,11 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         { MP_QSTR_handle, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_view, MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_roles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_pipes, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_env, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_stdout, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_vhandles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     struct {
-        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, pipes, env, stdout, vhandles;
+        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, env, vhandles;
     } a;
     struct { struct Ospawn base; struct Oinherit extra; } ext;
     struct Oinheritv *hv;
@@ -1180,9 +1179,8 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     hasv = a.vhandles.u_obj != mp_const_none;
     hv = (struct Oinheritv *)&ext.extra;
     if (hasv) {
-        if (a.view.u_int != 0
-        || a.stdout.u_obj != mp_const_none || a.roles.u_obj != mp_const_none
-        || a.pipes.u_obj != mp_const_none || a.env.u_obj != mp_const_none) {
+        if (a.view.u_int != 0 || a.roles.u_obj != mp_const_none
+        || a.env.u_obj != mp_const_none) {
             mp_raise_msg(&mp_type_ValueError,
                 MP_ERROR_TEXT("space.spawn: vhandles cannot be combined with other inheritance"));
         }
@@ -1210,7 +1208,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     ext.base.flags = hasv ? 2 : 1;
     if (!hasv) {
     ext.extra.view = a.view.u_int;
-    if(a.stdout.u_obj != mp_const_none) ext.extra.stdoutpipe = mp_obj_get_uint(a.stdout.u_obj);
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
@@ -1218,17 +1215,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
             if(ext.extra.nroles == 32 || strlen(s) >= 32)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn role limit"));
             strcpy(ext.extra.roles[ext.extra.nroles++], s);
-        }
-    }
-    if(a.pipes.u_obj != mp_const_none){
-        it = mp_getiter(a.pipes.u_obj, NULL);
-        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
-            size_t count; mp_obj_t *pair;
-            mp_obj_get_array(item, &count, &pair);
-            if(count != 2 || ext.extra.npipes == 16)
-                mp_raise_ValueError(MP_ERROR_TEXT("spawn pipe limit"));
-            ext.extra.pipes[ext.extra.npipes][0] = mp_obj_get_int(pair[0]);
-            ext.extra.pipes[ext.extra.npipes++][1] = mp_obj_get_int(pair[1]);
         }
     }
     if(a.env.u_obj != mp_const_none){
@@ -1264,28 +1250,13 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(space_spawn_obj, 1, space_spawn);
 
-// wait() -> (pid, status): status '' if the child succeeded
-static mp_obj_t space_wait(void) {
-    Waitmsg *w;
-    mp_obj_t t[2];
 
-    p9_space_rest();
-    if ((w = wait()) == nil) {
-        raise_err();
+// terminate(handle): authorized termination through a Vcontrol Handle
+static mp_obj_t space_terminate(mp_obj_t handle) {
+    if (!mp_obj_is_int(handle)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("space.terminate: handle must be an int"));
     }
-    t[0] = mp_obj_new_int(w->pid);
-    t[1] = mp_obj_new_str(w->msg, strlen(w->msg));
-    free(w);
-    return mp_obj_new_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(space_wait_obj, space_wait);
-
-// terminate(pid): request NDebug termination of a direct child
-static mp_obj_t space_terminate(mp_obj_t pidobj) {
-    if (!mp_obj_is_int(pidobj)) {
-        mp_raise_TypeError(MP_ERROR_TEXT("space.terminate: pid must be an int"));
-    }
-    if (oterminate(mp_obj_get_int(pidobj)) < 0) {
+    if (obj_process_terminate(mp_obj_get_int(handle)) < 0) {
         raise_err();
     }
     return mp_const_none;
@@ -1684,7 +1655,6 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_oput), MP_ROM_PTR(&space_oput_obj) },
     { MP_ROM_QSTR(MP_QSTR_oregister), MP_ROM_PTR(&space_oregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_spawn), MP_ROM_PTR(&space_spawn_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&space_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_terminate), MP_ROM_PTR(&space_terminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_CommitError), MP_ROM_PTR(&mp_type_CommitError) },
     { MP_ROM_QSTR(MP_QSTR_atomic), MP_ROM_PTR(&atomic_type) },

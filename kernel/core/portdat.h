@@ -26,11 +26,9 @@ typedef struct Queue	Queue;
 typedef struct Ref	Ref;
 typedef struct Rendez	Rendez;
 typedef struct Rendezq	Rendezq;
-typedef struct Rgrp	Rgrp;
 typedef struct RWLock	RWLock;
 typedef struct Sargs	Sargs;
 typedef struct Schedq	Schedq;
-typedef struct Sema	Sema;
 typedef struct Segment	Segment;
 typedef struct Segio	Segio;
 typedef struct Sysstat	Sysstat;
@@ -38,7 +36,9 @@ typedef struct Timer	Timer;
 typedef struct Timers	Timers;
 typedef struct Tos	Tos;
 typedef struct Uart	Uart;
-typedef struct Waitq	Waitq;
+typedef struct Procstat	Procstat;
+typedef struct Pwait	Pwait;
+typedef struct ObjProcessInfo ObjProcessInfo;
 typedef struct Watchpt	Watchpt;
 typedef struct Watchdog	Watchdog;
 
@@ -253,15 +253,18 @@ struct Pte
 /* Segment types */
 enum
 {
-	SG_TYPE		= 07,		/* Mask type of segment */
+	SG_TYPE		= 017,		/* Mask type of segment */
 	SG_TEXT		= 00,
 	SG_DATA		= 01,
 	SG_BSS		= 02,
 	SG_STACK	= 03,
-	SG_SHARED	= 04,
+	/* 04 was SG_SHARED, the named anonymous shared segment.  Volatile
+	 * capability-protected regions use SG_REGION and are never attachable
+	 * by name. */
 	SG_PHYSICAL	= 05,
 	SG_FIXED	= 06,
 	SG_STICKY	= 07,
+	SG_REGION	= 010,		/* capability-region mapping (internal) */
 
 	SG_RONLY	= 0040,		/* Segment is read only */
 	SG_CEXEC	= 0100,		/* Detach at exec */
@@ -289,15 +292,6 @@ struct Physseg
 	uintptr	size;			/* Maximum segment size in bytes */
 };
 
-struct Sema
-{
-	Rendez rz;
-	long	*addr;
-	int	waiting;
-	Sema	*next;
-	Sema	*prev;
-};
-
 struct Segment
 {
 	Ref ref;
@@ -316,8 +310,15 @@ struct Segment
 	Pte	*ssegmap[SSEGMAPSIZE];
 
 	ulong	used;
-	Sema	sema;		/* pages in use */
 
+	/*
+	 * SG_REGION mappings hold one VkindRegion reference and record whether
+	 * this address space owns the single writable mapping.  The reference
+	 * keeps the region and its Page backing alive after the process closes
+	 * its Handles; regionsegput() drops it and releases the writer slot.
+	 */
+	void	*region;
+	int	regionwriter;
 };
 
 struct Segio
@@ -338,12 +339,9 @@ struct Segio
 
 enum
 {
-	RENDLOG	=	5,
-	RENDHASH =	1<<RENDLOG,	/* Hash to lookup rendezvous tags */
 	ENVLOG =	5,
 	ENVHASH =	1<<ENVLOG,	/* Egrp hash for variable lookup */
 };
-#define REND(p,s)	((p)->rendhash[(s)&((1<<RENDLOG)-1)])
 enum
 {
 	PgrpNsSealed	= 1<<0,		/* no further namespace extension */
@@ -358,13 +356,6 @@ struct Pgrp
 #ifdef PLAN2001_LIFECYCLE_DIAG
 	ulong	diagid;			/* diagnostic identity, never an ABI handle */
 #endif
-};
-
-struct Rgrp
-{
-	Ref ref;
-	Lock lk;
-	Proc	*rendhash[RENDHASH];	/* Rendezvous tag hash */
 };
 
 struct Evalue
@@ -396,10 +387,38 @@ struct Palloc
 	Rendezq	pwait[2];		/* Queues of procs waiting for memory */
 };
 
-struct Waitq
+/*
+ * Process completion is a separate, reference-counted resource so it can
+ * outlive the scheduler Proc and its address space.  A Proc owns one
+ * reference while it exists; every VkindProcess Handle owns another.  The
+ * record is immutable after the single completion transition.
+ */
+enum {
+	PstatCreated	= 0,
+	PstatRunning	= 1,
+	PstatCompleted	= 2,
+};
+
+enum {
+	PcauseNone	= 0,
+	PcauseExit	= 1,
+	PcauseTerminated = 2,
+	PcauseFault	= 3,
+};
+
+struct Procstat
 {
-	Waitmsg	w;
-	Waitq	*next;
+	Ref	ref;
+	Lock	lk;
+	int	state;
+	int	cause;
+	ulong	pid;
+	uvlong	generation;
+	uvlong	owner;		/* immutable program/process OwnerID */
+	ulong	time[3];	/* user, sys, real (ms) */
+	char	msg[128];
+	Proc	*proc;		/* live target, nil after completion */
+	Pwait	*wait;		/* observers blocked on completion */
 };
 
 /*
@@ -435,11 +454,9 @@ enum
 	RFNOTEG		= (1<<3),
 	RFPROC		= (1<<4),
 	RFMEM		= (1<<5),
-	RFNOWAIT	= (1<<6),
 	RFCNAMEG	= (1<<10),
 	RFCENVG		= (1<<11),
 	RFCFDG		= (1<<12),
-	RFREND		= (1<<13),
 	RFNOMNT		= (1<<14),
 };
 
@@ -448,7 +465,9 @@ enum
  */
 enum
 {
-	SSEG, TSEG, DSEG, BSEG, ESEG, LSEG, SEG1, SEG2, SEG3, SEG4, NSEG
+	SSEG, TSEG, DSEG, BSEG, ESEG, LSEG, SEG1, SEG2, SEG3, SEG4,
+	SEG5, SEG6, SEG7, SEG8, SEG9, SEG10, SEG11, SEG12, SEG13, SEG14,
+	SEG15, SEG16, NSEG
 };
 
 enum
@@ -463,9 +482,7 @@ enum
 	QueueingR,
 	QueueingW,
 	Wakeme,
-	Broken,
 	Stopped,
-	Rendezvous,
 	Waitrelease,
 
 	Proc_stopme = 1, 	/* devproc requests */
@@ -529,16 +546,11 @@ struct Proc
 
 	ulong	pid;
 	ulong	noteid;		/* Equivalent of note group */
-	ulong	parentpid;
 	ulong	index;
 
-	Proc	*parent;	/* Process to send wait record on exit */
-	Lock	exl;		/* Lock count and waitq */
-	Waitq	*waitq;		/* Exited processes wait children */
-	int	nchild;		/* Number of living children */
-	int	nwait;		/* Number of uncollected wait records */
-	QLock	qwaitr;
-	Rendez	waitr;		/* Place to hang out in wait */
+	Procstat *stat;		/* completion resource, nil only before creation */
+	int	boot;		/* explicit initial/boot process, never ancestry */
+	uvlong	owner;		/* immutable process/program OwnerID */
 
 	QLock	seglock;	/* locked whenever seg[] changes */
 	Segment	*seg[NSEG];
@@ -546,10 +558,8 @@ struct Proc
 	Pgrp	*pgrp;		/* Process group for namespace */
 	Egrp 	*egrp;		/* Environment group */
 	Ref	*fdgrp;		/* legacy RFORK FD-group presence token, nil = absent */
-	int	stdoutpipe;	/* explicit Pipe-backed IOWRITE route, otherwise 0 */
 	void	*vobjhandles;	/* Unified process-local OBJ, GE and namespace Handles */
 	ulong	iomask;		/* Process-local native output grants */
-	Rgrp	*rgrp;		/* Rendez group */
 
 	int	insyscall;
 	ulong	time[6];	/* User, Sys, Real; child U, S, R */
@@ -571,6 +581,7 @@ struct Proc
 	int	privatemem;	/* proc does not let anyone read mem */
 	int	noswap;		/* permit the last free page (allocation priority) */
 	int	hang;		/* hang at next exec for debug */
+	int	terminate;	/* sticky capability termination; debug protects writes */
 	int	procctl;	/* Control for /proc debugging */
 
 	Lock	rlock;		/* sync sleep/wakeup with procinterrupt */
@@ -581,10 +592,6 @@ struct Proc
 	Proc	*palarm;	/* Next alarm time */
 	ulong	alarm;		/* Time of call */
 	int	newtlb;		/* Pager has changed my pte's, I must flush */
-
-	uintptr	rendtag;	/* Tag for rendezvous */
-	uintptr	rendval;	/* Value for rendezvous */
-	Proc	*rendhash;	/* Hash list for tag values */
 
 	Timer timer;		/* For tsleep and real-time */
 	Rendez	*trend;

@@ -8,6 +8,7 @@
 
 #include	<a.out.h>
 #include	"kbuildid.h"
+#include	"../core/owner.h"
 
 /*
  * The single native O-server bootstrap.
@@ -171,7 +172,7 @@ ouserproc(void *arg)
 	 * Only the objects needed to execute user code are initialized.
 	 * The initial process gets one empty, private Egrp so native ENV
 	 * operations work from userspace without exposing confegrp.
-	 * proc0's FD group and Rgrp, namec("#/"), cclone and init0 are
+	 * proc0's FD group, namec("#/"), cclone and init0 are
 	 * deliberately absent.  kproc has already supplied the shared
 	 * Pgrp; it remains initialized but unused here.
 	 */
@@ -185,9 +186,12 @@ ouserproc(void *arg)
 		up->egrp = nil;
 	}
 	up->egrp = newegrp();
-	up->rgrp = nil;
-	up->parent = nil;
-	up->parentpid = 0;
+	/* Explicit boot role: privileged lifecycle status is never inferred
+	 * from ancestry or from a zero parent PID.  The first userspace
+	 * process is an ordinary named owner (root), not a kernel override. */
+	ownerinit();
+	up->boot = 1;
+	up->owner = ownerroot();
 
 	ts = newseg(SG_TEXT|SG_RONLY, UTZERO, 1);
 	ts->flushme = 1;
@@ -368,6 +372,10 @@ o_user_bootstrap(void)
 		obootcpu = (int)v;
 	}
 
+	if(bootkernelonly)
+		ownerprogrambootprepare(0);
+	else
+		ownerprogrambootprepare(bootoid);
 	up = nil;
 	if(eve == nil)
 		kstrdup(&eve, "");

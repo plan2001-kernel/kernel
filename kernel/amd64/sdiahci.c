@@ -1405,7 +1405,7 @@ ledkproc(void*)
 			j++;
 		}
 	if(j == 0)
-		pexit("no work", 1);
+		pexit("no work");
 	for(i = 0; i < niadrive; i++){
 		d = iadrive[i];
 		d->led.nled = 3;		/* hardcoded */

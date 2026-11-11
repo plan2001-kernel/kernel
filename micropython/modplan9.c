@@ -9,12 +9,14 @@
 #include "py/runtime.h"
 #include "py/objstr.h"
 #include "py/objtuple.h"
+#include "shared/runtime/pyexec.h"
 #ifndef NO_QSTR
 #include "../runtime/abi/vobj.h"
 #include "../runtime/abi/obj.h"
 #include "../runtime/abi/sys.h"
 #include "../runtime/abi/sysctl.h"
 #include "../runtime/abi/ioctl.h"
+#include "p9console.h"
 #include <envapi.h>
 #include <uartapi.h>
 #endif
@@ -52,21 +54,202 @@ static mp_obj_t p9_alarm(mp_obj_t ms) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_alarm_obj, p9_alarm);
 
-// wait() -> (pid, status): status '' if the child succeeded
-static mp_obj_t p9_wait(void) {
-    Waitmsg *w;
-    mp_obj_t t[2];
 
-    p9_space_rest();
-    if ((w = wait()) == nil) {
-        raise_err();
-    }
-    t[0] = mp_obj_new_int(w->pid);
-    t[1] = mp_obj_new_str(w->msg, strlen(w->msg));
-    free(w);
-    return mp_obj_new_tuple(2, t);
+static mp_obj_t
+p9_proctuple(ObjProcessInfo *p, long result)
+{
+    mp_obj_t t[10];
+
+    t[0] = mp_obj_new_int_from_ll(p->pid);
+    t[1] = mp_obj_new_str(p->msg, p->msglen);
+    t[2] = mp_obj_new_int(p->cause);
+    t[3] = mp_obj_new_int(p->state);
+    t[4] = mp_obj_new_int_from_ull(p->generation);
+    t[5] = mp_obj_new_int_from_ull(p->time[0]);
+    t[6] = mp_obj_new_int_from_ull(p->time[1]);
+    t[7] = mp_obj_new_int_from_ull(p->time[2]);
+    t[8] = mp_obj_new_int(result);
+    t[9] = mp_obj_new_int_from_ull(p->waiters);
+    return mp_obj_new_tuple(10, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_wait_obj, p9_wait);
+
+// process_wait(handle, timeout=-1) -> typed completion tuple.  Repeatable.
+static mp_obj_t p9_processwait(size_t n, const mp_obj_t *a) {
+    ObjProcessInfo p;
+    long long timeout = n > 1 ? (long long)mp_obj_get_ll(a[1]) : -1;
+
+    if(n < 1 || n > 2)
+        mp_raise_TypeError(MP_ERROR_TEXT("process_wait: 1 or 2 arguments"));
+    memset(&p, 0, sizeof p);
+    long r = obj_process_wait(mp_obj_get_int(a[0]), &p, timeout);
+    if(r < 0)
+        raise_err();
+    return p9_proctuple(&p, r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_processwait_obj, 1, 2, p9_processwait);
+
+// process_info(handle) -> current typed process record without blocking.
+static mp_obj_t p9_processinfo(mp_obj_t handle) {
+    ObjProcessInfo p;
+
+    memset(&p, 0, sizeof p);
+    if(obj_process_info(mp_obj_get_int(handle), &p) < 0)
+        raise_err();
+    return p9_proctuple(&p, 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_processinfo_obj, p9_processinfo);
+
+// process_terminate(handle): Vcontrol-authorized lifecycle action.
+static mp_obj_t p9_processterminate(mp_obj_t handle) {
+    if(obj_process_terminate(mp_obj_get_int(handle)) < 0)
+        raise_err();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_processterminate_obj, p9_processterminate);
+
+extern long programregister(ProgramRegisterReq *, long);
+extern long programlaunch(char *, long, char **, int, struct Ospawn *);
+extern long owneridfault(int point);
+
+/* Test-only deterministic create/publication fault point. */
+static mp_obj_t p9_owneridfault(mp_obj_t point) {
+    return check(owneridfault(mp_obj_get_int(point)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_owneridfault_obj, p9_owneridfault);
+
+/* owner_info() -> (OwnerID, name).  The name is empty when this boot has
+ * no trust-domain registration for the already-resolved identity. */
+static mp_obj_t p9_ownerinfo(void) {
+    SysctlOwnerInfoRec o;
+    if(owner_info(&o) < 0) raise_err();
+    return mp_obj_new_tuple(2, (mp_obj_t[2]){
+        mp_obj_new_int_from_ull(o.owner),
+        mp_obj_new_str(o.name, strlen(o.name))});
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_ownerinfo_obj, p9_ownerinfo);
+
+/* obj_owner(handle) -> (OwnerID, name).  Reports identity only. */
+static mp_obj_t p9_objowner(mp_obj_t handle) {
+    ObjOwnerInfo o;
+    memset(&o, 0, sizeof o);
+    if(obj_owner_info(mp_obj_get_int(handle), &o) < 0) raise_err();
+    return mp_obj_new_tuple(2, (mp_obj_t[2]){
+        mp_obj_new_int_from_ull(o.owner),
+        mp_obj_new_str(o.name, strlen(o.name))});
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_objowner_obj, p9_objowner);
+
+/* program_register(name, owner_name, space_handle, source_oid,
+ *                  policy=OWNER_PROGRAM_LAUNCHABLE) -> (owner, installed_oid)
+ *
+ * Trusted boot/installation only.  The kernel installs a private
+ * owner-owned executable copy; the program's later launch never uses the
+ * requester's identity or grants access to that executable. */
+static mp_obj_t p9_programregister(size_t n, const mp_obj_t *a) {
+    ProgramRegisterReq r;
+    const char *name, *owner;
+    long ret;
+
+    if(n < 4 || n > 5)
+        mp_raise_TypeError(MP_ERROR_TEXT("program_register: 4 or 5 arguments"));
+    name = mp_obj_str_get_str(a[0]);
+    owner = mp_obj_str_get_str(a[1]);
+    if(strlen(name) >= OWNER_PROGRAM_NAME_MAX ||
+       strlen(owner) >= OWNER_NAME_MAX)
+        mp_raise_ValueError(MP_ERROR_TEXT("program_register: name too long"));
+    memset(&r, 0, sizeof r);
+    r.version = OWNER_PROGRAM_ABI_VERSION;
+    r.policy = n > 4 ? (unsigned int)mp_obj_get_int(a[4])
+                     : (unsigned int)OWNER_PROGRAM_LAUNCHABLE;
+    r.namelen = (unsigned int)strlen(name);
+    r.ownerlen = (unsigned int)strlen(owner);
+    r.space = mp_obj_get_int(a[2]);
+    r.oid = (unsigned long long)mp_obj_get_uint(a[3]);
+    memmove(r.name, name, r.namelen);
+    memmove(r.owner_name, owner, r.ownerlen);
+    ret = programregister(&r, sizeof r);
+    if(ret < 0) raise_err();
+    return mp_obj_new_tuple(2, (mp_obj_t[2]){
+        mp_obj_new_int_from_ull(r.owner),
+        mp_obj_new_int_from_ull(r.oid)});
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_programregister_obj, 4, 5,
+                                           p9_programregister);
+
+/* program_launch(name, argv=(), vhandles=(), cpu=None, membudget=0)
+ * -> observation-only VkindProcess handle. */
+static mp_obj_t p9_programlaunch(size_t n, const mp_obj_t *a) {
+    struct { struct Ospawn base; struct Oinherit extra; } ext;
+    struct Oinheritv *hv;
+    char *argv[33];
+    const char *name;
+    mp_obj_t it, item;
+    int argc, i, hasv, h;
+    size_t total;
+
+    if(n < 1 || n > 5)
+        mp_raise_TypeError(MP_ERROR_TEXT("program_launch: 1 to 5 arguments"));
+    name = mp_obj_str_get_str(a[0]);
+    if(strlen(name) == 0 || strlen(name) >= OWNER_PROGRAM_NAME_MAX)
+        mp_raise_ValueError(MP_ERROR_TEXT("program_launch: bad name"));
+    memset(&ext, 0, sizeof ext);
+    ext.base.cpu = ~0ULL;
+    if(n > 3 && a[3] != mp_const_none) {
+        int cpu = mp_obj_get_int(a[3]);
+        if(cpu < -1)
+            mp_raise_ValueError(MP_ERROR_TEXT("program_launch: cpu"));
+        if(cpu >= 0) ext.base.cpu = (unsigned long long)cpu;
+    }
+    if(n > 4 && a[4] != mp_const_none)
+        ext.base.membudget = (unsigned long long)mp_obj_get_uint(a[4]);
+    argc = 0;
+    total = 0;
+    if(n > 1 && a[1] != mp_const_none) {
+        it = mp_getiter(a[1], NULL);
+        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            const char *s;
+            if(argc >= 32)
+                mp_raise_ValueError(MP_ERROR_TEXT("program_launch: argv count"));
+            if(!mp_obj_is_str(item))
+                mp_raise_TypeError(MP_ERROR_TEXT("program_launch: argv str"));
+            s = mp_obj_str_get_str(item);
+            total += strlen(s) + 1;
+            if(total > 16*1024)
+                mp_raise_ValueError(MP_ERROR_TEXT("program_launch: argv size"));
+            argv[argc++] = (char*)s;
+        }
+    }
+    argv[argc] = NULL;
+    hasv = n > 2 && a[2] != mp_const_none;
+    hv = (struct Oinheritv *)&ext.extra;
+    if(hasv) {
+        memset(hv, 0, sizeof *hv);
+        it = mp_getiter(a[2], NULL);
+        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            mp_obj_t hi = item;
+            unsigned long long rights = 0;
+            if(!mp_obj_is_int(item)) {
+                size_t len; mp_obj_t *pair;
+                mp_obj_get_array(item, &len, &pair);
+                if(len != 2)
+                    mp_raise_ValueError(MP_ERROR_TEXT("program_launch: vhandle pair"));
+                hi = pair[0];
+                rights = (unsigned long long)mp_obj_get_int(pair[1]);
+            }
+            if(hv->nhandles >= 8)
+                mp_raise_ValueError(MP_ERROR_TEXT("program_launch: vhandle count"));
+            hv->h[hv->nhandles].handle = (unsigned long long)mp_obj_get_int(hi);
+            hv->h[hv->nhandles].rights = rights;
+            hv->nhandles++;
+        }
+    }
+    ext.base.flags = hasv ? 2 : 1;
+    h = programlaunch((char*)name, strlen(name), argv, argc, &ext.base);
+    if(h < 0) raise_err();
+    return mp_obj_new_int(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_programlaunch_obj, 1, 5,
+                                           p9_programlaunch);
 
 // rfork(flags) -> pid: name space, environment, note group and the
 // like; with RFPROC the child runs on in Python (a copy of everything)
@@ -182,12 +365,13 @@ static mp_obj_t p9_envlist(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_envlist_obj,p9_envlist);
 
 static mp_obj_t p9_procinfo(void) {
-    SysctlProcInfo i;mp_obj_t a[3];
+    SysctlProcInfo i;mp_obj_t a[4];
     if(proc_info(&i)<0)raise_err();
     a[0]=mp_obj_new_int_from_ll(i.pid);
     a[1]=mp_obj_new_int_from_ull(i.cpu);
     a[2]=mp_obj_new_int_from_ull(i.membudget);
-    return mp_obj_new_tuple(3,a);
+    a[3]=mp_obj_new_int_from_ull(i.owner);
+    return mp_obj_new_tuple(4,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_procinfo_obj,p9_procinfo);
 
@@ -275,46 +459,15 @@ static mp_obj_t p9_exits(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_exits_obj, 0, 1, p9_exits);
 
-/* Historical Pipe method names are userland adapters over the canonical
- * OBJCREATE/INVOKE/CLOSE paths; the retired numbers have no dispatch entry. */
-static mp_obj_t p9_pipenew(void) {
-    ObjId id; long a,b; mp_obj_t t[2];
-    a=obj_pipe_create(&id);
-    if(a<0)raise_err();
-    b=obj_pipe_peer((int)a);
-    if(b<0)raise_err();
-    t[0]=mp_obj_new_int((mp_int_t)a); t[1]=mp_obj_new_int((mp_int_t)b);
-    return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_pipenew_obj,p9_pipenew);
-static mp_obj_t p9_piperead(mp_obj_t h,mp_obj_t count) {
-    long n=mp_obj_get_int(count),r; vstr_t v;
-    if(n<0 || n>65536) mp_raise_ValueError(MP_ERROR_TEXT("Pipe read limit"));
-    vstr_init_len(&v,n);
-    r=obj_read(mp_obj_get_int(h),v.buf,(unsigned long long)n,0);
-    if(r<0){vstr_clear(&v);raise_err();}
-    v.len=r;return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_piperead_obj,p9_piperead);
-static mp_obj_t p9_pipewrite(mp_obj_t h,mp_obj_t data) {
-    mp_buffer_info_t b;mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
-    return check(obj_write(mp_obj_get_int(h),b.buf,(unsigned long long)b.len,0));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_pipewrite_obj,p9_pipewrite);
-static mp_obj_t p9_pipeclose(mp_obj_t h) {
-    check(obj_close(mp_obj_get_int(h)));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_pipeclose_obj,p9_pipeclose);
 /* Process creation declares Handle inheritance in the creation call itself
- * (RFORKEX or the explicit OSPAWN options); there is no pipeinherit side
+ * (RFORKEX or the explicit OSPAWN options); there is no side-channel
  * channel that could arm a later fork. */
 /* The TCP6/UDP6 object interface and its Python adapters were removed.  The
- * supported network boundary is raw device frames/ObjectFIFO with userspace
- * protocol handling. */
+ * supported network boundary is raw L2 device frames plus userspace protocol
+ * handling. */
 
-/* Historical Python object/object-FIFO method names.  They are compatibility
- * adapters over the canonical five-operation OBJ* ABI; the retired VOBJ*
- * kernel numbers have no dispatch entry. */
+/* Historical Python object method names over the canonical five-operation
+ * OBJ* ABI; the retired VOBJ* kernel numbers have no dispatch entry. */
 static mp_obj_t p9_vobjcreate(size_t n,const mp_obj_t *a){
  mp_buffer_info_t b;long r;unsigned long long space=0;
  mp_get_buffer_raise(a[0],&b,MP_BUFFER_READ);
@@ -334,20 +487,18 @@ static mp_obj_t p9_vobjread(mp_obj_t handle){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjread_obj,p9_vobjread);
 
-/* Generic metadata comes from ObjOpInfo; FIFO/subscription counters come
- * from the separate ObjOpStat contract.  This adapter keeps the historical
- * 16-tuple view for existing scripts. */
+/* Generic metadata comes from ObjOpInfo.  The historical 16-tuple positions
+ * for queue counters are retained as zero so scripts that only index the
+ * generic identity fields keep working without any FIFO provider. */
 static mp_obj_t p9_infotuple(int handle){
- VobjInfo i;VobjFifostat f;
+ VobjInfo i;
  if(obj_info(handle,&i)<0)raise_err();
- memset(&f,0,sizeof f);
- if(i.kind==VkindFifo)obj_stat(handle,&f);
  mp_obj_t a[16]={mp_obj_new_int_from_ull(i.incarnation),mp_obj_new_int_from_ull(i.space),
   mp_obj_new_int_from_ull(i.oid),mp_obj_new_int_from_ull(i.size),mp_obj_new_int_from_ull(i.holds),
-  mp_obj_new_int_from_ull(f.subscribers),mp_obj_new_int_from_ull(f.sends),mp_obj_new_int_from_ull(f.drops),
+  mp_obj_new_int(0),mp_obj_new_int(0),mp_obj_new_int(0),
   mp_obj_new_int(i.kind),mp_obj_new_int(i.flags),mp_obj_new_int(i.rights),
-  mp_obj_new_int(f.capacity),mp_obj_new_int(f.queued),mp_obj_new_int(f.sub_dropped),
-  mp_obj_new_int(f.fifo_closed),mp_obj_new_int(f.sub_closed)};
+  mp_obj_new_int(0),mp_obj_new_int(0),mp_obj_new_int(0),
+  mp_obj_new_int(0),mp_obj_new_int(0)};
  return mp_obj_new_tuple(16,a);
 }
 
@@ -358,49 +509,6 @@ static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjinfo_obj,p9_vobjinfo);
 
 static mp_obj_t p9_vobjclose(mp_obj_t h){check(obj_close(mp_obj_get_int(h)));return mp_const_none;}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjclose_obj,p9_vobjclose);
-
-static mp_obj_t p9_vobjfifocreate(size_t n,const mp_obj_t *a){
- long cap=n>0?mp_obj_get_int(a[0]):64;
- return check(obj_create(0,ObjKindFifo,NULL,(unsigned long long)cap,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfifocreate_obj,0,1,p9_vobjfifocreate);
-
-static mp_obj_t p9_vobjfifosub(size_t n,const mp_obj_t *a){
- long cap=n>2?mp_obj_get_int(a[2]):0;
- unsigned long long rights=n>1?(unsigned long long)mp_obj_get_int(a[1]):(Vrecv|Vmeta);
- return check(obj_subscribe(mp_obj_get_int(a[0]),rights,(unsigned long long)cap));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfifosub_obj,1,3,p9_vobjfifosub);
-
-static mp_obj_t p9_vobjfifosend(size_t n,const mp_obj_t *a){
- mp_buffer_info_t b;b.buf=NULL;b.len=0;
- if(n>2)mp_get_buffer_raise(a[2],&b,MP_BUFFER_READ);
- check(obj_publish(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),b.buf,(unsigned long long)b.len));
- return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfifosend_obj,2,3,p9_vobjfifosend);
-
-static mp_obj_t p9_vobjfiforecv(size_t n,const mp_obj_t *a){
- int timeout=n>1?mp_obj_get_int(a[1]):-1,envcap=n>2?mp_obj_get_int(a[2]):64;
- long got=0,r;vstr_t v;mp_obj_t t[2];
- if(envcap<0||envcap>64)mp_raise_ValueError(MP_ERROR_TEXT("vobj envelope limit"));
- vstr_init_len(&v,envcap);
- r=obj_receive(mp_obj_get_int(a[0]),envcap?v.buf:NULL,(unsigned long long)envcap,(unsigned long long)timeout,(unsigned long long*)&got);
- if(r<0){vstr_clear(&v);raise_err();}
- if(got<v.len)v.len=got;else if(got>0&&got<=envcap)v.len=got;
- t[0]=mp_obj_new_int((mp_int_t)r);t[1]=mp_obj_new_bytes_from_vstr(&v);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjfiforecv_obj,1,3,p9_vobjfiforecv);
-
-static mp_obj_t p9_vobjfifostat(mp_obj_t h){
- VobjFifostat s;if(obj_stat(mp_obj_get_int(h),&s)<0)raise_err();
- mp_obj_t a[7]={mp_obj_new_int_from_ull(s.sends),mp_obj_new_int_from_ull(s.drops),
-  mp_obj_new_int(s.subscribers),mp_obj_new_int(s.queued),mp_obj_new_int(s.capacity),
-  mp_obj_new_int(s.fifo_closed),mp_obj_new_int(s.sub_closed)};
- return mp_obj_new_tuple(7,a);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_vobjfifostat_obj,p9_vobjfifostat);
 
 static mp_obj_t p9_vobjgrant(mp_obj_t h,mp_obj_t rights){
  return check(obj_grant(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(rights)));
@@ -456,12 +564,6 @@ static mp_obj_t p9_objcreate(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objcreate_obj,0,2,p9_objcreate);
 
-static mp_obj_t p9_objfifocreate(size_t n,const mp_obj_t *a){
- long cap=n>0?mp_obj_get_int(a[0]):64;
- return check(obj_create(0,ObjKindFifo,NULL,(unsigned long long)cap,NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objfifocreate_obj,0,1,p9_objfifocreate);
-
 static mp_obj_t p9_objclose(mp_obj_t h){
  check(obj_close(mp_obj_get_int(h)));return mp_const_none;
 }
@@ -513,6 +615,18 @@ static mp_obj_t p9_objopengeospace(mp_obj_t sh,mp_obj_t oid){
  return check(obj_open(ObjOpenGeSpace,&req,sizeof req,0,NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objopengeospace_obj,p9_objopengeospace);
+
+/* obj_put_oid(space, oid, data): named persistent replace, then commit is
+ * a separate explicit operation.  Used by the ownership negative tests. */
+static mp_obj_t p9_objputoid(size_t n,const mp_obj_t *a){
+ mp_buffer_info_t b;
+ (void)n;
+ mp_get_buffer_raise(a[2],&b,MP_BUFFER_READ);
+ return check(obj_put_oid(mp_obj_get_int(a[0]),
+  (unsigned long long)mp_obj_get_uint(a[1]),b.buf,
+  (unsigned long long)b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objputoid_obj,3,3,p9_objputoid);
 
 static mp_obj_t p9_objcommit(mp_obj_t h){
  ObjCall c;
@@ -585,60 +699,16 @@ static mp_obj_t p9_objinfo(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objinfo_obj,p9_objinfo);
 
-static mp_obj_t p9_objstat(mp_obj_t h){
- VobjFifostat s;if(obj_stat(mp_obj_get_int(h),&s)<0)raise_err();
- mp_obj_t a[7]={mp_obj_new_int_from_ull(s.sends),mp_obj_new_int_from_ull(s.drops),
-  mp_obj_new_int(s.subscribers),mp_obj_new_int(s.queued),mp_obj_new_int(s.capacity),
-  mp_obj_new_int(s.fifo_closed),mp_obj_new_int(s.sub_closed)};
- return mp_obj_new_tuple(7,a);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objstat_obj,p9_objstat);
-
-static mp_obj_t p9_objsubscribe(size_t n,const mp_obj_t *a){
- unsigned long long rights=n>1?(unsigned long long)mp_obj_get_int(a[1]):(Vrecv|Vmeta);
- unsigned long long cap=n>2?(unsigned long long)mp_obj_get_int(a[2]):0;
- return check(obj_subscribe(mp_obj_get_int(a[0]),rights,cap));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objsubscribe_obj,1,3,p9_objsubscribe);
-
-static mp_obj_t p9_objpublish(size_t n,const mp_obj_t *a){
- mp_buffer_info_t b;b.buf=NULL;b.len=0;
- if(n>2)mp_get_buffer_raise(a[2],&b,MP_BUFFER_READ);
- check(obj_publish(mp_obj_get_int(a[0]),mp_obj_get_int(a[1]),b.buf,(unsigned long long)b.len));
- return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objpublish_obj,2,3,p9_objpublish);
-
-static mp_obj_t p9_objreceive(size_t n,const mp_obj_t *a){
- int timeout=n>1?mp_obj_get_int(a[1]):-1,envcap=n>2?mp_obj_get_int(a[2]):64;
- unsigned long long got=0;long r;vstr_t v;mp_obj_t t[2];
- if(envcap<0||envcap>64)mp_raise_ValueError(MP_ERROR_TEXT("obj envelope limit"));
- vstr_init_len(&v,envcap);
- r=obj_receive(mp_obj_get_int(a[0]),envcap?v.buf:NULL,(unsigned long long)envcap,
-  (unsigned long long)timeout,&got);
- if(r<0){vstr_clear(&v);raise_err();}
- if(got<v.len)v.len=got;else if(got>0&&got<=(unsigned long long)envcap)v.len=got;
- t[0]=mp_obj_new_int((mp_int_t)r);t[1]=mp_obj_new_bytes_from_vstr(&v);
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objreceive_obj,1,3,p9_objreceive);
 
 static mp_obj_t p9_objgrant(mp_obj_t h,mp_obj_t rights){
  return check(obj_grant(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(rights)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objgrant_obj,p9_objgrant);
 
-/* Capability revocation only.  A FIFO is a transport, not a revoked grant;
- * use obj_fifo_shutdown() for FIFO shutdown. */
 static mp_obj_t p9_objrevoke(mp_obj_t h){
- check(obj_revoke(mp_obj_get_int(h)));return mp_const_none;
+ return check(obj_revoke(mp_obj_get_int(h)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objrevoke_obj,p9_objrevoke);
-
-static mp_obj_t p9_objfifoshutdown(mp_obj_t h){
- check(obj_fifo_shutdown(mp_obj_get_int(h)));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objfifoshutdown_obj,p9_objfifoshutdown);
 
 static mp_obj_t p9_objlist(void){
  VobjListRec rec[32];long n,i;mp_obj_t t[32];
@@ -661,6 +731,106 @@ static mp_obj_t p9_objinvoke(size_t n,const mp_obj_t *a){
  return check(obj_invoke(mp_obj_get_int(a[0]),&c,sizeof c));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objinvoke_obj,2,5,p9_objinvoke);
+
+/* Volatile capability regions.  These helpers exercise the region mapping:
+ * create returns a writer-capable Handle, map returns a process-local virtual
+ * address, and unmap affects only the caller's address space.  region_read
+ * and region_write perform ordinary user-mode memory accesses, so writing an
+ * SG_RONLY region fails in the MMU and delivers the normal fault note. */
+static mp_obj_t p9_regioncreate(mp_obj_t size){
+ return check(obj_region_create((unsigned long long)mp_obj_get_uint(size),NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_regioncreate_obj,p9_regioncreate);
+
+static mp_obj_t p9_regionmap(size_t n,const mp_obj_t *a){
+ unsigned long long addr=n>1?(unsigned long long)mp_obj_get_uint(a[1]):0;
+ unsigned int flags=n>2?(unsigned int)mp_obj_get_uint(a[2]):0;
+ return check(obj_region_map_flags(mp_obj_get_int(a[0]),addr,flags));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_regionmap_obj,1,3,p9_regionmap);
+
+static mp_obj_t p9_regionunmap(mp_obj_t addr){
+ check(obj_region_unmap((unsigned long long)mp_obj_get_uint(addr)));
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_regionunmap_obj,p9_regionunmap);
+
+static mp_obj_t p9_regionread(mp_obj_t addr,mp_obj_t count){
+ long n=mp_obj_get_int(count);vstr_t v;
+ if(n<0||n>65536)mp_raise_ValueError(MP_ERROR_TEXT("region read limit"));
+ vstr_init_len(&v,n);
+ if(n>0)memmove(v.buf,(void*)(uintptr_t)mp_obj_get_uint(addr),(size_t)n);
+ return mp_obj_new_bytes_from_vstr(&v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionread_obj,p9_regionread);
+
+static mp_obj_t p9_regionwrite(mp_obj_t addr,mp_obj_t data){
+ mp_buffer_info_t b;
+ mp_get_buffer_raise(data,&b,MP_BUFFER_READ);
+ if(b.len>65536)mp_raise_ValueError(MP_ERROR_TEXT("region write limit"));
+ if(b.len>0)memmove((void*)(uintptr_t)mp_obj_get_uint(addr),b.buf,(size_t)b.len);
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionwrite_obj,p9_regionwrite);
+
+/* The publication word is 64-bit, naturally aligned and little-endian.
+ * These accessors are real C11/GCC atomic operations so a release publish
+ * cannot be simulated by an ordinary Python object or memmove.  Payload
+ * bytes are built with region_write; the release store of the word orders
+ * those stores before publication, and the acquire load orders the reader's
+ * later payload reads after it. */
+static unsigned long long* p9_atomicword(mp_obj_t addr){
+ unsigned long long *p=(unsigned long long*)(uintptr_t)mp_obj_get_uint(addr);
+ if(((uintptr_t)p & (sizeof *p-1))!=0)
+  mp_raise_ValueError(MP_ERROR_TEXT("aligned 64-bit publication word required"));
+ return p;
+}
+static mp_obj_t p9_regionatomicload(mp_obj_t addr){
+ return mp_obj_new_int_from_ull(__atomic_load_n(p9_atomicword(addr),__ATOMIC_ACQUIRE));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_regionatomicload_obj,p9_regionatomicload);
+static mp_obj_t p9_regionatomicstore(mp_obj_t addr,mp_obj_t value){
+ __atomic_store_n(p9_atomicword(addr),(unsigned long long)mp_obj_get_uint(value),__ATOMIC_RELEASE);
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_regionatomicstore_obj,p9_regionatomicstore);
+static mp_obj_t p9_regionwait(size_t n,const mp_obj_t *a){
+ long timeout=n>3?mp_obj_get_int(a[3]):-1;
+ return check(region_wait(mp_obj_get_uint(a[0]),mp_obj_get_uint(a[1]),
+  mp_obj_get_uint(a[2]),(long long)timeout));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_regionwait_obj,3,4,p9_regionwait);
+static mp_obj_t p9_regionwake(mp_obj_t base,mp_obj_t offset,mp_obj_t count){
+ return check(region_wake(mp_obj_get_uint(base),mp_obj_get_uint(offset),
+  mp_obj_get_uint(count)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(p9_regionwake_obj,p9_regionwake);
+
+/* Console session transport.  console_attach(in, out[, diag]) maps three
+ * capability regions: the input region is read-only here, the output and
+ * optional diagnostic regions are writable here.  repl() runs the friendly
+ * REPL over the attached session and returns when Ctrl-D ends the client. */
+static mp_obj_t p9_consoleattach(size_t n,const mp_obj_t *a){
+ long in=mp_obj_get_int(a[0]),out=mp_obj_get_int(a[1]);
+ long diag=n>2?mp_obj_get_int(a[2]):-1;
+ long r=p9_console_attach((int)in,(int)out,(int)diag);
+ if(r<0)
+  mp_raise_msg_varg(&mp_type_ValueError,
+    MP_ERROR_TEXT("console session attach failed %d: %s"),(int)r,
+    p9_console_session_error());
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_consoleattach_obj,2,3,p9_consoleattach);
+
+static mp_obj_t p9_repl(void){
+ for(;;){
+  pyexec_mode_kind=PYEXEC_MODE_FRIENDLY_REPL;
+  if(pyexec_friendly_repl()!=0)
+   break;
+ }
+ return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_repl_obj,p9_repl);
 
 /* Test-only callback address for ObjOpNotifyRegister: a real user text
  * address that accepts any note.  It is not installed by normal startup;
@@ -724,27 +894,14 @@ static mp_obj_t p9_notify_probe_framevals(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_notify_probe_framevals_obj,p9_notify_probe_framevals);
 
 /* Read-only system information (UJ1). */
-extern long syssnapshot(void*);
+
 static mp_obj_t p9_system(void){
  unsigned long long v[7];check(syssnapshot(v));mp_obj_t a[7];
  for(int i=0;i<7;i++)a[i]=mp_obj_new_int_from_ull(v[i]);return mp_obj_new_tuple(7,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_system_obj,p9_system);
 
-/* Native Pipe, UART and KBD: canonical OBJ* adapters and the historical
- * compatibility calls.  Both routes hit the same Vhand table. */
-static mp_obj_t p9_objpipecreate(void){
- ObjId id;long h=obj_pipe_create(&id);
- if(h<0)raise_err();
- mp_obj_t t[2]={mp_obj_new_int((mp_int_t)h),mp_obj_new_int_from_ull(id.oid)};
- return mp_obj_new_tuple(2,t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(p9_objpipecreate_obj,p9_objpipecreate);
-
-static mp_obj_t p9_objpipepeer(mp_obj_t h){
- return check(obj_pipe_peer(mp_obj_get_int(h)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objpipepeer_obj,p9_objpipepeer);
+/* Native UART and KBD: canonical OBJ* adapters. */
 
 static mp_obj_t p9_objuartctl(size_t n,const mp_obj_t *a){
  Uartcfg c;
@@ -837,6 +994,13 @@ static mp_obj_t p9_devicerx(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicerx_obj,p9_devicerx);
 
+/* Ethernet transmit-channel acquisition; the returned region's unique
+ * writable mapping is the frame publisher. */
+static mp_obj_t p9_devicetx(mp_obj_t h){
+ return check(obj_device_tx(mp_obj_get_int(h)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_devicetx_obj,p9_devicetx);
+
 /* Device control is IOCTL(145).  Each adapter names its own typed operation
  * and passes the real Python buffer length, so choosing a provider never
  * requires a metadata (Vmeta) lookup. */
@@ -887,7 +1051,7 @@ static mp_obj_t p9_devedetach(mp_obj_t h){
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_devedetach_obj,p9_devedetach);
 
 static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
- ObjEtherStatus i;mp_obj_t a[15];
+ ObjEtherStatus i;mp_obj_t a[17];
  if(obj_device_ether_status(mp_obj_get_int(handle),&i)<0)raise_err();
  a[0]=mp_obj_new_int(i.version);a[1]=mp_obj_new_int(i.controller);
  a[2]=mp_obj_new_int(i.minframe);a[3]=mp_obj_new_int(i.maxframe);
@@ -896,8 +1060,9 @@ static mp_obj_t p9_deviceetherinfo(mp_obj_t handle){
  a[8]=mp_obj_new_int_from_ull(i.published);a[9]=mp_obj_new_int_from_ull(i.handoff_drops);
  a[10]=mp_obj_new_int_from_ull(i.publish_drops);a[11]=mp_obj_new_int_from_ull(i.tx_accepted);
  a[12]=mp_obj_new_int_from_ull(i.highwater);a[13]=mp_obj_new_int(i.handoff_capacity);
- a[14]=mp_obj_new_int(i.handoff_queued);
- return mp_obj_new_tuple(15,a);
+ a[14]=mp_obj_new_int(i.handoff_queued);a[15]=mp_obj_new_int_from_ull(i.tx_dropped);
+ a[16]=mp_obj_new_int_from_ull(i.tx_errors);
+ return mp_obj_new_tuple(17,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_deviceetherinfo_obj,p9_deviceetherinfo);
 
@@ -920,17 +1085,6 @@ static mp_obj_t p9_segflush(mp_obj_t addr,mp_obj_t size){check(segflush((void*)(
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_segflush_obj,p9_segflush);
 static mp_obj_t p9_segdetach(mp_obj_t addr){check(segdetach(mp_obj_get_int(addr)));return mp_const_none;}
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_segdetach_obj,p9_segdetach);
-static long* p9_semaddr(mp_obj_t word){
- mp_buffer_info_t b;mp_get_buffer_raise(word,&b,MP_BUFFER_WRITE);
- if(b.len<sizeof(long) || ((uintptr_t)b.buf & (sizeof(long)-1))) mp_raise_ValueError(MP_ERROR_TEXT("aligned semaphore word required"));
- return (long*)b.buf;
-}
-static mp_obj_t p9_semacquire(mp_obj_t word,mp_obj_t block){return check(semacquire(p9_semaddr(word),mp_obj_get_int(block)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_semacquire_obj,p9_semacquire);
-static mp_obj_t p9_semrelease(mp_obj_t word,mp_obj_t delta){return check(semrelease(p9_semaddr(word),mp_obj_get_int(delta)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_semrelease_obj,p9_semrelease);
-static mp_obj_t p9_tsemacquire(mp_obj_t word,mp_obj_t ms){return check(tsemacquire(p9_semaddr(word),mp_obj_get_int(ms)));}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_tsemacquire_obj,p9_tsemacquire);
 
 /* Diagnostic raw-syscall trampoline for ABI retirement tests.  It adds no
  * kernel entry point: the number is chosen by the caller exactly as the
@@ -951,17 +1105,15 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_seg_brk), MP_ROM_PTR(&p9_segbrk_obj) },
     { MP_ROM_QSTR(MP_QSTR_seg_free), MP_ROM_PTR(&p9_segfree_obj) },
     { MP_ROM_QSTR(MP_QSTR_seg_flush), MP_ROM_PTR(&p9_segflush_obj) },
-    { MP_ROM_QSTR(MP_QSTR_seg_detach), MP_ROM_PTR(&p9_segdetach_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sem_acquire), MP_ROM_PTR(&p9_semacquire_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sem_release), MP_ROM_PTR(&p9_semrelease_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sem_timed_acquire), MP_ROM_PTR(&p9_tsemacquire_obj) },
-
-    { MP_ROM_QSTR(MP_QSTR_pipenew), MP_ROM_PTR(&p9_pipenew_obj) },
-    { MP_ROM_QSTR(MP_QSTR_piperead), MP_ROM_PTR(&p9_piperead_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pipewrite), MP_ROM_PTR(&p9_pipewrite_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pipeclose), MP_ROM_PTR(&p9_pipeclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&p9_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_seg_detach), MP_ROM_PTR(&p9_segdetach_obj) },    { MP_ROM_QSTR(MP_QSTR_alarm), MP_ROM_PTR(&p9_alarm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_process_wait), MP_ROM_PTR(&p9_processwait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_process_info), MP_ROM_PTR(&p9_processinfo_obj) },
+    { MP_ROM_QSTR(MP_QSTR_process_terminate), MP_ROM_PTR(&p9_processterminate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_owner_info), MP_ROM_PTR(&p9_ownerinfo_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_owner), MP_ROM_PTR(&p9_objowner_obj) },
+    { MP_ROM_QSTR(MP_QSTR_program_register), MP_ROM_PTR(&p9_programregister_obj) },
+    { MP_ROM_QSTR(MP_QSTR_program_launch), MP_ROM_PTR(&p9_programlaunch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ownerid_fault), MP_ROM_PTR(&p9_owneridfault_obj) },
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
     { MP_ROM_QSTR(MP_QSTR_rforkex), MP_ROM_PTR(&p9_rforkex_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },
@@ -981,23 +1133,14 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_vobjcreate), MP_ROM_PTR(&p9_vobjcreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjread), MP_ROM_PTR(&p9_vobjread_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjinfo), MP_ROM_PTR(&p9_vobjinfo_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjclose), MP_ROM_PTR(&p9_vobjclose_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifocreate), MP_ROM_PTR(&p9_vobjfifocreate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifosub), MP_ROM_PTR(&p9_vobjfifosub_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifosend), MP_ROM_PTR(&p9_vobjfifosend_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfiforecv), MP_ROM_PTR(&p9_vobjfiforecv_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjfifostat), MP_ROM_PTR(&p9_vobjfifostat_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vobjgrant), MP_ROM_PTR(&p9_vobjgrant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_vobjclose), MP_ROM_PTR(&p9_vobjclose_obj) },    { MP_ROM_QSTR(MP_QSTR_vobjgrant), MP_ROM_PTR(&p9_vobjgrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjrevoke), MP_ROM_PTR(&p9_vobjrevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjio), MP_ROM_PTR(&p9_vobjio_obj) },
     { MP_ROM_QSTR(MP_QSTR_vobjlist), MP_ROM_PTR(&p9_vobjlist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create), MP_ROM_PTR(&p9_objcreate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_fifocreate), MP_ROM_PTR(&p9_objfifocreate_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_close), MP_ROM_PTR(&p9_objclose_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_handle), MP_ROM_PTR(&p9_objopenhandle_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_binding), MP_ROM_PTR(&p9_objopenbinding_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_pipe_create), MP_ROM_PTR(&p9_objpipecreate_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_pipe_peer), MP_ROM_PTR(&p9_objpipepeer_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_ctl), MP_ROM_PTR(&p9_objuartctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_uart_status), MP_ROM_PTR(&p9_objuartstatus_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_kbd_leds), MP_ROM_PTR(&p9_objkbdleds_obj) },
@@ -1008,6 +1151,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_send), MP_ROM_PTR(&p9_devicesend_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_recv), MP_ROM_PTR(&p9_devicerecv_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_rx), MP_ROM_PTR(&p9_devicerx_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_device_tx), MP_ROM_PTR(&p9_devicetx_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ioctl), MP_ROM_PTR(&p9_deviceioctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_global_ctl), MP_ROM_PTR(&p9_devusbglobal_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
@@ -1017,6 +1161,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_namespace_current), MP_ROM_PTR(&p9_objopennamespacecurrent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_put_oid), MP_ROM_PTR(&p9_objputoid_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_bind), MP_ROM_PTR(&p9_objbind_obj) },
@@ -1024,20 +1169,29 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_read_version), MP_ROM_PTR(&p9_objreadver_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_write), MP_ROM_PTR(&p9_objwrite_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_info), MP_ROM_PTR(&p9_objinfo_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_stat), MP_ROM_PTR(&p9_objstat_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_subscribe), MP_ROM_PTR(&p9_objsubscribe_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_publish), MP_ROM_PTR(&p9_objpublish_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_receive), MP_ROM_PTR(&p9_objreceive_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_grant), MP_ROM_PTR(&p9_objgrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_revoke), MP_ROM_PTR(&p9_objrevoke_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_fifo_shutdown), MP_ROM_PTR(&p9_objfifoshutdown_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_list), MP_ROM_PTR(&p9_objlist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_invoke), MP_ROM_PTR(&p9_objinvoke_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_create), MP_ROM_PTR(&p9_regioncreate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_map), MP_ROM_PTR(&p9_regionmap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_unmap), MP_ROM_PTR(&p9_regionunmap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_read), MP_ROM_PTR(&p9_regionread_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_write), MP_ROM_PTR(&p9_regionwrite_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_atomic_load), MP_ROM_PTR(&p9_regionatomicload_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_atomic_store), MP_ROM_PTR(&p9_regionatomicstore_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_wait), MP_ROM_PTR(&p9_regionwait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_region_wake), MP_ROM_PTR(&p9_regionwake_obj) },
+    { MP_ROM_QSTR(MP_QSTR_console_attach), MP_ROM_PTR(&p9_consoleattach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_repl), MP_ROM_PTR(&p9_repl_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_addr), MP_ROM_PTR(&p9_notify_probe_addr_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_count), MP_ROM_PTR(&p9_notify_probe_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_reset), MP_ROM_PTR(&p9_notify_probe_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_lastnote), MP_ROM_PTR(&p9_notify_probe_lastnote_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_framevals), MP_ROM_PTR(&p9_notify_probe_framevals_obj) },
+    { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_AUTOSTART), MP_ROM_INT(OWNER_PROGRAM_AUTOSTART) },
+    { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_LAUNCHABLE), MP_ROM_INT(OWNER_PROGRAM_LAUNCHABLE) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_OWNER_INFO), MP_ROM_INT(ObjOpOwnerInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_BINDING), MP_ROM_INT(ObjOpenBinding) },
@@ -1061,9 +1215,22 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_NSAVE), MP_ROM_INT(NSAVE) },
     { MP_ROM_QSTR(MP_QSTR_NRSTR), MP_ROM_INT(NRSTR) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_DATA), MP_ROM_INT(OBJ_USB_EP_DATA) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_PIPE), MP_ROM_INT(ObjKindPipe) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PIPE_PEER), MP_ROM_INT(ObjOpPipePeer) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_USB_EP_CTL), MP_ROM_INT(OBJ_USB_EP_CTL) },    { MP_ROM_QSTR(MP_QSTR_VKIND_REGION), MP_ROM_INT(VkindRegion) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_PROCESS), MP_ROM_INT(VkindProcess) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_INFO), MP_ROM_INT(ObjOpProcessInfo) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_WAIT), MP_ROM_INT(ObjOpProcessWait) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PROCESS_TERMINATE), MP_ROM_INT(ObjOpProcessTerminate) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CREATED), MP_ROM_INT(ObjProcCreated) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_RUNNING), MP_ROM_INT(ObjProcRunning) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_COMPLETED), MP_ROM_INT(ObjProcCompleted) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_NONE), MP_ROM_INT(ObjProcCauseNone) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_EXIT), MP_ROM_INT(ObjProcCauseExit) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_TERMINATED), MP_ROM_INT(ObjProcCauseTerminated) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_PROC_CAUSE_FAULT), MP_ROM_INT(ObjProcCauseFault) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_REGION), MP_ROM_INT(ObjKindRegion) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_MAP), MP_ROM_INT(ObjOpRegionMap) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REGION_UNMAP), MP_ROM_INT(ObjOpRegionUnmap) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_REGION_MAP_READONLY), MP_ROM_INT(ObjRegionMapReadonly) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_CONFIG), MP_ROM_INT(IoctlUartConfig) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_UART_STATUS), MP_ROM_INT(IoctlUartStatus) },
     { MP_ROM_QSTR(MP_QSTR_IOCTL_KBD_LEDS), MP_ROM_INT(IoctlKbdLeds) },
@@ -1083,13 +1250,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_PUT_OID), MP_ROM_INT(ObjOpPutOid) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_INFO), MP_ROM_INT(ObjOpInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_READ), MP_ROM_INT(ObjOpRead) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_WRITE), MP_ROM_INT(ObjOpWrite) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_STAT), MP_ROM_INT(ObjOpStat) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SEND), MP_ROM_INT(ObjOpSend) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_RECV), MP_ROM_INT(ObjOpRecv) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SUBSCRIBE), MP_ROM_INT(ObjOpSubscribe) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_FIFO_SHUTDOWN), MP_ROM_INT(ObjOpFifoShutdown) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_WRITE), MP_ROM_INT(ObjOpWrite) },    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_REVOKE), MP_ROM_INT(ObjOpRevoke) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_DEVICE_RX), MP_ROM_INT(ObjOpDeviceRx) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_COPY), MP_ROM_INT(ObjBindCopy) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_BIND_EXCLUSIVE), MP_ROM_INT(ObjBindExclusive) },
@@ -1100,6 +1261,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VRECV), MP_ROM_INT(Vrecv) },
     { MP_ROM_QSTR(MP_QSTR_VMETA), MP_ROM_INT(Vmeta) },
     { MP_ROM_QSTR(MP_QSTR_VSUBSCRIBE), MP_ROM_INT(Vsubscribe) },
+    { MP_ROM_QSTR(MP_QSTR_VOBSERVE), MP_ROM_INT(Vobserve) },
     { MP_ROM_QSTR(MP_QSTR_VCONTROL), MP_ROM_INT(Vcontrol) },
     { MP_ROM_QSTR(MP_QSTR_VDELEGATE), MP_ROM_INT(Vdelegate) },
     { MP_ROM_QSTR(MP_QSTR_VWRITE), MP_ROM_INT(Vwrite) },
@@ -1107,12 +1269,10 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VCONNECT), MP_ROM_INT(Vconnect) },
     { MP_ROM_QSTR(MP_QSTR_VCREATE), MP_ROM_INT(Vcreate) },
     { MP_ROM_QSTR(MP_QSTR_VCOMMIT), MP_ROM_INT(Vcommit) },
+    { MP_ROM_QSTR(MP_QSTR_VEXECUTE), MP_ROM_INT(Vexecute) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_BYTES), MP_ROM_INT(VkindBytes) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_FIFO), MP_ROM_INT(VkindFifo) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_GE), MP_ROM_INT(VkindGe) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_SPACE), MP_ROM_INT(VkindSpace) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_PIPE), MP_ROM_INT(VkindPipe) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_SPACE), MP_ROM_INT(VkindSpace) },    { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_KBD), MP_ROM_INT(VkindKbd) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_USB_EP), MP_ROM_INT(VkindUsbEp) },
     { MP_ROM_QSTR(MP_QSTR_VIO_READ), MP_ROM_INT(VioRead) },
@@ -1124,11 +1284,10 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_RFFDG), MP_ROM_INT(RFFDG) },
     { MP_ROM_QSTR(MP_QSTR_RFNOTEG), MP_ROM_INT(RFNOTEG) },
     { MP_ROM_QSTR(MP_QSTR_RFPROC), MP_ROM_INT(RFPROC) },
-    { MP_ROM_QSTR(MP_QSTR_RFNOWAIT), MP_ROM_INT(RFNOWAIT) },
+    { MP_ROM_QSTR(MP_QSTR_RFMEM), MP_ROM_INT(RFMEM) },
     { MP_ROM_QSTR(MP_QSTR_RFCNAMEG), MP_ROM_INT(RFCNAMEG) },
     { MP_ROM_QSTR(MP_QSTR_RFCENVG), MP_ROM_INT(RFCENVG) },
     { MP_ROM_QSTR(MP_QSTR_RFCFDG), MP_ROM_INT(RFCFDG) },
-    { MP_ROM_QSTR(MP_QSTR_RFREND), MP_ROM_INT(RFREND) },
     { MP_ROM_QSTR(MP_QSTR_RFNOMNT), MP_ROM_INT(RFNOMNT) },
 };
 static MP_DEFINE_CONST_DICT(plan9_globals_dict, plan9_globals);

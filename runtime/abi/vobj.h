@@ -1,5 +1,5 @@
 /*
- * Volatile object and ObjectFIFO userspace ABI.
+ * Volatile object and capability-system userspace ABI.
  *
  * Fixed-width, little-endian layout for amd64.  A volatile identity is
  * (incarnation, space, oid): the incarnation is per-boot, the space is a
@@ -19,12 +19,12 @@
 /* Independent, attenuable rights on an object or subscription handle. */
 enum {
 	Vread		= 1<<0,	/* read immutable object bytes */
-	Vsend		= 1<<1,	/* publish references into a FIFO */
-	Vrecv		= 1<<2,	/* receive references from a subscription */
+	Vsend		= 1<<1,	/* send one provider message (USB/Ethernet) */
+	Vrecv		= 1<<2,	/* receive one provider completion/channel */
 	Vmeta		= 1<<3,	/* query identity/metrics */
 	Vclose		= 1<<4,	/* reserved; close is always allowed */
-	Vsubscribe	= 1<<5,	/* create independent subscriptions (TEE) */
-	Vcontrol	= 1<<6,	/* revoke/close a FIFO for all subscribers */
+	Vsubscribe	= 1<<5,	/* acquire a device receive channel */
+	Vcontrol	= 1<<6,	/* provider control or capability revocation */
 	Vdelegate	= 1<<7,	/* create attenuated handles */
 	Vwrite		= 1<<8,	/* write stream/GE bytes where the provider allows */
 	Vaccept		= 1<<9,	/* reserved historical connection right */
@@ -32,15 +32,14 @@ enum {
 	Vcreate		= 1<<11,	/* create persistent objects in an O Space */
 	Vcommit		= 1<<12,	/* commit a persistent O Space transaction */
 	Vexecute	= 1<<13,	/* execute/load a GE/O object into a child */
+	Vobserve	= 1<<14,	/* read a process completion record and wait */
 	Vall		= 0xffff,
 };
 
 enum {
 	VkindBytes	= 0,	/* immutable byte content, including empty */
-	VkindFifo	= 1,	/* message-framed ObjectFIFO */
-	VkindGe		= 3,	/* persistent GE/O object capability (2 reserved) */
+	VkindGe		= 3,	/* persistent GE/O object capability (1,2 reserved) */
 	VkindSpace	= 4,	/* authorized open O Space capability */
-	VkindPipe	= 6,	/* one end of a native byte-stream Pipe pair (5 reserved) */
 	VkindUart	= 7,	/* native UART port, opened through the device catalog */
 	VkindKbd	= 8,	/* exclusive PS/2 scan-code source */
 	VkindUsbEp	= 10,	/* catalog-opened USB endpoint reference */
@@ -49,8 +48,11 @@ enum {
 	VkindDevice = 14,
 	VkindNamespaceView = 15,	/* sealed role grants */
 	VkindNamespaceControl = 16,	/* caller's current namespace */
-	/* Kinds 2 (TCP), 5 (UDP6), 9 (USB service) and 12 (ProcessSelf) are
-	 * reserved historical identifiers and are never installed. */
+	VkindRegion	= 17,	/* volatile capability-mapped memory region */
+	VkindProcess	= 18,	/* volatile process observation/control capability */
+	/* Kinds 1 (message FIFO), 2 (TCP), 5 (UDP6), 6 (Pipe), 9 (USB service)
+	 * and 12 (ProcessSelf) are reserved historical identifiers and are
+	 * never installed. */
 };
 
 /* VOBJOPEN providers.  These select a concrete provider, not a data schema.
@@ -78,9 +80,7 @@ typedef struct VobjId {
 	unsigned long long	oid;
 } VobjId;
 
-/* VOBJINFO result: generic identity/type/size/rights metadata only.  It
- * never carries FIFO or subscription counters; those are the separate
- * VOBJFIFOSTAT contract used by ObjOpStat. */
+/* VOBJINFO result: generic identity/type/size/rights metadata only. */
 typedef struct VobjInfo {
 	unsigned long long	incarnation;
 	unsigned long long	space;
@@ -112,17 +112,5 @@ typedef struct VobjGeReq {
 	unsigned int		rights;
 	unsigned long long	oid;
 } VobjGeReq;
-
-/* VOBJFIFOSTAT result. */
-typedef struct VobjFifostat {
-	unsigned long long	sends;
-	unsigned long long	drops;
-	unsigned int		subscribers;
-	unsigned int		queued;
-	unsigned int		capacity;
-	unsigned int		fifo_closed;
-	unsigned int		sub_closed;
-	unsigned int		sub_dropped;
-} VobjFifostat;
 
 #endif /* PLAN2001_ABI_VOBJ_H */

@@ -61,25 +61,6 @@ kprocpgrp(void)
 	return p;
 }
 
-Rgrp*
-newrgrp(void)
-{
-	Rgrp *r;
-
-	r = malloc(sizeof(Rgrp));
-	if(r == nil)
-		error(Enomem);
-	r->ref.ref = 1;
-	return r;
-}
-
-void
-closergrp(Rgrp *r)
-{
-	if(decref(&r->ref) == 0)
-		free(r);
-}
-
 void
 closepgrp(Pgrp *p)
 {

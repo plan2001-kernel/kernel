@@ -18,6 +18,7 @@
 #include	"../../runtime/abi/sys.h"
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/sysctl.h"
+#include	"owner.h"
 
 static void
 sysctlbuf(void *p, uvlong n, int write)
@@ -142,9 +143,25 @@ syssysctl(sysva_list list)
 		pi.cpu = up->affinity < 0 ? ~0ULL : (uvlong)up->affinity;
 		lock(&up->memlock);
 		pi.membudget = up->membudget;
+		pi.owner = up->owner;
 		unlock(&up->memlock);
 		memmove(r.data, &pi, sizeof pi);
 		break;
+	case SysctlOwnerInfo:
+	{
+		SysctlOwnerInfoRec oi;
+
+		if(scope != SysctlScopeOwnProcess || r.name != nil ||
+		   r.namelen != 0 || r.datalen != sizeof oi || r.data == nil)
+			error(Ebadarg);
+		sysctlbuf(r.data, r.datalen, 1);
+		memset(&oi, 0, sizeof oi);
+		oi.version = SYSCTL_ABI_VERSION;
+		oi.owner = up->owner;
+		ownerinfo(up->owner, &oi.flags, oi.name, sizeof oi.name);
+		memmove(r.data, &oi, sizeof oi);
+		break;
+	}
 	default:
 		error(Ebadarg);
 	}

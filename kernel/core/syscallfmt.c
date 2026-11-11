@@ -139,7 +139,6 @@ syscallfmt(ulong syscallno, uintptr pc, sysva_list list)
 		fmtuserstring(&fmt, a, "");
 		break;
 	case SEGBRK:
-	case RENDEZVOUS:
 		v = sysva_arg(list, void*);
 		fmtprint(&fmt, "%#p ", v);
 		v = sysva_arg(list, void*);
@@ -182,7 +181,6 @@ syscallfmt(ulong syscallno, uintptr pc, sysva_list list)
 		i[0] = sysva_arg(list, int);
 		fmtprint(&fmt, "%#ux", i[0]);
 		break;
-	case PIPE:
 	case BRK_:
 		v = sysva_arg(list, int*);
 		fmtprint(&fmt, "%#p", v);
@@ -225,17 +223,6 @@ syscallfmt(ulong syscallno, uintptr pc, sysva_list list)
 		fmtuserstring(&fmt, a, " ");
 		a = sysva_arg(list, char*);
 		fmtuserstring(&fmt, a, "");
-		break;
-	case SEMACQUIRE:
-	case SEMRELEASE:
-		v = sysva_arg(list, int*);
-		i[0] = sysva_arg(list, int);
-		fmtprint(&fmt, "%#p %d", v, i[0]);
-		break;
-	case TSEMACQUIRE:
-		v = sysva_arg(list, int*);
-		l = sysva_arg(list, ulong);
-		fmtprint(&fmt, "%#p %ld", v, l);
 		break;
 	case SEEK:
 		v = sysva_arg(list, vlong*);
@@ -332,7 +319,6 @@ sysretfmt(ulong syscallno, sysva_list list, uintptr ret, uvlong start, uvlong st
 	case EXEC:
 	case SEGBRK:
 	case SEGATTACH:
-	case RENDEZVOUS:
 		if((void *)ret == (void*)-1)
 			errstr = up->syserrstr;
 		fmtprint(&fmt, " = %#p", (void *)ret);
