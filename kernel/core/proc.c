@@ -725,6 +725,7 @@ newproc(void)
 		p->pfpu.kfpstate = FPinit;
 #endif
 	p->procctl = 0;
+	p->terminate = 0;
 	p->noteureg = nil;
 	p->dbgreg = nil;
 	p->nerrlab = 0;
@@ -1389,13 +1390,34 @@ pstatwaiters(Procstat *st)
 	return n;
 }
 
+/* st->lk held; out must point to kernel-owned storage. */
+static void
+procstatcopylocked(Procstat *st, ObjProcessInfo *out)
+{
+	memset(out, 0, sizeof *out);
+	out->version = OBJ_ABI_VERSION;
+	out->state = st->state;
+	out->cause = st->cause;
+	out->pid = (long long)st->pid;
+	out->generation = st->generation;
+	out->time[0] = st->time[0];
+	out->time[1] = st->time[1];
+	out->time[2] = st->time[2];
+	out->msglen = strlen(st->msg);
+	if(out->msglen > OBJ_PROCESS_MSG_MAX)
+		out->msglen = OBJ_PROCESS_MSG_MAX;
+	memmove(out->msg, st->msg, out->msglen);
+	out->waiters = (unsigned int)pstatwaiters(st);
+}
+
 /*
  * Wait for completion, without consuming it.  Timeout is -1 for an infinite
  * wait, otherwise milliseconds.  Returns 0 when completed and 1 on timeout.
  *
  * Linearization point: after the optional sleep, the wait node is unlinked,
  * the completed/timeout decision is made and the entire ObjProcessInfo
- * snapshot is copied under the same st->lk critical section.  A completion
+ * snapshot is captured in kernel storage under the same st->lk critical
+ * section; copying to faultable user pages happens after unlocking. A completion
  * that wins that lock is therefore reported as result 0 with COMPLETED;
  * result 1 always describes a non-completed snapshot, even if completion
  * happens immediately after the lock is released.  Completion itself takes
@@ -1409,6 +1431,7 @@ int
 procstatwait(Procstat *st, ObjProcessInfo *out, long timeout)
 {
 	Pwait w;
+	ObjProcessInfo snapshot;
 	int completed;
 
 	if(st == nil || out == nil)
@@ -1433,46 +1456,24 @@ procstatwait(Procstat *st, ObjProcessInfo *out, long timeout)
 	}
 	pstatunlink(st, &w);
 	completed = st->state == PstatCompleted;
-	memset(out, 0, sizeof *out);
-	out->version = OBJ_ABI_VERSION;
-	out->state = st->state;
-	out->cause = st->cause;
-	out->pid = (long long)st->pid;
-	out->generation = st->generation;
-	out->time[0] = st->time[0];
-	out->time[1] = st->time[1];
-	out->time[2] = st->time[2];
-	out->msglen = strlen(st->msg);
-	if(out->msglen > OBJ_PROCESS_MSG_MAX)
-		out->msglen = OBJ_PROCESS_MSG_MAX;
-	memmove(out->msg, st->msg, out->msglen);
-	out->waiters = (unsigned int)pstatwaiters(st);
+	procstatcopylocked(st, &snapshot);
 	unlock(&st->lk);
 	poperror();
+	memmove(out, &snapshot, sizeof snapshot);
 	return completed ? 0 : 1;
 }
 
 void
 procstatinfo(Procstat *st, ObjProcessInfo *out)
 {
+	ObjProcessInfo snapshot;
+
 	if(st == nil || out == nil)
 		error(Ebadarg);
-	memset(out, 0, sizeof *out);
-	out->version = OBJ_ABI_VERSION;
 	lock(&st->lk);
-	out->state = st->state;
-	out->cause = st->cause;
-	out->pid = (long long)st->pid;
-	out->generation = st->generation;
-	out->time[0] = st->time[0];
-	out->time[1] = st->time[1];
-	out->time[2] = st->time[2];
-	out->msglen = strlen(st->msg);
-	if(out->msglen > OBJ_PROCESS_MSG_MAX)
-		out->msglen = OBJ_PROCESS_MSG_MAX;
-	memmove(out->msg, st->msg, out->msglen);
-	out->waiters = (unsigned int)pstatwaiters(st);
+	procstatcopylocked(st, &snapshot);
 	unlock(&st->lk);
+	memmove(out, &snapshot, sizeof snapshot);
 }
 
 /*
@@ -1480,6 +1481,9 @@ procstatinfo(Procstat *st, ObjProcessInfo *out)
  * record generation plus the live Proc pointer, never a PID.  The Proc
  * allocation is never freed, so the pointer is a safe comparison token, but
  * completion clears it and Proc reuse installs a different record.
+ * debug serializes acceptance against pexit marking exiting. Concurrent
+ * requests accepted before that point are idempotent; later requests fail
+ * with Eprocdied. Only the target exits, at its own trap/syscall boundary.
  */
 int
 procstatterminate(Procstat *st)
@@ -1501,8 +1505,18 @@ procstatterminate(Procstat *st)
 	qlock(&p->debug);
 	if(p->pid != st->pid || p->exiting || p->stat != st)
 		e = Eprocdied;
-	else
-		postnote(p, 0, "terminated", NDebug);
+	else if(p->boot || p->kp)
+		e = Eperm;
+	else {
+		/* Sticky until Proc reuse; ordinary notes cannot cancel this. */
+		p->terminate = 1;
+		/* Existing fault retry and queue-drain loops recognize exitme.
+		 * terminate remains the non-cancellable authority/cause latch. */
+		p->procctl = Proc_exitme;
+		procinterrupt(p);
+		if(p->state == Stopped)
+			ready(p);
+	}
 	qunlock(&p->debug);
 	if(e != nil)
 		error(e);
@@ -1531,14 +1545,15 @@ pexitcause(Proc *p)
 {
 	Note *n;
 
+	if(p->terminate)
+		return PcauseTerminated;
 	n = p->lastnote;
 	if(n == nil)
 		return PcauseExit;
 	if(n->flag == NExit)
 		return PcauseTerminated;
 	if(n->flag == NDebug){
-		if(strcmp(n->msg, "terminated") == 0 ||
-		   strncmp(n->msg, "sys: killed", 11) == 0)
+		if(strncmp(n->msg, "sys: killed", 11) == 0)
 			return PcauseTerminated;
 		return PcauseFault;
 	}
@@ -1576,6 +1591,8 @@ pexit(char *exitstr)
 	/* nil out all the resources under lock (free later) */
 	qlock(&up->debug);
 	up->exiting = 1;
+	if(up->terminate)
+		kstrcpy(status, "terminated", sizeof status);
 	fdgrp = up->fdgrp;
 	up->fdgrp = nil;
 	egrp = up->egrp;
@@ -1988,6 +2005,10 @@ procctl(void)
 {
 	char *state;
 
+	if(up->terminate){
+		spllo();
+		pexit("terminated");
+	}
 	switch(up->procctl) {
 	case Proc_exitbig:
 		spllo();

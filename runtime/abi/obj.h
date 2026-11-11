@@ -124,7 +124,10 @@ enum {
 	/* VkindProcess: durable, repeatable completion observation.  WAIT takes
 	 * an optional timeout in arg0 (-1 = infinite, 0 = poll) and copies an
 	 * ObjProcessInfo to out; it does not consume the completion.  TERMINATE
-	 * requires Vcontrol.  INFO requires Vmeta and never blocks. */
+	 * requires Vcontrol and requests non-cancellable termination at the target
+	 * boundary, independently of user note handlers. Repeated requests before
+	 * exit begins are idempotent; exiting/completed targets reject requests.
+	 * INFO requires Vmeta and never waits for completion. */
 	ObjOpProcessInfo = 49,
 	ObjOpProcessWait = 50,
 	ObjOpProcessTerminate = 51,

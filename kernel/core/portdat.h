@@ -578,6 +578,7 @@ struct Proc
 	int	privatemem;	/* proc does not let anyone read mem */
 	int	noswap;		/* permit the last free page (allocation priority) */
 	int	hang;		/* hang at next exec for debug */
+	int	terminate;	/* sticky capability termination; debug protects writes */
 	int	procctl;	/* Control for /proc debugging */
 
 	Lock	rlock;		/* sync sleep/wakeup with procinterrupt */

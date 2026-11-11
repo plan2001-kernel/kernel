@@ -692,7 +692,12 @@ vobjprocinfo(int handle, ObjProcessInfo *out)
 		vobjput(o);
 		error(Ebadarg);
 	}
+	if(waserror()){
+		vobjput(o);
+		nexterror();
+	}
 	procstatinfo(o->priv, out);
+	poperror();
 	vobjput(o);
 	return 0;
 }

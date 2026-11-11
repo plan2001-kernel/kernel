@@ -175,7 +175,7 @@ trap(Ureg *ureg)
 
 	splhi();
 	if(user){
-		if(up->procctl || up->nnote)
+		if(up->terminate || up->procctl || up->nnote)
 			donotify(ureg);
 		kexit(ureg);
 	}
@@ -196,7 +196,7 @@ syscall(Ureg *ureg)
 	if(dosyscall(scallnr, (Sargs*)(ureg->sp+BY2WD), &ureg->r0))
 		returnto(noteret);
 
-	if(up->procctl || up->nnote)
+	if(up->terminate || up->procctl || up->nnote)
 		donotify(ureg);
 
 	if(up->delaysched)

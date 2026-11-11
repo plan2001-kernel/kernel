@@ -1629,6 +1629,12 @@ sysexits(sysva_list list)
 		}
 
 	}
+	/* An explicit EXITS is voluntary even after a handled note.  A sticky
+	 * capability termination still takes precedence in pexitcause(). */
+	qlock(&up->debug);
+	freenote(up->lastnote);
+	up->lastnote = nil;
+	qunlock(&up->debug);
 	pexit(status);
 }
 
@@ -1709,7 +1715,7 @@ donotify(Ureg *ureg)
 	Ureg *nureg;
 	char *msg;
 
-	if(up->procctl)
+	if(up->terminate || up->procctl)
 		procctl();
 	if(up->nnote == 0)
 		return 0;
@@ -1813,6 +1819,7 @@ syssegbrk(sysva_list list)
 		case SG_STACK:
 		case SG_PHYSICAL:
 		case SG_FIXED:
+		case SG_REGION:	/* fixed capability backing and writer lifetime */
 		case SG_STICKY:
 			error(Ebadarg);
 		default:

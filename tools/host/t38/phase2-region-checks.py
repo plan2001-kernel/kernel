@@ -250,6 +250,10 @@ def run():
     p.obj_close(reg)
     ok(p.region_read(addr, 19) == b'persist-after-close',
        'mapping survives closing its Handle')
+    denied(lambda: p.seg_brk(addr, addr), 'SEGBRK cannot empty a region')
+    denied(lambda: p.seg_brk(addr, addr + 8192), 'SEGBRK cannot grow a region')
+    ok(p.region_read(addr, 19) == b'persist-after-close',
+       'rejected region resize preserves mapped backing and writer lifetime')
     denied(lambda: p.seg_free(addr, 4096), 'SEGFREE cannot split a region')
     denied(lambda: p.seg_detach(addr), 'SEGDETACH cannot remove a region')
     denied(lambda: p.region_map(reg), 'stale Handle after close')

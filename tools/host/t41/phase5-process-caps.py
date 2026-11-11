@@ -287,6 +287,44 @@ p.exits(@STATUS@)
 '''
 
 
+# A real SysV notify callback executes NOTED(NCONT).  Prove delivery with a
+# recoverable bad-pointer syscall before waiting with a live writer mapping.
+IGNORE_TERMINATION = PRELUDE + r'''
+p.sysraw(28, p.notify_probe_addr())
+try:
+    p.sysraw(41, 1, 128)
+except OSError:
+    pass
+if p.notify_probe_count() != 1:
+    fail('notify-not-executed')
+rw = findregion(True)
+base = p.region_map(rw, 0x48000000)
+publish(base, b'IGNORE-READY')
+while True:
+    try:
+        p.region_wait(base, 0, 1, -1)
+    except OSError:
+        pass  # deliberately ignore an ordinary note interrupt too
+    # No ordinary callback or interrupted syscall may resume this target.
+    p.region_write(base + 128, b'ESCAPED')
+'''
+
+RACING_CONTROLLER = PRELUDE + r'''
+ctl = findkind(p.VKIND_PROCESS, p.VCONTROL)
+rh = findregion(False)
+base = p.region_map(rh, 0x49000000)
+while p.region_atomic_load(base) == 0:
+    p.region_wait(base, 0, 0, -1)
+try:
+    p.process_terminate(ctl)
+except OSError as e:
+    # The other controller may already have completed termination.
+    if 'process exited' not in str(e):
+        fail('controller:' + str(e))
+p.exits('')
+'''
+
+
 class Counter:
     def __init__(self):
         self.n = 0
@@ -476,6 +514,100 @@ def run():
     p.region_unmap(tbase)
     p.obj_close(ro)
     p.obj_close(reg)
+
+    # Handled faults must not taint a later explicit voluntary exit.
+    handled = PRELUDE + r'''
+p.sysraw(28, p.notify_probe_addr())
+try:
+    p.sysraw(41, 1, 128)
+except OSError:
+    pass
+if p.notify_probe_count() != 1:
+    fail('handled-note-not-run')
+p.exits('handled-note-exit')
+'''
+    h = spawn(handled)
+    result = rec_ok(h, p.OBJ_PROC_CAUSE_EXIT, 'handled-note-exit')
+    ok(result[1] == 'handled-note-exit',
+       'explicit exit after handled NCONT note has voluntary cause')
+    p.obj_close(h)
+
+    # --- cold user pages through the actual OBJINVOKE ABI -----------------
+    import struct
+    cold_live = p.system()[5]
+    b = spawn(LONG_STATUS_CHILD.replace('@STATUS@', repr('cold-snapshot')))
+    expected = rec_ok(b, p.OBJ_PROC_CAUSE_EXIT, 'cold-target')
+    callbase = p.seg_attach('memory', 4096)
+
+    def rawprocess(op, dest, timeout=0):
+        # ObjCall: no Python object/wrapper touches dest before kernel entry.
+        call = struct.pack('<IIIIQQQQQQqQII', 1, op, 0, 0,
+                           timeout, 0, 0, 0, dest, 200, 0, 0, 0, 0)
+        p.region_write(callbase, call)
+        return p.sysraw(140, b, callbase, len(call))
+
+    for op in (49, 50):
+        for offset in (0, 4096 - 96):
+            destbase = p.seg_attach('memory', 8192)
+            dest = destbase + offset
+            rawprocess(op, dest)
+            data = p.region_read(dest, 200)
+            fields = struct.unpack('<IIIIqQQQQII', data[:64])
+            ok(fields[1] == p.OBJ_PROC_COMPLETED and
+               fields[2] == expected[2] and fields[4] == expected[0] and
+               fields[5] == expected[4] and
+               data[64:64 + fields[9]] == b'cold-snapshot' and
+               struct.unpack('<I', data[192:196])[0] == 0,
+               'cold user pages op=%d offset=%d snapshot intact' % (op, offset))
+            p.seg_detach(destbase)
+    # Install the proven NCONT handler so invalid addresses report OSError.
+    p.sysraw(28, p.notify_probe_addr())
+    for op in (49, 50):
+        denied(lambda: rawprocess(op, 1), 'bad process destination')
+    ok(p.process_info(b)[9] == 0, 'bad INFO/WAIT destinations leave no waiters')
+    p.sysraw(28, 0)
+    p.seg_detach(callbase)
+    p.obj_close(b)
+
+    ok(p.system()[5] == cold_live,
+       'cold and bad destination calls release completion references')
+
+    # --- non-cancellable termination, racing controllers, writer release --
+    reg = p.region_create(8192)
+    ro = p.obj_open_handle(reg, RO)
+    base = p.region_map(ro, 0x4f310000)
+    b = spawn(IGNORE_TERMINATION, ((reg, RW),), cpu=1)
+    waitword(base, 1, 'genuine NCONT handler and writer ready')
+    ok(rstr(base) == b'IGNORE-READY',
+       'target executed a genuine userspace NCONT callback before blocking')
+    go = p.region_create(8192)
+    goro = p.obj_open_handle(go, RO)
+    gobase = p.region_map(go, 0x4f320000)
+    ctl = p.obj_open_handle(b, CT)
+    c = spawn(RACING_CONTROLLER, ((ctl, CT), (goro, RO)), cpu=0)
+    d = spawn(RACING_CONTROLLER, ((ctl, CT), (goro, RO)), cpu=2)
+    p.sleep(200)  # allow both independent controllers to enter their GO wait
+    p.region_atomic_store(gobase, 1)
+    p.region_wake(gobase, 0, 0x7fffffff)
+    ok(p.region_wait(base, 0, 1, 10000) == 3,
+       'forced writer termination wakes RO reader with writer-release status')
+    rb = rec(b, 10000)
+    ok(rb[8] == 0 and rb[2] == p.OBJ_PROC_CAUSE_TERMINATED and
+       rb[1] == 'terminated', 'NCONT cannot cancel capability termination')
+    ok(p.region_read(base + 128, 7) == b'\0' * 7 and
+       rstr(base) == b'IGNORE-READY',
+       'target cannot resume after termination; immutable RO payload survives')
+    denied(lambda: p.process_terminate(b), 'already completed target')
+    for h in (c, d):
+        rc = rec(h, 10000)
+        ok(rc[8] == 0 and rc[1] == '', 'racing controller completes cleanly')
+        p.obj_close(h)
+    p.obj_close(ctl)
+    p.obj_close(b)
+    p.region_unmap(base)
+    p.region_unmap(gobase)
+    for h in (ro, reg, goro, go):
+        p.obj_close(h)
 
     # --- genuine Handle-slot reuse cannot revive stale authority ----------
     first = spawn(SHORT.replace('@MS@', '0'))
