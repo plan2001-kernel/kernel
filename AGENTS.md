@@ -3,11 +3,22 @@
 ## Target architecture and mandatory deletion
 
 Read [the authoritative target architecture](docs/ARCHITECTURE.md) first.
-Processes are independent execution contexts related only by explicit
-capabilities and shared resources, not privileged parent/child ancestry.
-Memory-publication IPC uses one RW writer, authorized RO readers, atomic
-release/acquire publication and blocking WAIT/WAKE. Do not reintroduce a
-generic kernel message FIFO, Pipe or payload-copy IPC primitive.
+The **target** is one immutable named owner per object: only processes
+running under that owner have direct object access; no Unix UID/GID, rwx,
+ACL, general capability-rights, borrowing, ownership transfer or grants.
+Programs own their executable and persistent objects. Boot/installation
+registration binds program name, owner, image and startup policy; a launch
+request runs the registered program under **its own** identity, not the
+requester's, and grants no parent/child or launcher-control relationship.
+
+**Do not redesign IPC.** The current memory-publication regions, one RW
+publisher, RO observers and WAIT/WAKE are retained. Data received through
+that mechanism belongs to the recipient as a data value; the original
+publisher-owned object is unchanged. Do not introduce generic kernel
+message queues, send/receive system calls, FIFO, Pipe, copy transport
+or new user programs as part of this ownership-documentation change.
+Capability ABI details in current-implementation sections remain factual
+until a separately authorized implementation migration.
 
 Whenever a phase replaces a mechanism, **remove** its obsolete code, public
 ABI, wrappers/adapters, dormant providers, fixtures, tests and docs. List
@@ -29,10 +40,10 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 ## Scope
 
 - Persistent identity: GE/O `(SpaceID, OID)`. There is no native hierarchical
-  filesystem namespace. Runtime objects, capabilities, and stored occurrences
+  filesystem namespace. Runtime objects, owner identities and stored occurrences
   are different concepts.
-- Runtime namespace views may bind authorized capabilities independently of
-  process ancestry. Current `Pgrp/OContext` sharing, copying and lifetime
+- Runtime namespace views are lookup/data constructs and do not grant
+  ownership. Current `Pgrp/OContext` sharing, copying and lifetime
   are implementation facts, not target obligations.
 - A persistent GE/O object may hold a *namespace definition* for userspace to
   construct or modify an authorized runtime view. The definition is data,
@@ -41,7 +52,7 @@ AMD64 or claim that ARM64 userspace and drivers already work.
   namespace-construction functionality.
 - Persistent GE/O object *sets* and OID membership relations are separate from
   process namespaces. Set membership, union, intersection and difference are
-  future data/query semantics, not automatic capability grants or required
+  future data/query semantics, not ownership grants or required
   persistent namespace machinery.
 - Never implement or restore kernel hashtag/tag semantics: no `#`-tag
   validation, tag-name objects, tag-specific indexes or tag query parsers.
@@ -49,10 +60,10 @@ AMD64 or claim that ARM64 userspace and drivers already work.
   or set membership never grants authority. Do not preserve legacy GE R1
   hashtag metadata for compatibility: experimental volumes may be reamed
   and objects reimported.
-- Object operations belong to resources with object/capability semantics.
+- Object operations belong to owned resources with object semantics.
   Direct scalar syscalls are allowed. **There is no fixed syscall-count goal.**
 - Keep low-level device mechanisms. Ethernet receive and console sessions
-  use capability regions with WAIT/WAKE; USB control has distinct
+  currently use capability regions with WAIT/WAKE; USB control has distinct
   synchronous completion. Do not introduce another universal kernel message
   queue, FIFO or Pipe.
 - MicroPython is the current userspace proof of concept. Do not add larger

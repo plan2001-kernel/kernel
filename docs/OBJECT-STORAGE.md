@@ -22,14 +22,14 @@ uninterpreted occurrence; a contextual object is its interpretation or role.
 
 ## Stored definitions versus runtime namespaces
 
-A target process namespace is a volatile capability view independent of
-process ancestry, not a GE/O object or persistent OID. The current AMD64
-implementation uses reference-counted `Pgrp/OContext`. GE/O may store a
-namespace *definition* as ordinary object content, to be interpreted by
-an authorized userspace loader when constructing or modifying a view.
-The definition's format and loader are not yet implemented. A definition
-is neither a snapshot of live Handles nor an authority token: loading it
-does not grant access to the objects it mentions.
+A target namespace is a lookup/data view independent of process ancestry,
+not a source of ownership. Objects have one named owner from creation until
+destruction; an OID or namespace label grants no ownership. The current
+AMD64 implementation uses capability-based reference-counted `Pgrp/OContext`;
+that is an implementation fact, not the single-owner target. GE/O may store
+namespace definitions as ordinary object data for future userspace
+interpretation; the format and loader are not implemented, and loading
+such data cannot grant access to objects it references.
 
 Persistent GE/O objects may also represent object sets and OID membership
 relations as separate data. Those are not process namespaces and are not

@@ -7,10 +7,13 @@
 Plan 2001-kernel is an **experimental object-oriented operating-system
 kernel** under development for AMD64 and ARM64. Persistent GE/O storage
 uses SpaceIDs and OIDs rather than a native hierarchical filesystem.
-Current object Handles, capability-mapped memory regions and region-scoped
-WAIT/WAKE provide the capability-aware runtime and device interfaces. The
-[architecture](docs/ARCHITECTURE.md) treats processes as independent contexts
-connected by explicit grants. MicroPython is the userspace proof of concept.
+The [target architecture](docs/ARCHITECTURE.md) assigns each object one
+immutable named owner. Registered programs own their executable and data;
+launching one creates an independent process under the program's owner.
+Owners offer data to other owners through the existing region-based IPC,
+not ownership or direct access to their objects. Current capability-based
+Handles and region-scoped WAIT/WAKE are implementation facts, not the
+completed single-owner model. MicroPython is the userspace proof of concept.
 
 The current **AMD64** kernel has a working full-system path, including GE/O
 and MicroPython. The **ARM64** implementation has an early UEFI/QEMU boot

@@ -7,65 +7,56 @@ historical ABI compatibility obligation.
 
 ## Authority and identity
 
-Persistent GE/O `(SpaceID, OID)`, volatile memory-region identity, volatile
-process identity, process-local Handle and device identity are distinct.
-Knowledge of a value or pointer grants no access. Object operations suit
-resources with identity, ownership, rights, delegation and lifetime; direct
-scalar operations are allowed. The kernel checks authority at each call and
-mapping. Revocation, final close and process exit must have explicit lifetime
-effects. GE/O object content and versions remain independent of volatile
-process and region lifetimes.
+The [target architecture](ARCHITECTURE.md) defines a single, named,
+immutable `OwnerID` per object. A process may directly operate only on
+objects with the same owner. There are no Unix UID/GID, rwx, ACL, general
+capability-rights, delegated ownership or ownership transfer in the target.
+An OID, name or namespace relation gives identity, never ownership.
 
-Namespace roles can provide authorized lookup independent of ancestry. A
-stored definition is data interpreted by a future userspace loader, not an
-authority token. Role removal does not automatically revoke capabilities
-already opened from that role. GE/O object-set membership is also data, not
-a grant. The current `Pgrp/OContext` implementation is described below,
-not required as the target namespace structure.
+Trusted registration binds a program name, owner, executable object and
+startup policy. The kernel loads registered executables at boot or by
+a launch request and starts an independent process as the **program's**
+owner, never as the requester. Start does not grant access to the image,
+other program objects or the process lifecycle. Voluntary stop and object
+modification are owner-handled requests over the existing IPC.
+
+The sender keeps ownership of its original data. Received data values
+belong entirely to the receiver, and stored received objects are owned
+by the receiver. No owner is allowed to directly change another's objects.
 
 ## Capability regions and publication (target)
 
-Create a volatile region under a capability; grant at most one writer RW
-mapping and any number of authorized reader RO mappings, including processes
-with no launch relationship. Rights are per process and per mapping. Maps may
-have different virtual addresses, so published references are region-relative
-offsets or another mapping-independent form. Specify bounds/alignment,
-reference ownership, unmap, writer death, revocation and reclamation. A live
-reader retains a published immutable snapshot after writer death unless an
-explicit revocation rule invalidates it. A known PID, OID or raw pointer
-cannot obtain or identify a mapping capability.
+The **existing** region-publication mechanism is the IPC transport: one
+writable publisher, read-only observers, release/acquire publication and
+blocking REGIONWAIT/REGIONWAKE. Do **not** add a message/send/receive
+transport, FIFO, Pipe, ObjectFIFO or generic kernel IPC provider.
 
-Writer stores data, then atomically publishes a version/reference with release
-ordering. Reader acquires that word before dereferencing a complete immutable
-snapshot. Small deltas and references to large immutable records avoid
-compulsory full copies. Ownership of storage and reuse must prevent mutation
-of a snapshot while readers may still observe it. FIFO, RPC, mailbox, stream
-and broadcast formats belong in userspace.
+Observer mappings show offered data, not direct object-management authority
+over the publisher's underlying region. Any independently stored received
+data belongs to the receiver. Keep RO/RW page protection, bounds/alignment
+checks, region-relative offsets, unique writer mapping, lifetime cleanup,
+atomic WAIT enrollment and WAKE notifications. WAKE carries no payload.
+These memory-safety mechanisms are distinct from general rwx/capability
+object permissions.
 
-Proposed `WAIT(region, offset, expected, timeout)` accepts an RO mapping and
-atomically checks the word against `expected` while registering the waiter,
-so a publication/WAKE cannot be lost between check and sleep. Proposed
-`WAKE(region, offset, count)` signals waiters but carries no data. Calls may
-return for changed value, spurious wake, timeout or interrupt; readers always
-recheck. Validation covers capability, region bounds, word alignment and
-mapping rights. Kernel locks/queues can implement the synchronization.
-Names, arguments and return codes are not a finalized syscall ABI. Region
-creation/mapping may use existing object and VM families; no generic kernel
-message provider is required.
+The capability handles, mapping rights and revocation in CURRENT
+IMPLEMENTATION remain accurate descriptions of the presently implemented
+ABI, **not** target permission requirements.
 
-## Process lifecycle and grants (target)
+## Process lifecycle and registered launch (target)
 
-Process creation makes an independent schedulable context, with explicit
-initial capabilities and namespace view. It does not confer lasting control
-or exclusive observation on the launcher. Process-control grants permit
-authorized management and may be delegated with attenuation. Separate
-observation grants permit multiple holders to observe completion, including
-after the launcher exits. Specify completion-state retention, notification,
-revocation and cleanup by explicit references. A process may outlive its
-launcher. Boot/initial status has an explicit designation, not a special
-`parentpid == 0` lifecycle rule. A kernel process-tree database is not
-required. Namespace sharing, if offered, is an explicit resource grant rather
-than inherited parent/child policy.
+Program code, configuration and stored data belong to the program's named
+owner. Trusted boot/installation registration supplies the image OID and
+startup policy. Kernel boot starts autostart entries, and a launch request
+resolves a registered entry and starts an independent process under the
+program's owner. There is no parent/child lifecycle, launcher-owned process
+or implicit launcher control.
+
+Process completion, voluntary exit, forced termination and cleanup remain
+separate kernel lifecycle operations. The process owner and explicit kernel
+lifecycle policy govern forced termination; userspace may offer a shutdown
+request that the program can choose to act upon. No new syscall family,
+permission-grant model or IPC transport is required by this design.
 
 ## CURRENT IMPLEMENTATION
 

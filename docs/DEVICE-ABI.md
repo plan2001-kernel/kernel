@@ -1,8 +1,10 @@
 # Common device authority and provider semantics
 
-This document records the current AMD64 device-opening contract in
-`runtime/abi/obj.h` and authority rules to retain during migration. The
-[target architecture](ARCHITECTURE.md) governs future transport.
+This document records the **current** AMD64 device-opening contract in
+`runtime/abi/obj.h`, including existing capability rights. Those rights
+are not requirements of the single-owner target. The
+[target architecture](ARCHITECTURE.md) retains the current region-based
+IPC transport; it does not require a replacement.
 
 ## One catalog authority chain
 
