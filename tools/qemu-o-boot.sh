@@ -723,7 +723,7 @@ qob_boot_once()
 	local qlog="$QOB_OUT/qemu-$tag.log"
 	local bootlog="$QOB_OUT/boot-$tag.log"
 	local vars="$QOB_OUT/vars-$tag.fd"
-	local mondir mon pid status start_ts deadline success_seen=0 injected=0
+	local mondir mon pid status start_ts deadline success_seen=0 injected=0 crashed=0
 	local reason= result=fail
 
 	qob_safe_rm "$serial"
@@ -784,6 +784,15 @@ qob_boot_once()
 		fi
 		if [ "$success_seen" = 0 ] && qob_has_ere "$success" "$serial"; then
 			success_seen=1
+			if [ "$mode" = crash ]; then
+				qob_say "crash checkpoint reached; SIGKILL without guest shutdown"
+				kill -9 "$pid" 2>/dev/null || true
+				wait "$pid" 2>/dev/null || true
+				QOB_CURRENT_PID=
+				crashed=1
+				result=pass
+				break
+			fi
 			if [ -z "${QOB_ACCEL_SELECTED:-}" ]; then
 				QOB_ACCEL_SELECTED=$(qob_monitor_query "$mon" "info kvm" 2>/dev/null |
 					tr '\n' ' ')
@@ -873,7 +882,7 @@ qob_boot_once()
 		sleep 0.2
 	done
 
-	if [ "$result" = pass ] && ! kill -0 "$pid" 2>/dev/null; then
+	if [ "$result" = pass ] && [ "$crashed" = 0 ] && ! kill -0 "$pid" 2>/dev/null; then
 		wait "$pid" 2>/dev/null || status=$?
 		QOB_CURRENT_PID=
 		result=fail
@@ -883,7 +892,7 @@ qob_boot_once()
 		qob_say "interactive QEMU is running as pid $pid for ${QOB_HOLD}s"
 		sleep "$QOB_HOLD" || true
 	fi
-	if [ "$result" = pass ] && ! kill -0 "$pid" 2>/dev/null; then
+	if [ "$result" = pass ] && [ "$crashed" = 0 ] && ! kill -0 "$pid" 2>/dev/null; then
 		wait "$pid" 2>/dev/null || status=$?
 		QOB_CURRENT_PID=
 		result=fail

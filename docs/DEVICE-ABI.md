@@ -2,7 +2,11 @@
 
 This document records the **current** AMD64 device-opening contract in
 `runtime/abi/obj.h`, including existing capability rights. Those rights
-are not requirements of the single-owner target. The
+are not requirements of the single-owner target. Device objects also carry
+the creating process's immutable `OwnerID`; direct device operations and
+control require the same owner even when a Handle has been delegated. The
+receiving side of an offered publication region may map it read-only across
+owners. The
 [target architecture](ARCHITECTURE.md) retains the current region-based
 IPC transport; it does not require a replacement.
 

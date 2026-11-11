@@ -226,6 +226,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	if(up->procctl == Proc_tracesyscall)
 		p->procctl = Proc_tracesyscall;
 	p->kp = 0;
+	p->owner = up->owner;	/* one trust domain across fork */
 
 	/*
 	 * Craft a return frame which will cause the child to pop out of
@@ -254,6 +255,7 @@ kernrforkcore(ulong flag, Vinherit *vi)
 
 	pid = pidalloc(p);
 	p->stat = procstatnew(pid);
+	p->stat->owner = p->owner;
 	p->stat->proc = p;
 
 #ifdef	PLAN2001_LIFECYCLE_DIAG
@@ -1051,7 +1053,8 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
  * setup) is unchanged.
  */
 long
-kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
+kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
+	uvlong owner, int internal)
 {
 	struct Ospawn opt;
 	Proc *p;
@@ -1217,7 +1220,10 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 		}
 	}
 
-	n = osgetobjecthand(soh, oid, &buf, Objspawnmax, &ver);
+	if(internal)
+		n = osgetobjecthandk(soh, oid, &buf, Objspawnmax, &ver);
+	else
+		n = osgetobjecthand(soh, oid, &buf, Objspawnmax, &ver);
 	if(n < 0)
 		error("oexec: no such object");
 	if(n > Objspawnmax)
@@ -1269,6 +1275,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->notepending = 0;
 	p->lastnote = nil;
 	p->kp = 0;
+	p->owner = owner;	/* registry owner or caller trust domain */
 	p->procmode = up->procmode;
 	p->privatemem = 0;
 	p->noswap = 0;
@@ -1300,6 +1307,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt)
 	p->pcycles = -p->kentry;
 	pid = pidalloc(p);
 	p->stat = procstatnew(pid);
+	p->stat->owner = p->owner;
 	p->stat->proc = p;
 	qunlock(&p->debug);
 	lockp = 0;
@@ -1583,7 +1591,7 @@ sysspawn(sysva_list list)
 		oshandput(soh);
 		nexterror();
 	}
-	handle = kernospawn(soh, oid, argv, argc, opt);
+	handle = kernospawn(soh, oid, argv, argc, opt, up->owner, 0);
 	poperror();
 	oshandput(soh);
 	return (uintptr)handle;

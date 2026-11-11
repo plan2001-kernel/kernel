@@ -296,6 +296,13 @@ sysobjinvoke(sysva_list list)
 		vobjinfo(handle, (VobjInfo*)c.out);
 		c.result = 0;
 		break;
+    case ObjOpOwnerInfo:
+		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
+		   c.out == nil || c.outlen != sizeof(ObjOwnerInfo))
+			error(Ebadarg);
+		vobjownerinfo(handle, (ObjOwnerInfo*)c.out);
+		c.result = 0;
+		break;
 	case ObjOpRead:
 	{
 		uvlong ver;

@@ -107,6 +107,150 @@ static mp_obj_t p9_processterminate(mp_obj_t handle) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_processterminate_obj, p9_processterminate);
 
+extern long programregister(ProgramRegisterReq *, long);
+extern long programlaunch(char *, long, char **, int, struct Ospawn *);
+extern long owneridfault(int point);
+
+/* Test-only deterministic create/publication fault point. */
+static mp_obj_t p9_owneridfault(mp_obj_t point) {
+    return check(owneridfault(mp_obj_get_int(point)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_owneridfault_obj, p9_owneridfault);
+
+/* owner_info() -> (OwnerID, name).  The name is empty when this boot has
+ * no trust-domain registration for the already-resolved identity. */
+static mp_obj_t p9_ownerinfo(void) {
+    SysctlOwnerInfoRec o;
+    if(owner_info(&o) < 0) raise_err();
+    return mp_obj_new_tuple(2, (mp_obj_t[2]){
+        mp_obj_new_int_from_ull(o.owner),
+        mp_obj_new_str(o.name, strlen(o.name))});
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_ownerinfo_obj, p9_ownerinfo);
+
+/* obj_owner(handle) -> (OwnerID, name).  Reports identity only. */
+static mp_obj_t p9_objowner(mp_obj_t handle) {
+    ObjOwnerInfo o;
+    memset(&o, 0, sizeof o);
+    if(obj_owner_info(mp_obj_get_int(handle), &o) < 0) raise_err();
+    return mp_obj_new_tuple(2, (mp_obj_t[2]){
+        mp_obj_new_int_from_ull(o.owner),
+        mp_obj_new_str(o.name, strlen(o.name))});
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_objowner_obj, p9_objowner);
+
+/* program_register(name, owner_name, space_handle, source_oid,
+ *                  policy=OWNER_PROGRAM_LAUNCHABLE) -> (owner, installed_oid)
+ *
+ * Trusted boot/installation only.  The kernel installs a private
+ * owner-owned executable copy; the program's later launch never uses the
+ * requester's identity or grants access to that executable. */
+static mp_obj_t p9_programregister(size_t n, const mp_obj_t *a) {
+    ProgramRegisterReq r;
+    const char *name, *owner;
+    long ret;
+
+    if(n < 4 || n > 5)
+        mp_raise_TypeError(MP_ERROR_TEXT("program_register: 4 or 5 arguments"));
+    name = mp_obj_str_get_str(a[0]);
+    owner = mp_obj_str_get_str(a[1]);
+    if(strlen(name) >= OWNER_PROGRAM_NAME_MAX ||
+       strlen(owner) >= OWNER_NAME_MAX)
+        mp_raise_ValueError(MP_ERROR_TEXT("program_register: name too long"));
+    memset(&r, 0, sizeof r);
+    r.version = OWNER_PROGRAM_ABI_VERSION;
+    r.policy = n > 4 ? (unsigned int)mp_obj_get_int(a[4])
+                     : (unsigned int)OWNER_PROGRAM_LAUNCHABLE;
+    r.namelen = (unsigned int)strlen(name);
+    r.ownerlen = (unsigned int)strlen(owner);
+    r.space = mp_obj_get_int(a[2]);
+    r.oid = (unsigned long long)mp_obj_get_uint(a[3]);
+    memmove(r.name, name, r.namelen);
+    memmove(r.owner_name, owner, r.ownerlen);
+    ret = programregister(&r, sizeof r);
+    if(ret < 0) raise_err();
+    return mp_obj_new_tuple(2, (mp_obj_t[2]){
+        mp_obj_new_int_from_ull(r.owner),
+        mp_obj_new_int_from_ull(r.oid)});
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_programregister_obj, 4, 5,
+                                           p9_programregister);
+
+/* program_launch(name, argv=(), vhandles=(), cpu=None, membudget=0)
+ * -> observation-only VkindProcess handle. */
+static mp_obj_t p9_programlaunch(size_t n, const mp_obj_t *a) {
+    struct { struct Ospawn base; struct Oinherit extra; } ext;
+    struct Oinheritv *hv;
+    char *argv[33];
+    const char *name;
+    mp_obj_t it, item;
+    int argc, i, hasv, h;
+    size_t total;
+
+    if(n < 1 || n > 5)
+        mp_raise_TypeError(MP_ERROR_TEXT("program_launch: 1 to 5 arguments"));
+    name = mp_obj_str_get_str(a[0]);
+    if(strlen(name) == 0 || strlen(name) >= OWNER_PROGRAM_NAME_MAX)
+        mp_raise_ValueError(MP_ERROR_TEXT("program_launch: bad name"));
+    memset(&ext, 0, sizeof ext);
+    ext.base.cpu = ~0ULL;
+    if(n > 3 && a[3] != mp_const_none) {
+        int cpu = mp_obj_get_int(a[3]);
+        if(cpu < -1)
+            mp_raise_ValueError(MP_ERROR_TEXT("program_launch: cpu"));
+        if(cpu >= 0) ext.base.cpu = (unsigned long long)cpu;
+    }
+    if(n > 4 && a[4] != mp_const_none)
+        ext.base.membudget = (unsigned long long)mp_obj_get_uint(a[4]);
+    argc = 0;
+    total = 0;
+    if(n > 1 && a[1] != mp_const_none) {
+        it = mp_getiter(a[1], NULL);
+        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            const char *s;
+            if(argc >= 32)
+                mp_raise_ValueError(MP_ERROR_TEXT("program_launch: argv count"));
+            if(!mp_obj_is_str(item))
+                mp_raise_TypeError(MP_ERROR_TEXT("program_launch: argv str"));
+            s = mp_obj_str_get_str(item);
+            total += strlen(s) + 1;
+            if(total > 16*1024)
+                mp_raise_ValueError(MP_ERROR_TEXT("program_launch: argv size"));
+            argv[argc++] = (char*)s;
+        }
+    }
+    argv[argc] = NULL;
+    hasv = n > 2 && a[2] != mp_const_none;
+    hv = (struct Oinheritv *)&ext.extra;
+    if(hasv) {
+        memset(hv, 0, sizeof *hv);
+        it = mp_getiter(a[2], NULL);
+        while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+            mp_obj_t hi = item;
+            unsigned long long rights = 0;
+            if(!mp_obj_is_int(item)) {
+                size_t len; mp_obj_t *pair;
+                mp_obj_get_array(item, &len, &pair);
+                if(len != 2)
+                    mp_raise_ValueError(MP_ERROR_TEXT("program_launch: vhandle pair"));
+                hi = pair[0];
+                rights = (unsigned long long)mp_obj_get_int(pair[1]);
+            }
+            if(hv->nhandles >= 8)
+                mp_raise_ValueError(MP_ERROR_TEXT("program_launch: vhandle count"));
+            hv->h[hv->nhandles].handle = (unsigned long long)mp_obj_get_int(hi);
+            hv->h[hv->nhandles].rights = rights;
+            hv->nhandles++;
+        }
+    }
+    ext.base.flags = hasv ? 2 : 1;
+    h = programlaunch((char*)name, strlen(name), argv, argc, &ext.base);
+    if(h < 0) raise_err();
+    return mp_obj_new_int(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_programlaunch_obj, 1, 5,
+                                           p9_programlaunch);
+
 // rfork(flags) -> pid: name space, environment, note group and the
 // like; with RFPROC the child runs on in Python (a copy of everything)
 static mp_obj_t p9_rfork(mp_obj_t flags) {
@@ -221,12 +365,13 @@ static mp_obj_t p9_envlist(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_envlist_obj,p9_envlist);
 
 static mp_obj_t p9_procinfo(void) {
-    SysctlProcInfo i;mp_obj_t a[3];
+    SysctlProcInfo i;mp_obj_t a[4];
     if(proc_info(&i)<0)raise_err();
     a[0]=mp_obj_new_int_from_ll(i.pid);
     a[1]=mp_obj_new_int_from_ull(i.cpu);
     a[2]=mp_obj_new_int_from_ull(i.membudget);
-    return mp_obj_new_tuple(3,a);
+    a[3]=mp_obj_new_int_from_ull(i.owner);
+    return mp_obj_new_tuple(4,a);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_procinfo_obj,p9_procinfo);
 
@@ -470,6 +615,18 @@ static mp_obj_t p9_objopengeospace(mp_obj_t sh,mp_obj_t oid){
  return check(obj_open(ObjOpenGeSpace,&req,sizeof req,0,NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(p9_objopengeospace_obj,p9_objopengeospace);
+
+/* obj_put_oid(space, oid, data): named persistent replace, then commit is
+ * a separate explicit operation.  Used by the ownership negative tests. */
+static mp_obj_t p9_objputoid(size_t n,const mp_obj_t *a){
+ mp_buffer_info_t b;
+ (void)n;
+ mp_get_buffer_raise(a[2],&b,MP_BUFFER_READ);
+ return check(obj_put_oid(mp_obj_get_int(a[0]),
+  (unsigned long long)mp_obj_get_uint(a[1]),b.buf,
+  (unsigned long long)b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objputoid_obj,3,3,p9_objputoid);
 
 static mp_obj_t p9_objcommit(mp_obj_t h){
  ObjCall c;
@@ -952,6 +1109,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_process_wait), MP_ROM_PTR(&p9_processwait_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_info), MP_ROM_PTR(&p9_processinfo_obj) },
     { MP_ROM_QSTR(MP_QSTR_process_terminate), MP_ROM_PTR(&p9_processterminate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_owner_info), MP_ROM_PTR(&p9_ownerinfo_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_owner), MP_ROM_PTR(&p9_objowner_obj) },
+    { MP_ROM_QSTR(MP_QSTR_program_register), MP_ROM_PTR(&p9_programregister_obj) },
+    { MP_ROM_QSTR(MP_QSTR_program_launch), MP_ROM_PTR(&p9_programlaunch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ownerid_fault), MP_ROM_PTR(&p9_owneridfault_obj) },
     { MP_ROM_QSTR(MP_QSTR_rfork), MP_ROM_PTR(&p9_rfork_obj) },
     { MP_ROM_QSTR(MP_QSTR_rforkex), MP_ROM_PTR(&p9_rforkex_obj) },
     { MP_ROM_QSTR(MP_QSTR_envget), MP_ROM_PTR(&p9_envget_obj) },
@@ -999,6 +1161,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_namespace_current), MP_ROM_PTR(&p9_objopennamespacecurrent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_put_oid), MP_ROM_PTR(&p9_objputoid_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_bind), MP_ROM_PTR(&p9_objbind_obj) },
@@ -1026,6 +1189,9 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_notify_probe_reset), MP_ROM_PTR(&p9_notify_probe_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_lastnote), MP_ROM_PTR(&p9_notify_probe_lastnote_obj) },
     { MP_ROM_QSTR(MP_QSTR_notify_probe_framevals), MP_ROM_PTR(&p9_notify_probe_framevals_obj) },
+    { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_AUTOSTART), MP_ROM_INT(OWNER_PROGRAM_AUTOSTART) },
+    { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_LAUNCHABLE), MP_ROM_INT(OWNER_PROGRAM_LAUNCHABLE) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_OWNER_INFO), MP_ROM_INT(ObjOpOwnerInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_BINDING), MP_ROM_INT(ObjOpenBinding) },

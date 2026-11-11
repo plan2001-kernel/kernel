@@ -717,6 +717,7 @@ newproc(void)
 	p->psstate = nil;
 	p->stat = nil;
 	p->boot = 0;
+	p->owner = 0;
 	p->state = New;
 		p->pfpu.fpstate = FPinit;
 #ifdef KFPSTATE

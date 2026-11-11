@@ -118,3 +118,18 @@ proc_info(SysctlProcInfo *out)
 	r.datalen = sizeof *out;
 	return sysctl(SysctlScopeOwnProcess, SysctlProcessInfo, &r, sizeof r);
 }
+
+long
+owner_info(SysctlOwnerInfoRec *out)
+{
+	SysctlReq r;
+
+	if(out == nil)
+		return -1;
+	memset(out, 0, sizeof *out);
+	memset(&r, 0, sizeof r);
+	r.version = SYSCTL_ABI_VERSION;
+	r.data = out;
+	r.datalen = sizeof *out;
+	return sysctl(SysctlScopeOwnProcess, SysctlOwnerInfo, &r, sizeof r);
+}

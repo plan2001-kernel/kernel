@@ -348,6 +348,19 @@ obj_process_info(int handle, ObjProcessInfo *out)
 }
 
 long
+obj_owner_info(int handle, ObjOwnerInfo *out)
+{
+	ObjCall c;
+
+	memset(&c, 0, sizeof c);
+	c.version = OBJ_ABI_VERSION;
+	c.op = ObjOpOwnerInfo;
+	c.out = out;
+	c.outlen = sizeof *out;
+	return obj_invoke(handle, &c, sizeof c);
+}
+
+long
 obj_process_wait(int handle, ObjProcessInfo *out, long long timeout)
 {
 	ObjCall c;
