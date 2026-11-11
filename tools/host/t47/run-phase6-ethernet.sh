@@ -24,17 +24,26 @@ kill -0 "$T47_PEER_PID"
 ( qob_main --no-build --accel kvm:tcg --cpus 2 --ncpu 2 --obootcpu 0 --timeout 600 \
   --udp6-peer 31401:31402 --obootexec 0x4f45584543000003 \
   --no-repl --output-dir "$T47_OUT" --expect '^T47-RESULT [0-9]+ PASS' "$@" )
+kill "$T47_PEER_PID" 2>/dev/null || true
+wait "$T47_PEER_PID" 2>/dev/null || true
 python3 - "$T47_OUT" <<'PY'
 import re,sys
 from pathlib import Path
 out=Path(sys.argv[1]); s=(out/'boot-boot.log').read_text()
-checks=re.findall(r'T47-PASS (\d+) (.*)',s)
+checks=re.findall(r'T47-PASS (\d+) (.*)$',s,re.M)
 result=re.search(r'^T47-RESULT (\d+) PASS$',s,re.M)
-assert result, 'missing executed result'
-assert [int(n) for n,_ in checks]==list(range(1,int(result[1])+1))
+assert result, 'missing executed PASS result'
+assert int(result[1])==len(checks), 'result count does not match executed assertions'
+assert [int(n) for n,_ in checks]==list(range(1,len(checks)+1)), 'non-sequential assertions'
+assert not re.search(r'T47-FAIL ',s,re.M), 'a T47 assertion failed'
+assert not re.search(r'Traceback|AssertionError|init: run failed|^panic:|PLAN2001-O: BOOT FAILED',s,re.M), 'fatal failure marker in boot log'
 peer=(out/'peer.log').read_text()
-assert 'Traceback' not in peer
-assert 'PEER-RX 60 88b5 ' in peer and 'PEER-TX 60 88b5 ' in peer
-assert not re.search(r'^Traceback|^AssertionError|^panic:',s,re.M)
+assert 'Traceback' not in peer and 'AssertionError' not in peer, 'external peer failed'
+for et in ('0800','86dd','0806','88b5'):
+    assert re.search(r'^PEER-RX 60 %s '%et,peer,re.M), 'missing peer RX record for '+et
+    assert re.search(r'^PEER-TX 60 %s '%et,peer,re.M), 'missing peer TX record for '+et
+assert re.search(r'^PEER-RX 1514 0800 ',peer,re.M), 'missing large peer RX record'
+assert re.search(r'^PEER-TX 1514 0800 ',peer,re.M), 'missing large peer TX record'
+assert '5434372d4f525048414e' not in peer, 'orphaned detached TX frame reached the peer'
 print('Verified',len(checks),'executed assertions and external peer records')
 PY
