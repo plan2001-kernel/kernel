@@ -161,11 +161,46 @@ reclaimer(void*)
 	}
 }
 
-Page*
-newpage(uintptr va, QLock *locked)
+static Page*
+pagepop(uintptr va)
 {
 	Page *p, **l;
 	int color;
+
+	if(palloc.head == nil)
+		return nil;
+
+	/* First try for our colour */
+	color = getpgcolor(va);
+	l = &palloc.head;
+	for(p = *l; p != nil; p = p->next){
+		if(p->color == color)
+			break;
+		l = &p->next;
+	}
+
+	if(p == nil) {
+		l = &palloc.head;
+		p = *l;
+	}
+
+	*l = p->next;
+	p->next = nil;
+	if(--palloc.freecount <= reclaimcfg.highwater)
+		kickreclaim();
+
+	p->ref.ref = 1;
+	p->va = va;
+	p->modref = 0;
+	inittxtflush(p);
+
+	return p;
+}
+
+Page*
+newpage(uintptr va, QLock *locked)
+{
+	Page *p;
 
 	lock(&palloc.lk);
 	while(!havepages(nil)){
@@ -204,34 +239,25 @@ newpage(uintptr va, QLock *locked)
 		lock(&palloc.lk);
 	}
 
-	/* First try for our colour */
-	color = getpgcolor(va);
-	l = &palloc.head;
-	for(p = *l; p != nil; p = p->next){
-		if(p->color == color)
-			break;
-		l = &p->next;
-	}
+	p = pagepop(va);
+	unlock(&palloc.lk);
+	return p;
+}
 
-	if(p == nil) {
-		l = &palloc.head;
-		p = *l;
-	}
+/*
+ * Allocate one page without sleeping for reclaim.  An explicit allocation
+ * that has a process budget and an error return (capability-region backing)
+ * must fail with Enomem instead of blocking forever when memory is exhausted.
+ * The ordinary fault path keeps using newpage().
+ */
+Page*
+newpagenowait(uintptr va)
+{
+	Page *p;
 
-	*l = p->next;
-	p->next = nil;
-	if(--palloc.freecount <= reclaimcfg.highwater){
-		unlock(&palloc.lk);
-		kickreclaim();
-	} else {
-		unlock(&palloc.lk);
-	}
-
-	p->ref.ref = 1;
-	p->va = va;
-	p->modref = 0;
-	inittxtflush(p);
-
+	lock(&palloc.lk);
+	p = pagepop(va);
+	unlock(&palloc.lk);
 	return p;
 }
 

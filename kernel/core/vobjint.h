@@ -134,7 +134,7 @@ int	vobjlist(void *buf, long n);
  */
 int	vobjregioncreate(uvlong size, VobjId *id);
 Vobj*	vobjregionalloc(uvlong size);
-uintptr	vobjregionmap(int handle, uintptr va);
+uintptr	vobjregionmap(int handle, uintptr va, int flags);
 int	vobjregionunmap(uintptr va);
 int	vobjregionwriterhold(Vobj *o);
 int	vobjregionringinit(Vobj *o);

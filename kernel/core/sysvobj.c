@@ -123,15 +123,16 @@ struct Wwait {
 };
 struct Vregion {
 	/*
-	 * Lock order is lk -> waitlk.  lk may be held while waitlk is taken
-	 * (mapping admission); waitlk is never held while taking lk, and no
-	 * code sleeps while holding either.  writeractive, writergen and the
-	 * wait queue share waitlk so the writer-presence check, word compare
-	 * and waiter enrollment are one linearizable step with writer-slot
-	 * acquisition and release.
+	 * Lock order is lk -> waitlk.  lk serializes mapping admission and
+	 * revocation so a successful revoke cannot race with a new mapping;
+	 * waitlk protects the state observed by WAIT.  waitlk is never held
+	 * while taking lk, and no code sleeps while holding either.
+	 * writeractive, writergen, revoked and the wait queue share waitlk so
+	 * the writer-presence check, word compare and waiter enrollment are
+	 * one linearizable step with writer-slot acquisition and release.
 	 */
-	QLock	lk;		/* protects revoked and mapping admission */
-	Lock	waitlk;		/* protects writeractive, writergen and waiters */
+	QLock	lk;		/* serializes mapping admission and revocation */
+	Lock	waitlk;		/* protects writeractive, writergen, revoked, waiters */
 	Page	**pages;	/* one reference per backing page */
 	ulong	npages;
 	int	writeractive;	/* a writable mapping is installed */
@@ -139,6 +140,9 @@ struct Vregion {
 	int	revoked;	/* no further mappings through any Handle */
 	Wwait	*waiters;	/* queue of blocked publication waiters */
 	Wwait	*waittail;
+	Proc	*chargeproc;	/* creator charged for the backing, for comparison */
+	ulong	chargepid;	/* creator's PID, for comparison only */
+	ulong	chargepages;	/* pages charged at creation, 0 if uncharged */
 };
 
 typedef struct Vdevice Vdevice;
@@ -332,6 +336,15 @@ vobjput(Vobj *o)
 		for(i = 0; i < r->npages; i++)
 			if(r->pages[i] != nil)
 				putpage(r->pages[i]);
+		/*
+		 * Backing pages are charged once to the creating process.
+		 * Refund only in that same process; a region that outlived its
+		 * creator must not consume another process's budget, and the
+		 * creator's charge disappears with its Proc.
+		 */
+		if(r->chargepages != 0 && up != nil &&
+		   up == r->chargeproc && up->pid == r->chargepid)
+			procmemdecommit(up, r->chargepages);
 		free(r->pages);
 		free(r);
 	}else if(o->kind == VkindProcess && o->priv != nil){
@@ -563,13 +576,29 @@ vobjregionalloc(uvlong size)
 	Vregion *r;
 	Page *p;
 	ulong npages, i;
+	int charged;
 
 	if(size == 0 || size > Vregionmax || (size % BY2PG) != 0)
 		error(Ebadarg);
 	npages = (ulong)(size / BY2PG);
+	charged = 0;
+	/*
+	 * Region backing is allocated eagerly, so commit it to the creating
+	 * process's budget here rather than only when someone maps it.  A
+	 * process that creates many regions cannot consume unbounded physical
+	 * memory without mapping them.
+	 */
+	if(up != nil){
+		if(procmemcommit(up, npages) < 0)
+			error(Enomem);
+		charged = 1;
+	}
 	o = vobjnewkind(VkindRegion, (ulong)size);
-	if(o == nil)
+	if(o == nil){
+		if(charged)
+			procmemdecommit(up, npages);
 		error(Enomem);
+	}
 	r = nil;
 	if(waserror()){
 		if(r != nil){
@@ -581,6 +610,8 @@ vobjregionalloc(uvlong size)
 			free(r);
 			o->priv = nil;
 		}
+		if(charged)
+			procmemdecommit(up, npages);
 		vobjput(o);
 		nexterror();
 	}
@@ -592,7 +623,11 @@ vobjregionalloc(uvlong size)
 	if(r->pages == nil)
 		error(Enomem);
 	for(i = 0; i < npages; i++){
-		p = newpage(0, nil);
+		/*
+		 * Explicit allocation has an error return: do not sleep
+		 * indefinitely for reclaim under memory pressure.
+		 */
+		p = newpagenowait(0);
 		if(p == nil)
 			error(Enomem);
 		r->pages[i] = fillpage(p, 0);
@@ -600,6 +635,10 @@ vobjregionalloc(uvlong size)
 	o->priv = r;
 	o->flags = 0;			/* a region payload is mutable */
 	o->provider = VkindRegion;
+	r->chargeproc = up;
+	r->chargepid = up != nil ? up->pid : 0;
+	r->chargepages = charged ? npages : 0;
+	charged = 0;
 	poperror();
 	return o;
 }
@@ -639,28 +678,34 @@ vobjregioncreate(uvlong size, VobjId *id)
  * Clear the writer-active state and notify every registered waiter as one
  * linearizable step.  This is the writer-slot release path: a waiter either
  * enrolled before this critical section (and is marked writer/3 here) or
- * checks writeractive after it (and returns 3 immediately).  A replacement
- * writer acquiring the slot later cannot erase the notification because the
- * woken/writer flags are already set.  Wakeup never sleeps, so holding the
- * queue spinlock cannot deadlock the sleeper: the sleeper releases the queue
- * before it sleeps.
+ * observes writeractive == 0 and writergen != 0 afterwards and returns 3
+ * immediately.  A replacement writer acquiring the slot later cannot erase
+ * the notification because the woken/writer flags are already set.  Wakeup
+ * never sleeps, so holding the queue spinlock cannot deadlock the sleeper:
+ * the sleeper releases the queue before it sleeps.
  */
 static void
-regionwriterdown(Vregion *r)
+regionnotify(Vregion *r, int writer)
 {
 	Wwait *w;
 
-	lock(&r->waitlk);
-	r->writeractive = 0;
-	r->writergen++;
 	for(w = r->waiters; w != nil; w = w->next){
 		if(w->woken)
 			continue;
 		w->woken = 1;
-		w->writer = 1;
+		w->writer = writer;
 		coherence();
 		wakeup(&w->rz);
 	}
+}
+
+static void
+regionwriterdown(Vregion *r)
+{
+	lock(&r->waitlk);
+	r->writeractive = 0;
+	r->writergen++;
+	regionnotify(r, 1);
 	unlock(&r->waitlk);
 }
 
@@ -722,15 +767,17 @@ regionfillseg(Segment *s, Vregion *r)
 }
 
 uintptr
-vobjregionmap(int handle, uintptr va)
+vobjregionmap(int handle, uintptr va, int flags)
 {
 	Vhand *h;
 	Vobj *o;
 	Vregion *r;
 	Segment *s, *os;
 	ulong npages, len;
-	int sno, write, charged, writerheld;
+	int sno, write, writerheld;
 
+	if((flags & ~ObjRegionMapFlags) != 0)
+		error(Ebadarg);
 	h = vlookup(handle, Vread);
 	o = h->obj;
 	if(o->kind != VkindRegion || o->priv == nil){
@@ -740,12 +787,12 @@ vobjregionmap(int handle, uintptr va)
 	r = o->priv;
 	npages = r->npages;
 	len = npages*BY2PG;
-	write = (h->rights & Vwrite) != 0;
+	write = (h->rights & Vwrite) != 0 &&
+		(flags & ObjRegionMapReadonly) == 0;
 	if(va != 0 && (va >= USTKTOP || (va & (BY2PG-1)) != 0)){
 		vhandput(h);
 		error(Ebadarg);
 	}
-	charged = 0;
 	writerheld = 0;
 	s = nil;
 	qlock(&up->seglock);
@@ -754,8 +801,6 @@ vobjregionmap(int handle, uintptr va)
 			putseg(s);	/* also releases the writer slot */
 		else if(writerheld)
 			regionwriterdown(r);
-		if(charged)
-			procmemdecommit(up, npages);
 		qunlock(&up->seglock);
 		vhandput(h);
 		nexterror();
@@ -778,9 +823,11 @@ vobjregionmap(int handle, uintptr va)
 		error(Ebadarg);
 	if(isoverlap(va, len) != nil)
 		error(Esoverlap);
-	if(procmemcommit(up, npages) < 0)
-		error(Enovmem);
-	charged = 1;
+	/*
+	 * The backing pages were committed when the region was created; a
+	 * mapping only installs PTEs over those pages and does not allocate
+	 * more memory, so it is not charged a second time.
+	 */
 	s = newseg(SG_REGION|SG_NOEXEC|(write? 0: SG_RONLY), va, npages);
 	s->region = o;
 	incref(&o->ref);
@@ -790,15 +837,16 @@ vobjregionmap(int handle, uintptr va)
 	 * The revoked check, writer-slot reservation and Segment publication
 	 * are one critical section so a successful revoke can never race with
 	 * a new mapping.  Existing mappings are deliberately unaffected.
-	 * writeractive is changed under waitlk so WAIT's writer-presence
-	 * check and enrollment are linearizable with this acquisition.
+	 * waitlk makes the writer-presence check and enrollment linearizable
+	 * with this acquisition and with WAIT.
 	 */
 	qlock(&r->lk);
+	lock(&r->waitlk);
 	if(r->revoked){
+		unlock(&r->waitlk);
 		qunlock(&r->lk);
 		error(Eperm);
 	}
-	lock(&r->waitlk);
 	if(write && r->writeractive){
 		unlock(&r->waitlk);
 		qunlock(&r->lk);
@@ -813,7 +861,6 @@ vobjregionmap(int handle, uintptr va)
 	unlock(&r->waitlk);
 	up->seg[sno] = s;
 	s = nil;
-	charged = 0;
 	writerheld = 0;			/* the installed Segment owns the slot */
 	qunlock(&r->lk);
 	qunlock(&up->seglock);
@@ -839,13 +886,12 @@ vobjregionunmap(uintptr va)
 	for(i = 0; i < NSEG; i++){
 		s = up->seg[i];
 		if(s != nil && (s->type&SG_TYPE) == SG_REGION &&
-		   va >= s->base && va < s->top)
+		   va == s->base)
 			break;
 	}
 	if(i == NSEG)
 		error(Ebadarg);
 	up->seg[i] = nil;
-	procmemdecommit(up, s->size);
 	putseg(s);
 	qunlock(&up->seglock);
 	poperror();
@@ -864,19 +910,23 @@ vobjregionunmap(uintptr va)
  *
  * WAIT order is fixed.  Validate the mapping and word; compare the word and
  * return 0 immediately if it differs (even with no writer).  If it still
- * matches and no writer mapping is active, return 3 immediately even for an
- * infinite timeout.  If a writer is active and timeout == 0, return 2;
- * otherwise enroll and sleep.  Status 3 is "no active writer at check time or
- * the previous writer was released", not permanent region destruction: a new
- * writer may map later unless revocation denies new maps.
+ * matches and no writer mapping is active, distinguish the two temporal
+ * states with writergen: a writer that was present and released (or a
+ * revoked region) returns 3 immediately, while a region that has never had a
+ * writer enrolls and blocks so the reader does not have to poll for writer
+ * appearance.  If a writer is active and timeout == 0, return 2; otherwise
+ * enroll and sleep.  Status 3 is therefore "the previous writer was released
+ * or revocation ended this mapping set", not permanent region destruction: a
+ * new writer may map later unless revocation denies new maps.
  *
  * The queue is keyed by the live region object plus its region-relative
  * offset.  A mapping reference keeps the region alive for the whole wait, so
  * a Vregion address cannot be reused behind a registered waiter (no ABA).
- * waitlk protects writeractive, writergen, the word compare and enrollment,
- * so a writer acquisition or release cannot interleave between the check and
- * the sleep.  lk may be held while taking waitlk (mapping admission); waitlk
- * is never held while taking lk, and no path sleeps holding either.
+ * waitlk protects writeractive, writergen, revoked, the word compare and
+ * enrollment, so a writer acquisition or release cannot interleave between
+ * the check and the sleep.  lk may be held while taking waitlk (mapping
+ * admission); waitlk is never held while taking lk, and no path sleeps
+ * holding either.
  */
 static Segment*
 regionmaplookup(uintptr addr)
@@ -1004,12 +1054,21 @@ sysregionwait(sysva_list list)
 		return 0;			/* value already changed */
 	}
 	if(!r->writeractive){
-		unlock(&r->waitlk);
-		kunmap(k);
-		putseg(s);
-		return 3;			/* no writer can WAKE this word */
+		/*
+		 * A region that has never had a writer may get one later, so
+		 * block instead of forcing the reader to poll for it.  A
+		 * released writer or a revoked region can never supply this
+		 * word through the current mapping set, so report that state
+		 * immediately.  writergen distinguishes the two cases.
+		 */
+		if(r->writergen != 0 || r->revoked || timeout == 0){
+			unlock(&r->waitlk);
+			kunmap(k);
+			putseg(s);
+			return (r->writergen == 0 && !r->revoked) ? 2 : 3;
+		}
 	}
-	if(timeout == 0){
+	else if(timeout == 0){
 		unlock(&r->waitlk);
 		kunmap(k);
 		putseg(s);
@@ -1130,12 +1189,8 @@ vobjregionwriterhold(Vobj *o)
 	if(o == nil || o->kind != VkindRegion || (r = o->priv) == nil)
 		return -1;
 	qlock(&r->lk);
-	if(r->revoked){
-		qunlock(&r->lk);
-		return -1;
-	}
 	lock(&r->waitlk);
-	if(r->writeractive){
+	if(r->revoked || r->writeractive){
 		unlock(&r->waitlk);
 		qunlock(&r->lk);
 		return -1;
@@ -1371,7 +1426,7 @@ vobjregionwaitkern(Vobj *o, uvlong off, uvlong expected, int timeout)
 		kunmap(k);
 		return 0;
 	}
-	if(!r->writeractive){
+	if(!r->writeractive && (r->writergen != 0 || r->revoked)){
 		unlock(&r->waitlk);
 		kunmap(k);
 		return 3;
@@ -2056,7 +2111,16 @@ vobjrevoke(int handle)
         if(r == nil || (h->rights & Vcontrol) == 0)
             error(Eperm);
         qlock(&r->lk);
+        lock(&r->waitlk);
         r->revoked = 1;
+        /*
+         * With no writer installed, no future writer may appear either, so
+         * release waiters that were blocking for one.  An installed writer
+         * keeps its slot: installed mappings remain usable by design.
+         */
+        if(!r->writeractive)
+            regionnotify(r, 1);
+        unlock(&r->waitlk);
         qunlock(&r->lk);
     }else if(h->obj->kind == VkindGe && h->obj->priv != nil){
         if((h->rights & Vdelegate) == 0)

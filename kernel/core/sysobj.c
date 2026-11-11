@@ -329,9 +329,10 @@ sysobjinvoke(sysva_list list)
 		break;
 	case ObjOpRegionMap:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
-		   c.arg1 != 0)
+		   (c.arg1 & ~(uvlong)ObjRegionMapFlags) != 0)
 			error(Ebadarg);
-		c.result = (long long)vobjregionmap(handle, (uintptr)c.arg0);
+		c.result = (long long)vobjregionmap(handle, (uintptr)c.arg0,
+			(int)c.arg1);
 		break;
 	case ObjOpRegionUnmap:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||

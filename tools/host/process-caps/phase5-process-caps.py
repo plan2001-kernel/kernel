@@ -367,6 +367,20 @@ except OSError as e:
 p.exits('')
 '''
 
+# An RO observer that starts before any writer mapping exists.  The old
+# semantics returned writer-release (3) immediately and forced polling; the
+# current contract blocks until a writer appears or the timeout applies.
+WAIT_NO_WRITER = PRELUDE + r'''
+r = findregion(False)
+b = p.region_map(r, 0x4f540000)
+rv = p.region_wait(b, 0, 0, 5000)
+if rv == 3:
+    fail('no-writer-returned-3')
+if rv not in (0, 1):
+    fail('no-writer-status')
+p.exits('')
+'''
+
 
 class Counter:
     def __init__(self):
@@ -984,6 +998,58 @@ p.exits('handled-note-exit')
     ok(slotok == 8,
        'writer slot and mapping address remain reusable across 8 cycles')
     p.obj_close(reg)
+
+    # --- mapping flags and exact-base unmap ------------------------------
+    reg = p.region_create(8192)
+    robase = p.region_map(reg, 0x4f510000, p.OBJ_REGION_MAP_READONLY)
+    rwbase = p.region_map(reg, 0x4f520000)
+    if robase != 0x4f510000 or rwbase != 0x4f520000:
+        raise AssertionError('flag mapping address changed')
+    p.region_atomic_store(rwbase, 0x5a)
+    if p.region_atomic_load(robase) != 0x5a:
+        raise AssertionError('read-only alias does not see writer data')
+    try:
+        p.region_unmap(robase + 4096)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('interior unmap accepted')
+    p.region_unmap(robase)
+    p.region_unmap(rwbase)
+    p.obj_close(reg)
+    ok(True, 'a Vwrite Handle maps read-only by flag without taking the '
+       'writer slot, and unmap requires the exact base')
+
+    # --- RFMEM shares an installed region mapping ----------------------
+    reg = p.region_create(8192)
+    base = p.region_map(reg, 0x4f530000)
+    p.region_atomic_store(base, 0)
+    pid = p.rfork(p.RFPROC | p.RFMEM)
+    if pid == 0:
+        p.region_atomic_store(base, 0x77)
+        p.exits('')
+    p.sleep(400)
+    if p.region_atomic_load(base) != 0x77:
+        raise AssertionError('RFMEM child did not share the region mapping')
+    p.region_unmap(base)
+    p.obj_close(reg)
+    ok(True, 'an RFMEM child shares the installed region mapping')
+
+    # --- WAIT blocks for a first writer instead of returning 3 ----------
+    reg = p.region_create(8192)
+    ro = p.obj_open_handle(reg, RO)
+    child = spawn(WAIT_NO_WRITER, ((ro, RO),), cpu=1)
+    p.obj_close(ro)
+    p.sleep(1000)
+    wbase = p.region_map(reg, 0x4f540000)
+    p.region_atomic_store(wbase, 1)
+    p.region_wake(wbase, 0, 0x7fffffff)
+    rec_ok(child, p.OBJ_PROC_CAUSE_EXIT, 'no-writer-wait')
+    p.region_unmap(wbase)
+    p.obj_close(child)
+    p.obj_close(reg)
+    ok(True, 'WAIT blocks for a first writer instead of returning '
+       'writer-release status')
 
     p.obj_close(sh)
     print('T41-FINISH', n[0], 'PASS')

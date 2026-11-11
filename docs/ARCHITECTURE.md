@@ -127,87 +127,19 @@ separate hardware checks.
 
 ## CURRENT IMPLEMENTATION
 
+The implemented kernel interface is specified in one place:
+[KERNEL-INTERFACE](KERNEL-INTERFACE.md#current-implementation). It defines
+the current object ABI, capability-region mapping and WAIT/WAKE semantics,
+process completion model, device ring protocols and their documented
+limitations. This document keeps the target architecture and the maturity
+summary below rather than maintaining a second copy.
+
 AMD64 has a functional full-system path with GE/O, MicroPython and device
-providers. `SPAWN` and `RFORKEX` return a process-local `VkindProcess` Handle
-carrying `Vobserve|Vcontrol|Vmeta|Vdelegate`; a process Handle, not a PID, is
-the authority. Observation and control are separate `OBJINVOKE` operations,
-completion is an immutable multi-reader record, and no parent/child wait
-state or ancestral control path exists. `Pgrp/OContext` sharing/copying/
-sealing and namespace views remain independent resource mechanisms.
-Ethernet receive and console sessions use capability-region rings with
-`REGIONWAIT`/`REGIONWAKE`; the authorized Ethernet transmit publisher uses the
-same mechanism with the kernel as reader. USB control has distinct synchronous
-completion.
-An authorized userspace console owner claims the PS/2 keyboard, decodes scan
-codes and routes input/output through per-session region grants. The `-I`
-native REPL may instead claim the keyboard directly for a single session.
-`ObjOpenConsole` selects protected output streams; `kernel/core/fbconsole.c`
-is the kernel-owned framebuffer text sink and early-boot/panic diagnostics
-remain independent of userspace. `ObjectFIFO` and Pipe providers, their ABI,
-adapters and tests are deleted.
-
-AMD64 also has volatile capability regions: `ObjKindRegion` creation, an
-attenuable `Vread`/`Vwrite` Handle, and `ObjOpRegionMap`/`ObjOpRegionUnmap`
-over the existing object ABI. A region owns eagerly allocated, zeroed Page
-backing. Exactly one writable mapping may exist at a time; authorized reader
-Handles map the same pages read-only at process-local addresses, with PTERONLY
-enforced per `SG_REGION` Segment. A mapping survives Handle close and is
-released by unmap or process exit; the region and its pages are reclaimed at
-the last mapping/Handle reference. Writer transfer is rejected in this phase.
-An authorized `Vcontrol` revoke blocks all future mappings through existing
-Handles without invalidating installed mappings; readers cannot revoke.
-`REGIONWAIT(147)` and `REGIONWAKE(148)` implement region-scoped publication
-waiting over an installed mapping. The publication word is a naturally
-aligned 64-bit little-endian value compared only for equality; userspace uses
-release/acquire atoms, and the kernel never copies payload. Waiters are keyed
-by the live region plus region-relative offset in a per-region queue guarded
-by a spin lock; writer presence, word comparison and registration are
-linearizable with writer-slot acquisition and release. Read-only mappings may
-wait, the mapping survives Handle close, and only the writable mapping may
-wake. A changed word returns immediately even with no writer; an unchanged
-word with no active writer returns writer-released immediately, including for
-a late waiter after unmap or writer-process exit. Timeout, interruption,
-writer-slot release and process exit remove the waiter; return values
-distinguish changed, woken, timeout and writer-release so callers always
-recheck. A later writer may map and publish, so status 3 is temporal rather
-than destruction. The retired public
-`RENDEZVOUS`, `SEMACQUIRE`, `SEMRELEASE` and `TSEMACQUIRE` ABI, its user
-wrappers, `RF*REND` resource and internal `Rgrp`/`Sema` waiting lists were
-deleted. Free-process grants are implemented by SPAWN/RFORKEX process
-Handles. The former named `shared`
-segment attach, `SG_SHARED` type and `_globalsegattach` hook were removed;
-`SEGATTACH` remains only for the anonymous `memory` and physical device
-segments.
-
-Phase 4 demonstrates three independent MicroPython processes over two
-capability regions: A is the only writer of the task region, B the only
-writer of the answer region, and C holds read-only mappings to both. Scalar,
-delta and immutable 8 KiB records cross only through shared pages;
-`REGIONWAIT`/`REGIONWAKE` carry notification only. The processes receive
-attenuated region Handles through explicit `SPAWN` vhandles, so this data
-path uses no `ObjectFIFO`, Pipe or payload-copy syscall.
-
-Phase 5 adds one reference-counted `Procstat` completion resource per user
-process, owned by the live `Proc` and then by every process Handle. A single
-completion transition publishes state, cause (voluntary exit, authorized
-termination or unhandled fault), bounded status and runtime accounting, then
-wakes every enrolled observer without consuming the record. The address
-space and its writable region mappings are released before completion, so a
-faulted or terminated writer cannot retain the only RW slot; read-only
-snapshots survive through their own mappings. `SPAWN` and `RFORKEX` install
-the initial Handle before publication, and `PROCWAIT`, `OTERMINATE`,
-`Proc.parent/parentpid/nchild/nwait/waitq`, the Broken-retention path and
-`RFNOWAIT` are deleted. `SPAWN` still creates a fresh `Pgrp`; no ancestry
-grants authority. The boot process has an explicit `Proc.boot` role, not a
-`parentpid == 0` test. `OEXECUTE` keeps the same Process identity and its
-observers; it replaces the image in place without granting new rights. The
-no-argument libc `wait()`/`await()` tracking adapters are gone; users wait on
-explicit `VkindProcess` Handles.
-
-ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff, mappings,
-console, timer interrupts and physical-page allocation, not full-system
-scheduler, GE/O, syscalls, userspace or device parity. MicroPython is the
-proof-of-concept userspace. Source and tests govern exact current behavior.
+providers. ARM64 has an early UEFI/QEMU boot foundation with BootInfo handoff,
+mappings, console, timer interrupts and physical-page allocation, not a
+full-system scheduler, GE/O, syscalls, userspace or device parity.
+MicroPython is the proof-of-concept userspace. Source and tests govern exact
+current behavior.
 
 ## Six-stage roadmap
 

@@ -15,7 +15,7 @@ qob_new_o_image() {
   mkdir -p "$logdir"
   qob_safe_rm "$img"
   MPEXEC="$QOB_MPY" "$T41_ROOT/tools/mkovol" "$img" "$QOB_MIB" \
-    "$T41_ROOT/tools/host/t41/phase5-process-caps.py" >"$logdir/mkovol.log" 2>&1
+    "$T41_ROOT/tools/host/process-caps/phase5-process-caps.py" >"$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --accel kvm:tcg --cpus 3 --ncpu 3 --obootcpu 0 \
   --mib 1024 --timeout 1200 --obootexec 0x4f45584543000003 --output-dir "$T41_OUT" \

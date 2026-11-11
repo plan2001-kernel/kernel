@@ -24,9 +24,17 @@ extern const struct _mp_obj_module_t mp_module___main__;
 #undef MODULE_DEF___MAIN__
 #define MODULE_DEF___MAIN__ { MP_ROM_QSTR(MP_QSTR___main__), MP_ROM_PTR(&mp_module___main__) },
 
+extern const struct _mp_obj_module_t aesgcm_module;
+#undef MODULE_DEF_AESGCM
+#define MODULE_DEF_AESGCM { MP_ROM_QSTR(MP_QSTR_aesgcm), MP_ROM_PTR(&aesgcm_module) },
+
 extern const struct _mp_obj_module_t mp_module_builtins;
 #undef MODULE_DEF_BUILTINS
 #define MODULE_DEF_BUILTINS { MP_ROM_QSTR(MP_QSTR_builtins), MP_ROM_PTR(&mp_module_builtins) },
+
+extern const struct _mp_obj_module_t mp_module_cbor;
+#undef MODULE_DEF_CBOR
+#define MODULE_DEF_CBOR { MP_ROM_QSTR(MP_QSTR_cbor), MP_ROM_PTR(&mp_module_cbor) },
 
 extern const struct _mp_obj_module_t mp_module_gc;
 #undef MODULE_DEF_GC
@@ -39,6 +47,10 @@ extern const struct _mp_obj_module_t mp_module_math;
 extern const struct _mp_obj_module_t mp_module_micropython;
 #undef MODULE_DEF_MICROPYTHON
 #define MODULE_DEF_MICROPYTHON { MP_ROM_QSTR(MP_QSTR_micropython), MP_ROM_PTR(&mp_module_micropython) },
+
+extern const struct _mp_obj_module_t mp_module_oenv;
+#undef MODULE_DEF_OENV
+#define MODULE_DEF_OENV { MP_ROM_QSTR(MP_QSTR_oenv), MP_ROM_PTR(&mp_module_oenv) },
 
 extern const struct _mp_obj_module_t mp_module_plan9;
 #undef MODULE_DEF_PLAN9
@@ -54,10 +66,13 @@ extern const struct _mp_obj_module_t mp_module_sys;
 
 
 #define MICROPY_REGISTERED_MODULES \
+    MODULE_DEF_AESGCM \
     MODULE_DEF_BUILTINS \
+    MODULE_DEF_CBOR \
     MODULE_DEF_GC \
     MODULE_DEF_MATH \
     MODULE_DEF_MICROPYTHON \
+    MODULE_DEF_OENV \
     MODULE_DEF_PLAN9 \
     MODULE_DEF_SPACE \
     MODULE_DEF_SYS \

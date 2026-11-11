@@ -110,10 +110,13 @@ enum {
 	ObjOpDeviceRx	= 45,	/* device: acquire the receive region Handle */
 	ObjOpDeviceTx	= 46,	/* device: acquire the transmit region Handle */
 	/* VkindRegion: install this region at arg0 (0 = choose) and return the
-	 * process-local virtual address.  A Handle carrying Vwrite requests the
-	 * single writable mapping; Vread alone requests a read-only mapping.
-	 * Unmap takes the process-local address in arg0 and affects only the
-	 * caller's address space. */
+	 * process-local virtual address.  arg1 is a bitmask of ObjRegionMap*
+	 * flags (0 keeps the default).  Without a flag a Handle carrying Vwrite
+	 * requests the single writable mapping and Vread alone requests a
+	 * read-only mapping; ObjRegionMapReadonly requests a read-only mapping
+	 * even from a Vwrite Handle without consuming the writer slot.  Unmap
+	 * takes the exact mapping base returned by the map call and affects only
+	 * the caller's address space. */
 	ObjOpRegionMap	= 47,
 	ObjOpRegionUnmap = 48,
 	/* VkindProcess: durable, repeatable completion observation.  WAIT takes
@@ -126,6 +129,12 @@ enum {
 	ObjOpProcessInfo = 49,
 	ObjOpProcessWait = 50,
 	ObjOpProcessTerminate = 51,
+};
+
+/* ObjOpRegionMap arg1 flags. */
+enum {
+	ObjRegionMapReadonly = 1<<0,	/* map read-only even with Vwrite */
+	ObjRegionMapFlags = ObjRegionMapReadonly,
 };
 
 /* Classification after the SYSCTL/IOCTL/object/scalar split:
@@ -559,13 +568,19 @@ long obj_list_count(void *records, unsigned long long count,
 
 /* Volatile capability regions.  Creation takes a page-multiple size and
  * returns a Handle carrying Vread|Vwrite|Vmeta|Vdelegate|Vcontrol.  A writer
- * mapping is unique for the region; read-only mappings are shared.  The
- * mapping survives closing the Handle and is released by obj_region_unmap()
- * or process exit.  obj_revoke() on a Vcontrol Handle blocks all future
- * mappings; installed mappings and page backing remain until unmap/exit and
- * the last reference. */
+ * mapping is unique for the region; read-only mappings are shared.  A Vwrite
+ * Handle maps read-only when flags contains ObjRegionMapReadonly, without
+ * consuming the writer slot.  The mapping survives closing the Handle and is
+ * released by obj_region_unmap() or process exit; unmap takes the exact base
+ * returned by the map call.  obj_revoke() on a Vcontrol Handle blocks all
+ * future mappings; installed mappings and page backing remain until
+ * unmap/exit and the last reference.  Revocation cannot invalidate an
+ * installed mapping or reclaim the writer slot: that still requires unmap,
+ * writer-process exit or termination. */
 long obj_region_create(unsigned long long size, ObjId *out);
 long obj_region_map(int handle, unsigned long long addr);
+long obj_region_map_flags(int handle, unsigned long long addr,
+		unsigned int flags);
 long obj_region_unmap(unsigned long long addr);
 
 /* Region-scoped publication wait/wake over the direct REGIONWAIT(147) and

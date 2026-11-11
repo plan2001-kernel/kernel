@@ -24,9 +24,9 @@ ALLOW_PREFIXES = (
     "docs/",
     "AGENTS.md",
     "README.md",
-    "tools/host/t40/",
-    "tools/host/t46/",
-    "tools/host/t47/",
+    "tools/host/micropython-ipc/",
+    "tools/host/console-sessions/",
+    "tools/host/ethernet-frames/",
     "tools/host/arch-audit.py",
     "tools/host/run-phase6-architecture-checks.sh",
 )

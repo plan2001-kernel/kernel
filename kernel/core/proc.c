@@ -1481,19 +1481,22 @@ procstatinfo(Procstat *st, ObjProcessInfo *out)
  * are recycled, so the pointer alone is not identity; every check below is
  * made while holding p->debug.
  *
- * Acceptance protocol and lock order:
+ * Acceptance protocol and lock order (outer to inner):
  *
- *	st->lk		authoritative run/completed transition and Proc pointer
  *	p->debug	pexit()'s exiting transition and process-local identity
+ *	st->lk		authoritative run/completed transition and Proc pointer
  *	p->rlock	only inside procinterrupt()
  *	Rendez.lk / q->use
  *	runq.lk		inside ready()
  *
  * No path acquires p->debug while holding st->lk, a Rendez lock, a QLock
- * queue lock or runq.lk, so this order is acyclic.  procinterrupt() may
- * retry a contended Rendez lock by calling sched(); p->debug is a sleepable
- * QLock, procinterrupt() drops p->rlock before sleeping, and no Rendez or
- * queue-lock holder waits for p->debug, so the retry cannot deadlock.
+ * queue lock or runq.lk, so this order is acyclic.  In particular the initial
+ * live check takes and releases st->lk before p->debug is acquired; the
+ * revalidation then takes st->lk while p->debug is held, matching the order
+ * above.  procinterrupt() may retry a contended Rendez lock by calling
+ * sched(); p->debug is a sleepable QLock, procinterrupt() drops p->rlock
+ * before sleeping, and no Rendez or queue-lock holder waits for p->debug, so
+ * the retry cannot deadlock.
  *
  * p->debug is deliberately held from revalidation through the wakeup.
  * pexit() sets p->exiting under that same lock before it releases mappings
