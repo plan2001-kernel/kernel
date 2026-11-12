@@ -1056,28 +1056,23 @@ ownerassign(Otx *tx, Ohdr *h, uvlong oid, uvlong owner)
 	 * this transaction is about to publish.
 	 */
 	if(ownerlookup(tx, oid, h->n, &stored, &over)){
-		if(stored != owner)
-			error(Eperm);
+		/* Existing object's provenance is immutable. The caller's
+		 * OwnerID describes the writer, not an authority predicate.
+		 * oswritehand already checked its explicit Ohand grant. */
 		return;
 	}
 	if(objectlive(tx, oid, h->n)){
 		if(ownerlookup(tx, oid, tx->ver, &stored, &over) &&
-		   over == tx->ver){
-			if(stored != owner)
-				error(Eperm);
-			return;
-		}
+		   over == tx->ver)
+			return; /* retain newly staged immutable provenance */
 		error("O: corrupt object owner metadata: live store %llx oid %llux",
 			tx->store, oid);
 	}
 	/* A reused OID with no published owner is a new publication.  Any
 	 * older unpublished record was cleared before staging this version. */
 	if(ownerlookup(tx, oid, tx->ver, &stored, &over) &&
-	   over == tx->ver){
-		if(stored != owner)
-			error(Eperm);
-		return;
-	}
+	   over == tx->ver)
+		return; /* previous writer in same transaction fixed provenance */
 	owneradd(tx, oid, tx->ver, owner);
 }
 

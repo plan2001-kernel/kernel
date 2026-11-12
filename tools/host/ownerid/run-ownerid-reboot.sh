@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Two QEMU/OVMF boots of the same disposable native GE/O disk.  Boot one
-# runs the full owner acceptance and persists A/B objects plus the resolved
-# OwnerIDs.  Boot two restores the same O volume, re-registers the trusted
-# names, and proves the stored owners and cross-owner denials survived.
+# Two QEMU/OVMF boots of the same disposable native GE/O disk. Boot one
+# persists A/B objects with immutable OwnerIDs and tests explicit authority.
+# Boot two restores the same O volume and proves immutable provenance and
+# cross-owner accesses through delegated Space capability grants.
 set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 OUT=${T49_RB_OUT:-$ROOT/build/t49-reboot/run}

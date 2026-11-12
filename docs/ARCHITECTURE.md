@@ -22,8 +22,10 @@ generation-checked capability; a BindingID identifies one relation; its
 rights cannot exceed the source capability. A label or raw OID cannot mint
 rights. OwnerID remains immutable provenance/lifecycle responsibility and
 a trusted policy input for issuing initial capabilities, NOT a general
-bypass for a process with the same name. The current owner equality gates
-are transitional and must be replaced provider by provider.
+bypass for a process with the same name. The legacy equality gates have
+been removed from current GE/O, region, device and process providers.
+Their authorization now uses capability admission, GE/O Ohand scope,
+trusted bootstrap gates and provider-specific safety checks.
 
 The first implemented ObjectSpace is volatile and uses the existing
 five-call object ABI; persistent graph transactions and capability roots
@@ -98,12 +100,13 @@ summary below rather than maintaining a second copy.
 
 AMD64 has a functional full-system path with GE/O, MicroPython and device
 providers. It implements immutable process/object `OwnerID`, trusted
-boot/installation program registration, owner-checked direct object access,
-registered-program launch under the program's owner, and owner-offered data
+boot/installation program registration, capability-controlled object access,
+registered-program launch under the program's owner, and explicitly shared data
 through the existing region publication IPC. Stored owners survive restart;
 the name/program registry is volatile and is reconstructed by trusted boot
-before access. Existing Handle rights are attenuated references, but old OwnerID gates
-still prevent many cross-owner operations; these must be migrated. ARM64 has an early UEFI/QEMU boot
+for symbolic program identity. Handle rights authorize cross-owner operations
+when explicitly delegated, independently of immutable provenance.
+ARM64 has an early UEFI/QEMU boot
 foundation with BootInfo handoff, mappings, console, timer interrupts and
 physical-page allocation, not a full-system scheduler, GE/O, syscalls,
 userspace or device parity. MicroPython is the proof-of-concept userspace.
