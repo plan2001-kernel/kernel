@@ -65,10 +65,34 @@ make_o_image() {
 	}
 	[ -z "$raw" ] || cp "$raw" "$seed/raw"
 	if [ "$raw" = "$OUT/corrupt.raw" ]; then
-		# Owner-aware flat volume: append allocator and owner-mode state.
-		python3 - "$seed/alloc" <<'PY'
+		# In owner mode even trusted boot code and Environment objects need
+		# valid Kowner provenance. Keep the four intentionally corrupt OIDs
+		# untouched; add root records only for normal formatter seed objects.
+		python3 - "$seed" <<'PY'
 import pathlib, struct, sys
-pathlib.Path(sys.argv[1]).write_bytes(b"OALLOC01" + struct.pack(">Q", 64) + b"OOWNMODE" + struct.pack(">Q", 1))
+seed = pathlib.Path(sys.argv[1])
+u64 = lambda n: struct.pack(">Q", n)
+u32 = lambda n: struct.pack(">I", n)
+root = 1469598103934665603
+for byte in b"root":
+    root = ((root ^ byte) * 1099511628211) & ((1 << 64) - 1)
+oids = {0xfffffffffffffffc}  # Environment
+for line in (seed / "env").read_text().splitlines():
+    fields = line.split()
+    if fields and fields[0] != "runtime":
+        assert len(fields) == 4, fields
+        oids.add(int(fields[3], 16))
+for name in ("exeoid", "rawexecoid", "mpoid", "badoid"):
+    f = seed / name
+    if f.exists():
+        oids.add(int(f.read_text().strip(), 16))
+raw = bytearray((seed / "raw").read_bytes())
+for oid in sorted(oids):
+    key = bytes([8]) + u64(oid) + u64((~1) & ((1 << 64) - 1))
+    value = b"OOWNER01" + u64(root)
+    raw.extend(u32(len(key)) + u32(len(value)) + key + value)
+(seed / "raw").write_bytes(raw)
+(seed / "alloc").write_bytes(b"OALLOC01" + u64(64) + b"OOWNMODE" + u64(1))
 PY
 	fi
 	"$QOB_FORMAT" --seed "$seed" --size "$QOB_MIB" "$img" >"$log.fmt" 2>&1 || {
