@@ -6,7 +6,8 @@
 
 Plan 2001-kernel is an **experimental object-oriented operating-system
 kernel** under development for AMD64 and ARM64. Persistent GE/O storage
-uses SpaceIDs and OIDs rather than a native hierarchical filesystem.
+uses one flat OID identity per GE/O volume, without a native hierarchical
+filesystem or SpaceID storage buckets.
 The [target architecture](docs/ARCHITECTURE.md) separates each object's
 immutable `OwnerID` provenance from its access authority. Registered
 programs run under a trusted program identity, but neither matching OwnerID

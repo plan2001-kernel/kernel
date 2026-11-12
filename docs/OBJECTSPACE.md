@@ -129,9 +129,9 @@ p.space_unbind(root, a)
 
 GE/O v2 is already flat: each volume has one OID allocator, one
 published version and one transaction domain. **No persistent SpaceID**
-exists, and ObjectSpace is not a storage partition. The temporary
-`Ospace` handle and `"init"` bootstrap selector are phase-3 API cleanup
-items, not on-disk identity. An ObjectSpace must itself have a durable
+exists, and ObjectSpace is not a storage partition. Phase 3 removed the
+named `Ospace` wrappers and `init` GE/O selector. A future persistent
+ObjectSpace must itself have a durable
 OID and store versioned binding records, not live Handle numbers or
 kernel pointers. Each binding stores BindingID, label, target durable
 identity, relation, rights *ceiling*, generation and optional metadata
@@ -178,7 +178,7 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
    remove obsolete providers, public ABI, wrappers and tests. No shims.
 4. **Persistence:** define and implement GE/O ObjectSpace records and
    atomic graph transactions, persisted identities and trusted reboot
-   reification; retire the transitional Ospace/SpaceID API separately.
+   reification. Phase 3 already retired the transitional Ospace/SpaceID API.
 5. **User view and hardening:** PVD, directory/project/container projections,
    multi-parent navigation, quotas, graph GC or specified lifetime semantics,
    recovery/race/fuzz tests, AMD64 physical hardware tests.

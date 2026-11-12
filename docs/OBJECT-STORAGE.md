@@ -24,8 +24,9 @@ semantics. **There is no SpaceID dimension in the on-disk identity.**
   require explicit, attenuable capabilities. Missing or malformed owner
   metadata for a live object in owner-aware mode is corruption.
 - There is **no** `Ko` name catalog, `store[8]` prefix, per-Space
-  version header or SpaceID allocator. The transitional API may still
-  accept the boot label `"init"`; it is not a persistent storage scope.
+  version header, SpaceID allocator or named storage selector. Boot volume
+  activation uses an explicit PARTUUID. GE/O handles are volume capabilities
+  and persistent objects are addressed directly by OID.
 
 ## Volume-global allocator and transactions
 
@@ -60,13 +61,24 @@ the owner-mode marker become visible together on the volume's single
 published version. This is **not** migration from the obsolete SpaceID
 disk format, which has no compatibility promise.
 
-## Boundaries of this phase
+## ABI and transaction boundary (phase 3)
 
-The `Ospace` structure, `ospaceopen()`, the `"init"` bootstrap
-selector and legacy ABI names are transitional **in-memory wrappers**,
-not independent on-disk stores. Removing those wrappers is **phase 3**.
-Persisting ObjectSpace graphs as ordinary GE/O objects and validating
-their capability reification is **phase 4**. Neither is claimed here.
+`ObjOpenVolume` requires an empty request and boot-owner authority; it
+returns an attenuable, revocable `VkindGeVolume` capability. A separate
+`ObjOpenGeOid` request supplies an authorized volume Handle and a flat OID.
+An OID by itself never confers authority. Internal GE operations are
+`oobjopen/get/put/create/commit/close`: a handle is an `Otx` transaction
+context, not an Ospace or storage namespace. The obsolete named `Ospace`
+and `onative*` wrappers and the `init` storage selector were removed.
+
+MicroPython boots with `-O PARTUUID=... -N` (or `-I`), and Python's
+`space.open()` restores the one application graph from flat OID records.
+The demonstration's Python Environment still uses the label `init`, but
+that label is not passed into GE/O or interpreted as a storage identity.
+
+Persisting native ObjectSpace relationship graphs, atomic binding updates
+and trusted capability reification remains **phase 4**, not part of the
+storage ABI migration.
 
 ## Acceptance and inspection
 

@@ -42,16 +42,18 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 
 ## Scope
 
-- Persistent identity: GE/O `(SpaceID, OID)`. There is no native hierarchical
-  filesystem namespace. Runtime objects, owner identities and stored occurrences
+- Persistent identity: GE/O `(VolumeID, OID)`, with one flat OID domain
+  per volume. There is no SpaceID or native hierarchical filesystem namespace. Runtime objects, owner identities and stored occurrences
   are different concepts.
 - Native ObjectSpace is a first-class kernel object, independent of Pgrp.
   Each binding has a label, stable BindingID, target and attenuated rights.
-- GE SpaceID is a private storage bucket, NOT the ObjectSpace graph identity.
-  Persistent ObjectSpace metadata needs atomic GE/O transactions and trusted
-  capability reconstruction; these are not yet implemented.
-- Pgrp/OContext are legacy to delete after explicit ObjectSpace roots replace
-  them. OwnerID equality access gates have already been removed. Do not
+- GE/O volume handles authorize flat OID operations; ObjectSpace graph
+  capabilities authorize graph relations and are separate from the store.
+  No named GE/O storage subspace or implicit `init` selector exists.
+  Persistent ObjectSpace metadata still needs atomic GE/O transactions and
+  trusted capability reconstruction; these are not yet implemented.
+- Pgrp/OContext process-root handling was replaced by explicit ObjectSpace
+  capabilities. OwnerID equality access gates have already been removed. Do not
   reintroduce them or add compatibility wrappers.
 - Never implement or restore kernel hashtag/tag semantics: no `#`-tag
   validation, tag-name objects, tag-specific indexes or tag query parsers.
