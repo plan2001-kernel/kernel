@@ -223,6 +223,10 @@ struct Vspace {
 	Vspace *next;
 	uvlong epoch, nextid;
 	int nbindings, revoked;
+	/* A restored root owns the otherwise weak nested ObjectSpace nodes.
+	 * Bindings remain weak, preventing graph cycles from leaking objects. */
+	int npersist_children;
+	Vobj *persist_children[16];
 	VspaceBinding entries[ObjSpaceBindingMax];
 };
 static Lock vspaceregistrylock;
@@ -459,6 +463,8 @@ vobjput(Vobj *o)
 			if(s->entries[i].target != nil)
 				vobjput(s->entries[i].target);
 		}
+		for(i = 0; i < s->npersist_children; i++)
+			vobjput(s->persist_children[i]);
 		free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
