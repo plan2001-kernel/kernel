@@ -10,7 +10,7 @@ assert "ownercanmanage" not in core
 assert "up->owner == o->owner" not in core
 assert "up->owner != owner" not in storage
 assert "up->owner != ownerroot()" not in storage
-for needle in ("vobjholdobj(handle, Vcontrol)","vlookup(handle, Vread)",
+for needle in ("vobjholdobj(handle, Vcontrol)","if((h->rights & (Vread|Vwrite)) == 0)",
                "vobjholdobj(handle, Vcommit)","vobjholdobj(handle, Vwrite)",
                "vlookup(handle, Vdelegate)","if(write && !ownercanmanage"):
     if needle.startswith("if(write"):
@@ -25,4 +25,7 @@ for needle in ("oauthorize(oh, oid, Oread)","oauthorize(oh, oid, Owrite)",
 assert "if(up == nil || !up->boot)" in owner
 assert "if(stored != owner)" not in objects, "Kowner must remain immutable without matching writer"
 assert "ownerassign(tx, &h, oid, owner)" in objects
+assert "write = (h->rights & Vwrite) != 0" in core
+fixture=(root/"tools/host/capability/owner-authority.py").read_text()
+assert "writer=(reg,p.VWRITE|p.VMETA)" in fixture
 print("PASS: OwnerID provenance isolated from Handle and Ohand authorization")
