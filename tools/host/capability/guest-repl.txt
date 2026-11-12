@@ -45,10 +45,10 @@ p.obj_close(renew)
 p.obj_close(sibling)
 p.obj_close(one)
 p.obj_close(base)
-# GE provider Handles must derive from the authorizing GE Space grant.
-ge=p.obj_open_space('init')
+# GE provider Handles must derive from the authorizing GE/O volume capability.
+ge=p.obj_open_volume()
 g,oid=p.obj_create_ge(ge,b'geval')
-opened=p.obj_open_ge_space(ge,oid)
+opened=p.obj_open_ge_oid(ge,oid)
 assert p.obj_read(opened,5)==b'geval'
 p.cap_revoke(ge)
 assert denied(lambda:p.obj_read(g,5))
@@ -56,7 +56,7 @@ assert denied(lambda:p.obj_read(opened,5))
 assert denied(lambda:p.obj_open_handle(g,p.VREAD))
 p.obj_close(opened)
 p.obj_close(g)
-freshge=p.obj_open_ge_space(ge,oid)
+freshge=p.obj_open_ge_oid(ge,oid)
 assert p.obj_read(freshge,5)==b'geval'
 p.obj_close(freshge)
 p.obj_close(ge)
