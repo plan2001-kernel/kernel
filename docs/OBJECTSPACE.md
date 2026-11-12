@@ -125,28 +125,52 @@ p.space_unbind(root, a)
 # reader retains its capability: unlink is not revoke.
 ```
 
-## Persistent GE/O integration (phase 4, experimental implementation)
+## Persistent GE/O integration (phase 4, experimental)
 
-GE/O v2 is already flat: each volume has one OID allocator, one
-published version and one transaction domain. **No persistent SpaceID**
-exists, and ObjectSpace is not a storage partition. Phase 3 removed the
-named `Ospace` wrappers and `init` GE/O selector. A future persistent
-ObjectSpace must itself have a durable
-OID and store versioned binding records, not live Handle numbers or
-kernel pointers. Each binding stores BindingID, label, target durable
-identity, relation, rights *ceiling*, generation and optional metadata
-object ID.
+GE/O v2 retains one flat OID allocator, one published version and one
+transaction domain per volume; there is **no SpaceID** or path selector.
+The API is deliberately explicit: `space_save(space, volume, graph_oid)`
+commits the serialized ObjectSpace snapshot as **one** GE/O object and
+returns the published version. `space_load(volume, graph_oid)` validates
+the snapshot and returns a new process-local ObjectSpace Handle. The
+caller must first allocate the graph OID with `obj_create_ge`. Neither
+operation opens a volume implicitly or reformats any existing O volume.
 
-Loading stored metadata from disk must never create authority simply
-because it contains an OID/rights pair. A trusted bootstrap policy
-validates targets and reifies only explicitly authorized capabilities.
-Graph operations and referenced-object creation must be transactionally
-published in GE/O as one recoverable version, with torn-write and
-reboot negative tests. Objects need not belong to any persistent graph,
-and removing a graph/binding never implies deletion of the target.
+The on-disk record is versioned and bounded: a magic/version header,
+binding count, highest BindingID, mutation epoch, checksum and sorted
+BindingID records (label, GE/O target OID, kind, rights ceiling and
+relation). No process-local Handle, in-memory pointer, boot incarnation
+or OwnerID equality is serialized as authority. A save rejects revoked
+or unsupported targets. GE/O uses one atomic publication version for
+the complete serialized snapshot, not separately committed binding
+records.
 
-Use fresh test images. NEVER silently reformat a hardware O volume. No
-legacy tag/hashtag schema is restored.
+Restore requires an authorized `VkindGeVolume` Handle with
+`Vread|Vdelegate`. Each target is independently reopened with owner-
+record integrity checking and Vcap ancestry derived from the *current*
+volume Handle, attenuated by the saved ceiling. It rejects malformed
+headers, unsupported versions, checksum mismatches, duplicate or
+non-monotonic BindingIDs, missing objects and excess rights. Failed
+restore closes the unpublished partial graph. Knowing an OID or reading
+serialized rights never grants a capability.
+
+**Implementation limit:** this initial durable format supports edges to
+persisted GE/O byte objects only. It deliberately rejects volatile
+objects, devices, processes, regions and nested ObjectSpaces. It does
+not yet implement durable ObjectSpace-to-ObjectSpace cycles, an
+automatically restored process-root catalog, graph garbage collection
+or cross-volume references. Phase 4 is not complete until the full
+ObjectSpace graph scope is addressed and the tests pass.
+
+Native tests in `tools/host/objectspace/run-persistent.sh` use one fresh,
+disposable GE/O disk over four QEMU boots: initial snapshot, restore
+and replacement, abrupt QEMU SIGKILL after an unpublished replacement,
+and recovery of the last published graph with negative corruption and
+capability tests. Passing compilation or v1 regression tests alone is
+not evidence of crash recovery or torn-write safety.
+
+NEVER silently reformat a hardware O volume; do not restore legacy
+SpaceID selectors or tag/hashtag schema.
 
 ## Execution, IPC and user-space projection (target)
 
