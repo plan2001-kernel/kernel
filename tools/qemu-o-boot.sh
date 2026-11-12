@@ -868,11 +868,13 @@ qob_boot_once()
 					reason="REPL input injection failed"
 					break
 				fi
-				# Wait until the REPL has processed the input and printed
-				# its final prompt. A prompt from an earlier input line does
-				# not mean the last statement and its GE/O commit finished.
-				pdeadline=$(( $(date +%s) + 15 ))
-				while [ "$(qob_count_fixed '>>>' "$serial")" -le "$prompts" ] ||
+				# In crash injection the guest may deliberately block on an
+				# unpublished writer. Kill at the observed guest marker without
+				# requiring the post-statement persistence prompt.
+				if [ "${QOB_CRASH_AFTER_EXPECT:-0}" != 1 ]; then
+					# Normal tests require a completed REPL statement/commit.
+					pdeadline=$(( $(date +%s) + 15 ))
+					while [ "$(qob_count_fixed '>>>' "$serial")" -le "$prompts" ] ||
                     ! tail -c 16 "$serial" | tr -d '\r' | tail -n 1 | grep -qxF '>>> '; do
 					if qob_fail_marker "$serial"; then
 						reason="fatal marker while processing REPL input"
@@ -888,8 +890,9 @@ qob_boot_once()
 						reason="REPL did not return to a prompt after input"
 						break 2
 					fi
-					sleep 0.2
-				done
+						sleep 0.2
+					done
+				fi
 				injected=1
 			fi
 		fi
