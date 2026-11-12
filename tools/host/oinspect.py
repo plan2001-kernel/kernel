@@ -228,9 +228,21 @@ def inspect(path, extract=None):
             return values
 
         values = tree(sb['snapbp'])
-        # A single flat volume header; no Ko name or SpaceID.
+        # The v2 tree contains exactly one volume header and flat OID keys.
+        # Reject obsolete SpaceID-qualified keys and Ko catalogs rather than
+        # silently ignoring them in an otherwise valid v2 superblock.
+        require(b'\x07' in values, 'missing flat GE/O volume header')
+        for k in values:
+            require(k and
+                    ((k[0] == 7 and len(k) in (1, 21)) or
+                     (k[0] == 8 and len(k) == 17)),
+                    'non-flat or unknown GE/O v2 key: %s' % k.hex())
         hdr = values[b'\x07']
+        require(24 <= len(hdr) <= 24 + 256,
+                'invalid flat GE/O volume header size')
         published, oldest, writer = struct.unpack_from('>QQQ', hdr)
+        require(1 <= oldest <= published <= writer < NIL,
+                'invalid GE/O volume version order')
         user = hdr[24:]
         owner_mode = len(user) >= 104 and user[88:96] == b'OOWNMODE'
         owners = {}
