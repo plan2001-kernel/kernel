@@ -721,10 +721,10 @@ osownercheckcreate(Ohand *oh, uvlong oid)
 int
 osownerfault(int point)
 {
-	/* 101..104 exercise owner creation/migration. 105 stops after GE/O
-	 * payload staging and before the published-version header update.
+	/* 101..104 exercise owner create/migration; 105 stops before
+	 * publication; 106 tears a GE superblock write inside gesync.
 	 * Points 1..4 remain recoverable error injections. */
-	if(point >= 101 && point <= 105){
+	if(point >= 101 && point <= 106){
 		ownercrash = point;
 		return 0;
 	}

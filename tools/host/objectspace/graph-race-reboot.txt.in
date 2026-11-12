@@ -1,0 +1,13 @@
+# Reload the snapshot created under concurrent mutation.
+import plan9 as p
+v=p.obj_open_volume()
+root=p.space_load(v,@GRAPH@)
+rows,_,_=p.space_list(root)
+assert len(rows)==1
+bid,label,kind,rights,relation,identity,flags=next(iter(rows))
+assert label=='child' and kind==p.VKIND_OBJECT_SPACE and flags==0
+child=p.space_resolve(root,bid,p.VREAD+p.VMETA)
+edges,_,_=p.space_list(child)
+assert len(edges)==0 or len(edges)==1
+assert not edges or next(iter(edges)).count('cycle')==1
+print('GRAPH-RACE-REBOOT-PASS')

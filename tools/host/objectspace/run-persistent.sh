@@ -104,6 +104,24 @@ run_boot boot4 "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
 QOB_REPL_SYNC_LINES=0 QOB_CRASH_AFTER_EXPECT=1 run_boot midcommit "$QOB_OUT/graph-midcommit.txt" '^OWNERID-CRASH graph-before-publication'
 run_boot after-midcommit "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
 
+# Point 106 interrupts a GE superblock sync after a synthetic 40-byte
+# partial write, unlike point 105 which stops before publication.
+# Reboot the same disk and accept only an entire old or entire new graph.
+python3 - "$ROOT/tools/host/objectspace" "$QOB_OUT" <<'PY'
+from pathlib import Path
+import sys
+fixtures, out = map(Path, sys.argv[1:])
+mid = (out / "graph-midcommit.txt").read_text()
+assert mid.count("ownerid_fault(105)") == 1
+(out / "graph-super-torn.txt").write_text(mid.replace("ownerid_fault(105)", "ownerid_fault(106)"))
+graph, oid, binding = (out / "graph-ids.txt").read_text().split()
+data = (fixtures / "graph-torn-recovery.txt.in").read_text()
+(out / "graph-torn-recovery.txt").write_text(
+    data.replace("@GRAPH@", graph).replace("@NEWBINDING@", binding))
+PY
+QOB_REPL_SYNC_LINES=0 QOB_CRASH_AFTER_EXPECT=1 run_boot torn-super "$QOB_OUT/graph-super-torn.txt" '^OWNERID-CRASH graph-superblock-torn bytes=40'
+run_boot after-torn "$QOB_OUT/graph-torn-recovery.txt" '^GRAPH-TORN-RECOVERY-PASS'
+
 # Nested-ObjectSpace acceptance uses the same persistent GE/O volume across
 # two more real boots. A saved graph has three nodes, two space edges and a
 # persistent leaf, not merely an embedded flat list of GE object bindings.
@@ -146,19 +164,50 @@ PY
 run_boot cyclic2 "$QOB_OUT/graph-cyclic-boot2.txt" '^CYCLIC-GRAPH-REBOOT-PASS'
 
 
+# Concurrent ObjectSpace mutation and snapshot with two native processes.
+# The readable guest fixture is hex-encoded only for restricted REPL sendkeys.
+python3 - "$ROOT/tools/host/objectspace" "$QOB_OUT" <<'PY'
+from pathlib import Path
+import sys
+fixtures, out = map(Path, sys.argv[1:])
+source = (fixtures / "graph-race.py").read_bytes()
+(out / "graph-race-repl.txt").write_text(
+    "exec(bytes.fromhex('" + source.hex() + "').decode())\n")
+PY
+QOB_TIMEOUT=900 run_boot race1 "$QOB_OUT/graph-race-repl.txt" '^GRAPH-RACE-PASS [0-9]+ [0-9]+ [0-9]+'
+python3 - "$ROOT/tools/host/objectspace" "$QOB_OUT" <<'PY'
+from pathlib import Path
+import re
+import sys
+fixtures, out = map(Path, sys.argv[1:])
+log = (out / "boot-race1.log").read_text(errors="replace")
+m = re.search(r"^GRAPH-RACE-PASS (\d+) (\d+) (\d+)", log, re.M)
+assert m, "concurrent save/load acceptance did not finish"
+graph, before, after = map(int, m.groups())
+assert graph > 0 and after > before > 0, "child was not active during saves"
+data = (fixtures / "graph-race-reboot.txt.in").read_text()
+(out / "graph-race-reboot.txt").write_text(data.replace("@GRAPH@", str(graph)))
+PY
+run_boot race2 "$QOB_OUT/graph-race-reboot.txt" '^GRAPH-RACE-REBOOT-PASS'
+
+
 python3 - "$QOB_OUT" <<'PY'
 from pathlib import Path
 import re
 import sys
 out = Path(sys.argv[1])
-for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit", "nested1", "nested2", "cyclic1", "cyclic2"):
+for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit", "torn-super", "after-torn", "nested1", "nested2", "cyclic1", "cyclic2", "race1", "race2"):
     log = (out / ("boot-" + tag + ".log")).read_text(errors="replace")
     assert not re.search(r"^(?:Traceback|AssertionError|panic:)", log, re.M), f"guest exception in {tag}"
 assert "PERSISTENT-UNCOMMITTED" in (out / "boot-crash.log").read_text()
 assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-boot4.log").read_text()
 assert "OWNERID-CRASH graph-before-publication" in (out / "boot-midcommit.log").read_text()
 assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-after-midcommit.log").read_text()
+assert "OWNERID-CRASH graph-superblock-torn bytes=40" in (out / "boot-torn-super.log").read_text()
+assert "GRAPH-TORN-RECOVERY-PASS" in (out / "boot-after-torn.log").read_text()
 assert "NESTED-GRAPH-REBOOT-PASS" in (out / "boot-nested2.log").read_text()
 assert "CYCLIC-GRAPH-REBOOT-PASS" in (out / "boot-cyclic2.log").read_text()
-print("PASS: GE/O ObjectSpace snapshots / nested and cyclic aliasing reboot / pre-publication crash recovery")
+assert "GRAPH-RACE-PASS" in (out / "boot-race1.log").read_text()
+assert "GRAPH-RACE-REBOOT-PASS" in (out / "boot-race2.log").read_text()
+print("PASS: ObjectSpace snapshots / nested cycles / pre-publication / torn-block recovery / concurrent fork stress")
 PY

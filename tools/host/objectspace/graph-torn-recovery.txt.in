@@ -1,0 +1,9 @@
+# Recover only a complete old or new ObjectSpace image after a short write.
+import plan9 as p
+v=p.obj_open_volume()
+s=p.space_load(v,@GRAPH@)
+rows,_,_=p.space_list(s)
+assert len(rows)==0 or len(rows)==1
+assert not rows or next(iter(rows)).count('second')==1
+assert not rows or next(iter(rows)).count(@NEWBINDING@)==1
+print('GRAPH-TORN-RECOVERY-PASS')
