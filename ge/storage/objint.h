@@ -6,9 +6,9 @@
 #define GEFS_OBJINT_H
 
 enum {
-	Objhdrksz	= 1+8,
-	Objoidksz	= 1+8+8,
-	Objksz		= 1+8+8+8+4,
+	Objhdrksz	= 1,
+	Objoidksz	= 1+8,
+	Objksz		= 1+8+8+4,
 	Objchunk	= 480,		/* < Inlmax */
 	Objuser		= 256,		/* the header's user part */
 	Objtomb		= 0xffffffff,	/* len of a tombstone */
@@ -40,7 +40,6 @@ struct Otx {
 	Gefs	*fs;		/* Plan2001: its volume */
 	Otx	*next;		/* the active ones, under mutlk */
 	Tree	*tree;		/* the volume's snapshot tree */
-	vlong	store;
 
 	/* the transaction: ver != 0 */
 	uvlong	ver;
@@ -69,7 +68,7 @@ struct Otx {
 
 /* The transaction engine and the native O API (obj.c). */
 Tree*	txroot(Otx*);
-int	gethdr(Tree*, vlong, Ohdr*);
+int	gethdr(Tree*, Ohdr*);
 uvlong	keyver(char*);
 void	objtxsweep(Otx*, char*, int, int (*)(char*, int, void*), void*);
 int	ospaceownerget(Ospace*, uvlong, uvlong*, int*);

@@ -7,32 +7,6 @@
  */
 #include "gefs.h"
 
-static void
-okey(char *kbuf, char *name, Key *k)
-{
-	if(strlen(name) > Keymax-1)
-		error("O: record name too long");
-	kbuf[0] = Ko;
-	memmove(kbuf+1, name, strlen(name));
-	k->k = kbuf;
-	k->nk = 1+strlen(name);
-}
-
-uvlong
-ospaceid(Gefs *fs, char *name)
-{
-	char kbuf[Keymax], xbuf[Kvmax];
-	Key k;
-	Kvp kv;
-
-	okey(kbuf, name, &k);
-	if(!btlookup(&fs->snap, &k, &kv, xbuf, sizeof(xbuf)))
-		error("O: no space '%s'", name);
-	if(kv.val.nv != 8)
-		error("O: bad space id length for '%s'", name);
-	return UNPACK64(kv.val.v);
-}
-
 /*
  * Open an existing O volume: GE's blocks/tree/recovery, the O profile
  * and version, and the init Space's catalog entry.  An FS volume is
@@ -52,8 +26,17 @@ oopen0(char *dev, void *oblk, vlong off, vlong size, int rw,
 	v = fs->flag & Ovolvermask;
 	if(v != Ovolvers)
 		error("O: unsupported volume version %llud", v);
-	if(ospaceid(fs, "init") != OspaceInit)
-		error("O: init Space id mismatch");
+	/* A flat O volume has one header and no name-to-SpaceID catalog. */
+	{
+		char b = Kobj, buf[Kvmax];
+		Key key;
+		Kvp kv;
+		key.k = &b;
+		key.nk = 1;
+		if(!btlookup(&fs->snap, &key, &kv, buf, sizeof buf) ||
+		   kv.val.nv < 24)
+			error("O: missing flat volume header");
+	}
 	return fs;
 }
 

@@ -101,13 +101,12 @@ enum {
 	Kconf,	/* name[] => value[] */
 
 	/* Plan2001: native O object stores (obj.c, docs/O-FORMAT.md) */
-	Kobj,	/* store[8] [oid[8] ~ver[8] idx[4]] => header or chunk */
+	Kobj,	/* [oid[8] ~ver[8] idx[4]] => header or chunk */
 
 	/* Plan2001: native O volume records (docs/O-FORMAT.md) */
-	Ko,	/* name[] => value[]: catalog and volume records */
 
 	/* Plan2001: immutable per-object owner metadata. */
-	Kowner,	/* store[8] oid[8] ~ver[8] => magic[8] owner[8] */
+	Kowner,	/* oid[8] ~ver[8] => magic[8] owner[8] */
 };
 
 enum {
@@ -130,13 +129,12 @@ enum {
  * Plan2001: the native O volume profile (docs/O-FORMAT.md).  The
  * low byte of fs->flag is the PoC format version; the high bit tells O
  * from a legacy FS volume (whose flag is 0).  O records live in the GE
- * snapshot tree under the Ko key type.
+ * snapshot tree under flat Kobj/Kowner keys.
  */
 enum {
 	Ovolflag	= 1ULL << 63,
-	Ovolvers	= 1,
+	Ovolvers	= 2,
 	Ovolvermask	= 0xff,
-	OspaceInit	= 1ULL,
 };
 
 #define Zb (Bptr){-1, -1, -1}
@@ -626,14 +624,11 @@ struct Arena {
 };
 
 /*
- * Plan2001 Stage 3: a native O Space handle.  Its objects are Kobj keys
- * scoped by the catalog's stable SpaceID; there is no file, qid, path or
- * Fid.  The lock serializes this handle's writer; obj.c's begin() excludes
- * any other transaction on the same SpaceID.
+ * Flat O-volume transaction context, without SpaceID.
+ * OID allocation, versioning and writer exclusivity are volume-scoped.
  */
 struct Ospace {
 	Gefs	*fs;
-	uvlong	sid;
 	QLock	lk;
 	void	*tx;		/* obj.c's Otx, while the handle has one */
 };

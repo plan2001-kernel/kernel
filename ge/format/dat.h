@@ -60,13 +60,12 @@ enum {
 	Kconf,	/* name[] => value[] */
 
 	/* Plan2001: object stores (the kernel's ge/storage/obj.c) */
-	Kobj,	/* store[8] [oid[8] ~ver[8] idx[4]] => header or chunk */
+	Kobj,	/* [oid[8] ~ver[8] idx[4]] => header or chunk */
 
 	/* Plan2001: native O volume records (docs/O-FORMAT.md) */
-	Ko,	/* name[] => value[]: catalog and volume records */
 
 	/* Plan2001: immutable per-object owner metadata. */
-	Kowner,	/* store[8] oid[8] ~ver[8] => magic[8] owner[8] */
+	Kowner,	/* oid[8] ~ver[8] => magic[8] owner[8] */
 };
 
 enum {
@@ -83,13 +82,12 @@ enum {
  * Plan2001: the native O volume profile (docs/O-FORMAT.md).  The
  * low byte of fs->flag is the PoC format version; the high bit tells O
  * from a legacy FS volume (whose flag is 0).  O records live in the GE
- * snapshot tree under the Ko key type.
+ * snapshot tree under flat Kobj/Kowner keys.
  */
 enum {
 	Ovolflag	= 1ULL << 63,
-	Ovolvers	= 1,
+	Ovolvers	= 2,
 	Ovolvermask	= 0xff,
-	OspaceInit	= 1ULL,
 };
 
 #define Zb (Bptr){-1, -1, -1}

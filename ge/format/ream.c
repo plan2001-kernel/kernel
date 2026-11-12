@@ -124,7 +124,7 @@ seedadd(Seedrec **r, int *n, int *a, char *k, int nk, char *v, int nv)
 }
 
 static void
-seedobjat(Seedrec **r, int *n, int *a, uvlong sid, uvlong oid, uchar *data, long len)
+seedobjat(Seedrec **r, int *n, int *a, uvlong oid, uchar *data, long len)
 {
 	enum { Seedchunk = 480 };
 	char k[Keymax], v[Inlmax];
@@ -135,10 +135,9 @@ seedobjat(Seedrec **r, int *n, int *a, uvlong sid, uvlong oid, uchar *data, long
 	idx = 0;
 	do{
 		k[0] = Kobj;
-		PACK64(k+1, sid);
-		PACK64(k+9, oid);
-		PACK64(k+17, ~1ULL);
-		PACK32(k+25, idx);
+		PACK64(k+1, oid);
+		PACK64(k+9, ~1ULL);
+		PACK32(k+17, idx);
 		m = 0;
 		if(idx == 0){
 			PACK32(v, (u32int)len);
@@ -154,7 +153,7 @@ seedobjat(Seedrec **r, int *n, int *a, uvlong sid, uvlong oid, uchar *data, long
 			else
 				memmove(v, data+off, m);
 		}
-		seedadd(r, n, a, k, 29, v, m);
+		seedadd(r, n, a, k, 21, v, m);
 		off += m - (idx == 0 ? 4 : 0);
 		idx++;
 	}while(off < len);
@@ -163,7 +162,7 @@ seedobjat(Seedrec **r, int *n, int *a, uvlong sid, uvlong oid, uchar *data, long
 static void
 seedobj(Seedrec **r, int *n, int *a, uvlong oid, uchar *data, long len)
 {
-	seedobjat(r, n, a, OspaceInit, oid, data, len);
+	seedobjat(r, n, a, oid, data, len);
 }
 
 /*
@@ -345,12 +344,7 @@ oseed(Bptr *rootp, int *htp)
 
 	r = nil;
 	nr = ar = 0;
-	/* the catalog entry: init -> 1 */
-	k[0] = Ko;
-	strecpy(k+1, k+sizeof k, "init");
-	PACK64(v, OspaceInit);
-	seedadd(&r, &nr, &ar, k, 1+4, v, 8);
-
+	/* Flat volume: no catalog or SpaceID. */
 	snprint(path, sizeof path, "%s/env", seeddir);
 	if(seedread(path, &eb, &en) < 0)
 		sysfatal("seed: %s: %r", path);
@@ -434,7 +428,6 @@ oseed(Bptr *rootp, int *htp)
 	memmove(hex, hb, 64);
 	hex[64] = 0;
 	k[0] = Kobj;
-	PACK64(k+1, OspaceInit);
 	PACK64(v, 1);
 	PACK64(v+8, 1);
 	PACK64(v+16, 1);
@@ -448,45 +441,9 @@ oseed(Bptr *rootp, int *htp)
 		memmove(v+24+72, ab, an);
 		free(ab);
 	}
-	seedadd(&r, &nr, &ar, k, 9, v, 24+72+an);
+	seedadd(&r, &nr, &ar, k, 1, v, 24+72+an);
 
-	/* Optional flat root store for native toolchain porting experiments.
-	 * The manifest lists only 16-digit OIDs; payloads are seed/root/<OID>.
-	 * Object names are an application-level registry, not GE directories.
-	 */
-	snprint(path, sizeof path, "%s/rootspace", seeddir);
-	if(seedread(path, &ab, &an) >= 0){
-		k[0] = Ko;
-		k[1] = '/';
-		PACK64(v, 2);
-		seedadd(&r, &nr, &ar, k, 2, v, 8);
-		for(p = (char*)ab; *p != 0; p = e+1){
-			e = strchr(p, '\n');
-			if(e == nil || e-p != 16)
-				sysfatal("seed: rootspace: expected 16 hex digits and LF");
-			for(q = p; q < e; q++)
-				if(!((*q >= '0' && *q <= '9') || (*q >= 'a' && *q <= 'f')))
-					sysfatal("seed: rootspace: bad OID");
-			memmove(oidhex, p, 16);
-			oidhex[16] = 0;
-			oid = strtoull(oidhex, nil, 16);
-			if(oid < 64 || oid >= 0xffffffff00000000ULL)
-				sysfatal("seed: rootspace: reserved OID");
-			snprint(path, sizeof path, "%s/root/%s", seeddir, oidhex);
-			if(seedread(path, &data, &n) < 0)
-				sysfatal("seed: %s: %r", path);
-			seedobjat(&r, &nr, &ar, 2, oid, data, n);
-			free(data);
-		}
-		free(ab);
-		k[0] = Kobj;
-		PACK64(k+1, 2);
-		PACK64(v, 1);
-		PACK64(v+8, 1);
-		PACK64(v+16, 1);
-		seedadd(&r, &nr, &ar, k, 9, v, 24);
-		print("seed: flat root catalog / -> SpaceID 2\n");
-	}
+	/* All seeded OIDs belong directly to the single volume. */
 
 	free(eb);
 	free(hb);
@@ -562,28 +519,23 @@ reamo(char *dev)
 		loadlog(a, a->loghd);
 	}
 
-	/*
-	 * The catalog is the snapshot tree: Ko "init" => an 8-byte
-	 * SpaceID.  It is flat: no parent, slash or directory.  Stage 4's
-	 * -i adds the Environment and code objects; a large object is many
-	 * chunk records, so the seed builder makes an ordinary multi-level
-	 * GE tree rather than one bounded leaf.
-	 */
+	/* The O volume stores flat object and owner records. */
 	if(seeddir != nil){
 		oseed(&root, &ht);
 		fs->snap.bp = root;
 		fs->snap.ht = ht;
 	}else{
 		if((tb = newblk(&fs->snap, Tleaf)) == nil)
-			sysfatal("ream O: allocate catalog: %r");
+			sysfatal("ream O: allocate volume header: %r");
 		holdblk(tb);
-		kbuf[0] = Ko;
-		strecpy(kbuf+1, kbuf+sizeof(kbuf), "init");
-		PACK64(vbuf, OspaceInit);
+		kbuf[0] = Kobj;
+		PACK64(vbuf, 1);
+		PACK64(vbuf+8, 1);
+		PACK64(vbuf+16, 1);
 		kv.key.k = kbuf;
-		kv.key.nk = 1+strlen("init");
+		kv.key.nk = 1;
 		kv.val.v = vbuf;
-		kv.val.nv = 8;
+		kv.val.nv = 24;
 		setval(tb, &kv);
 		finalize(tb);
 		syncblk(tb);
