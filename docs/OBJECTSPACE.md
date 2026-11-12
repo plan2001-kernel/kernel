@@ -125,7 +125,7 @@ p.space_unbind(root, a)
 # reader retains its capability: unlink is not revoke.
 ```
 
-## Persistent GE/O integration (target, NOT IMPLEMENTED)
+## Persistent GE/O integration (phase 4, experimental implementation)
 
 GE/O v2 is already flat: each volume has one OID allocator, one
 published version and one transaction domain. **No persistent SpaceID**
