@@ -176,10 +176,13 @@ capability tests. The extended QEMU harness now also injects boot-only fault poi
 inside `objtxcommit`, immediately after staging flush and before the
 published-version header update. It kills QEMU at the deterministic marker,
 boots the same disk again, and checks that the previous graph remains intact.
-This is a **pre-publication crash test**, not a sector-level torn-write test:
-interruptions during physical header-sector writes still need a separate
-block-device fault-injection test. The graph model remains restricted to GE/O
-leaves, so the multi-node/cyclic graph requirements are still outstanding.
+Point 106 extends the QEMU harness into GE's actual superblock sync:
+the guest deliberately writes only the first 40 bytes of one publication
+superblock and flushes them before the host kills QEMU. After restarting
+the exact same disposable disk, the test requires a valid, complete old
+or new graph. This models a torn logical superblock update, but **does
+not prove real hardware sector tearing, cache durability, or every
+possible write ordering**. The graph model still restricts leaves to GE/O.
 
 Passing compilation or v1 regression tests alone is
 not evidence of crash recovery or torn-write safety.

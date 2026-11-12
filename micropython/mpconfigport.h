@@ -20,6 +20,8 @@
 #define MICROPY_PY_CMATH (0)
 #define MICROPY_LONGINT_IMPL (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_PY_JSON (1)
+/* Native REPL CI imports normal Python fixtures through bytes.fromhex. */
+#define MICROPY_PY_BUILTINS_BYTES_HEX (1)
 #define MICROPY_ENABLE_SOURCE_LINE (1)
 #define MICROPY_ERROR_REPORTING (MICROPY_ERROR_REPORTING_DETAILED)
 /* io (StringIO/BytesIO and the stream machinery); pathname open() is gone */

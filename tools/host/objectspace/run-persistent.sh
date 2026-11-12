@@ -117,7 +117,7 @@ assert mid.count("ownerid_fault(105)") == 1
 graph, _, _ = (out / "graph-ids.txt").read_text().split()
 import re
 log = (out / "boot-boot2.log").read_text(errors="replace")
-m = re.search(r"^PERSISTENT-BOOT2 (\\d+) (\\d+) (\\d+)", log, re.M)
+m = re.search(r"^PERSISTENT-BOOT2 (\d+) (\d+) (\d+)", log, re.M)
 assert m and m.group(1) == graph
 binding = m.group(3)
 data = (fixtures / "graph-torn-recovery.txt.in").read_text()
