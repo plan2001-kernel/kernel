@@ -848,7 +848,7 @@ def run():
             p.obj_close(h)
         return got, order
 
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
     RW_RIGHTS = p.VREAD | p.VWRITE | p.VMETA | p.VDELEGATE
     RO_RIGHTS = p.VREAD | p.VMETA | p.VDELEGATE
 

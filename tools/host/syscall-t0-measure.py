@@ -558,7 +558,7 @@ def main() -> int:
         inp.write_text(
             "print(6*7)\n"
             "import plan9\n"
-            'h = plan9.obj_open_space("init")\n'
+            'h = plan9.obj_open_volume()\n'
             'print("T0-OBJ-HANDLE", h)\n'
             "plan9.obj_close(h)\n"
             'print("T0-OBJ-OK")\n'

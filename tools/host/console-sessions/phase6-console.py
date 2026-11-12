@@ -302,7 +302,7 @@ def init():
 
 def run():
     PASS[0] = 0
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
     cat = p.obj_devices_open(CATALOG_RIGHTS)
     kbdh = p.obj_device_open(cat, KBD_FAMILY, 0, 0, 0, KBD_OPTS)
 

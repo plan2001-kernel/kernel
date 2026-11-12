@@ -133,7 +133,7 @@ def run():
         except OSError as e:
             skip('delegated UART child', str(e))
         else:
-            sh = p.obj_open_space(b'init')
+            sh = p.obj_open_volume()
             child = """import plan9 as p
 hs=p.obj_list()
 h=next(h for h in hs if p.obj_info(h)[8]==7)
