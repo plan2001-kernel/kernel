@@ -1019,7 +1019,7 @@ qob_main()
 	nspace=$(python3 - "$QOB_OUT/o-after.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-print(d['space']['N'])
+print(d['volume']['N'])
 PY
 )
 	mp_sha=MISSING
