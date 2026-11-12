@@ -2214,7 +2214,8 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  o=vobjalloc(VkindGe,ossid(cap),0);
  if(o==nil) error(Enomem);
  o->provider=VopenGe;o->priv=cap;cap=nil;
- h=vhandalloc(o, rights);
+ /* A newly published GE Handle descends from its authorized O Space. */
+ h=vhandallocchild(o, rights, sh->cap);
  if(vgettab(1)==nil){vhandput(h);error(Enomem);}
  handle=vinstall(vgettab(1),h);
  if(handle<0){vhandput(h);error("vobj: too many handles");}
@@ -4248,6 +4249,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 	Vobj *o;
 	VobjGeReq gr;
 	Ohand *oh;
+	Vcap *sourcecap = nil;
 	int handle, defrights, ceiling;
 
 	if(id != nil)
@@ -4273,6 +4275,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		o = vobjalloc(VkindSpace, 0, 0);
 		if(o == nil){
 			oshandput(oh);
+			vcapput(sourcecap);
 			error(Enomem);
 		}
 		vgecaplimit(oh,(int)rights);
@@ -4298,11 +4301,15 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 			error(Ebadarg);
 		}
 		if(waserror()){
+			vcapput(sourcecap);
 			vhandput(sh);
 			nexterror();
 		}
 		ceiling = sh->rights;
 		cap = oscopycap((Ohand*)sp->priv, gr.oid);
+		/* Pin the authorizing grant before releasing its Handle. */
+		sourcecap = sh->cap;
+		incref(&sourcecap->ref);
 		poperror();
 		vhandput(sh);
 		oh = cap;
@@ -4311,6 +4318,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 			rights = defrights;
 		if((rights & ~(uvlong)defrights) != 0){
 			oshandput(oh);
+			vcapput(sourcecap);
 			error(Eperm);
 		}
 		o = vobjnewkind(VkindGe, 0);
@@ -4327,11 +4335,15 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 	}else
 		error("vobj: provider not supported");
 	if(waserror()){
+		vcapput(sourcecap);
 		vobjput(o);
 		nexterror();
 	}
-	handle = vobjinstallobj(o, (int)rights);
+	handle = sourcecap == nil ?
+		vobjinstallobj(o, (int)rights) :
+		vobjinstallchild(o, (int)rights, sourcecap);
 	poperror();
+	vcapput(sourcecap);
 	if(id != nil){
 		id->incarnation = o->incarnation;
 		id->space = o->space;
