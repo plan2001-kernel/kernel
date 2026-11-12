@@ -831,6 +831,20 @@ static mp_obj_t p9_objlist(void){
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_objlist_obj,p9_objlist);
 
+/* Every process gets zero or more ObjectSpace roots solely from its
+ * installed Handle capabilities. No ambient root or Pgrp traversal. */
+static mp_obj_t p9_spaceroots(void){
+ VobjListRec rec[32];long n,i,count=0;mp_obj_t roots[32];
+ n=obj_list(rec,32);
+ if(n<0)raise_err();
+ if(n>32)n=32;
+ for(i=0;i<n;i++)
+  if(rec[i].kind==VkindObjectSpace)
+   roots[count++]=mp_obj_new_int((mp_int_t)rec[i].handle);
+ return mp_obj_new_tuple(count,roots);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_spaceroots_obj,p9_spaceroots);
+
 /* Raw INVOKE for negative/version tests: no buffers are transferred. */
 static mp_obj_t p9_objinvoke(size_t n,const mp_obj_t *a){
  ObjCall c;
@@ -1276,6 +1290,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
     { MP_ROM_QSTR(MP_QSTR_cap_revoke), MP_ROM_PTR(&p9_caprevoke_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_roots), MP_ROM_PTR(&p9_spaceroots_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_new), MP_ROM_PTR(&p9_spacenew_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_bind), MP_ROM_PTR(&p9_spacebind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_unbind), MP_ROM_PTR(&p9_spaceunbind_obj) },
