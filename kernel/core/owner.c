@@ -18,7 +18,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"vobjint.h"
-#include	"../../ge/storage/ocontext.h"
+#include	"../../ge/storage/ohand.h"
 #include	"owner.h"
 
 enum {
