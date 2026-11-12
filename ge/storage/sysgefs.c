@@ -499,7 +499,7 @@ enum {
  */
 static long
 osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
-	int checkowner)
+	int checkintegrity)
 {
 	uchar *buf = nil;
 	uvlong v;
@@ -514,7 +514,7 @@ osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
 		nexterror();
 	}
 	oauthorize(oh, oid, Oexecute);
-	if(checkowner)
+	if(checkintegrity)
 		osownercheck(oh, oid);
 	if((buf = malloc(max)) == nil) error(Enomem);
 	n = onativeget(oh->sp, oid, buf, max, &v);
@@ -532,8 +532,8 @@ osgetobjecthand(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 	return osgetobjecthandcore(oh, oid, bp, max, ver, 1);
 }
 
-/* Trusted kernel/registered-program load: bypass the process owner check.
- * The caller must already hold registry/installation authority. */
+/* Trusted kernel/registered-program load: registry authority already
+ * validated. Ordinary executable reads check owner-record integrity too. */
 long
 osgetobjecthandk(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 {
@@ -729,11 +729,16 @@ osownerof(Ohand *oh, uvlong oid)
 }
 
 /*
- * An existing object's recorded owner is authoritative.  A write may also
- * be the first publication of an OID; that creation is assigned from the
- * caller's trust domain by the atomic create/put path, never from a
- * caller-supplied number.  A missing record for a live object in an
- * owner-aware Space is corruption.
+ * Owner metadata is immutable provenance, NOT access authority.
+ * oauthorize() has already validated the Ohand, its attenuated rights,
+ * optional one-object scope and its revocation gate. This check retains
+ * the owner-record integrity invariant: a missing Kowner for an existing
+ * object in an owner-aware Space is corruption, not implicit permission.
+ * The legacy seeded Space without Kowner records is still readable by
+ * holders of explicitly authorized capabilities.
+ *
+ * On first publication, the storage layer records the writer's OwnerID
+ * exactly once; subsequent delegated writes preserve that original OwnerID.
  */
 static void
 osownercheckcore(Ohand *oh, uvlong oid)
@@ -741,22 +746,15 @@ osownercheckcore(Ohand *oh, uvlong oid)
 	uvlong owner;
 	int required;
 
-	if(oid == 0 || up == nil || up->kp)
+	if(oid == 0)
 		return;
-	if(ospaceownerget(oh->sp, oid, &owner, &required)){
-		if(up->owner != owner)
-			error(Eperm);
+	if(ospaceownerget(oh->sp, oid, &owner, &required))
 		return;
-	}
-	/* No object yet: a write may create it; later reads report absence.
-	 * A write that does create it records the caller's trust domain in
-	 * the same transaction. */
+	/* A missing OID may be created with an Owrite capability. */
 	if(ospaceget(oh->sp, oid, nil, 0, nil) < 0)
 		return;
 	if(required)
 		error("O: corrupt object owner metadata");
-	if(up->owner != ownerroot())
-		error(Eperm);
 }
 
 void
@@ -866,7 +864,8 @@ oscreatehandcore(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
 	return 0;
 }
 
-/* Trusted installation creates an owner-owned object from a kernel buffer. */
+/* Trusted installation specifies the NEW object's immutable provenance;
+ * installation does not grant read/write access to a matching OwnerID. */
 long
 oscreatehandowner(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
 {

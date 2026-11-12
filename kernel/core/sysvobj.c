@@ -352,21 +352,12 @@ vobjalloc(int kind, uvlong space, ulong size)
 }
 
 /*
- * Direct object management requires the caller's immutable OwnerID to equal
- * the object's.  Kernel-internal callers retain their separate authority.
- * Namespace/Space, region mapping and process observation are handled at
- * their own call sites because they are data/lookup and IPC mechanisms, not
- * object ownership.
+ * OwnerID is immutable provenance, never an access-control predicate.
+ * Authorization is by vlookup/Vhand rights and its revocable Vcap lineage.
+ * No operation may re-open a Vobj from owner identity or raw OID alone.
+ * Provider-local safety checks (single writer, device state, GE transaction
+ * integrity) remain in force independently of provenance.
  */
-static int
-ownercanmanage(Vobj *o)
-{
-	if(o == nil)
-		return 0;
-	if(up == nil || up->kp)
-		return 1;
-	return o->owner != 0 && up->owner == o->owner;
-}
 
 static int
 vinstall(Vhtab*, Vhand*);
@@ -792,10 +783,8 @@ vobjprocterminate(int handle)
 		vobjput(o);
 		error(Ebadarg);
 	}
-	if(!ownercanmanage(o)){
-		vobjput(o);
-		error(Eperm);
-	}
+	/* vobjholdobj(Vcontrol) is the entire process-control authority;
+	 * PID, ancestry and OwnerID do not grant or restrict it. */
 	if(waserror()){
 		vobjput(o);
 		nexterror();
@@ -1038,12 +1027,8 @@ vobjregionmap(int handle, uintptr va, int flags)
 	len = npages*BY2PG;
 	write = (h->rights & Vwrite) != 0 &&
 		(flags & ObjRegionMapReadonly) == 0;
-	/* A read-only observer may consume published data across owners.  The
-	 * unique writable publisher slot requires direct ownership. */
-	if(write && !ownercanmanage(o)){
-		vhandput(h);
-		error(Eperm);
-	}
+	/* Vwrite is an explicit, attenuable transferable writer grant.
+	 * The unique writer slot and MMU protections still enforce exclusivity. */
 	if(va != 0 && (va >= USTKTOP || (va & (BY2PG-1)) != 0)){
 		vhandput(h);
 		error(Ebadarg);
@@ -2255,10 +2240,7 @@ vobjcommit(int handle, uvlong *ver)
 		vobjput(o);
 		error(Ebadarg);
 	}
-	if(kind == VkindGe && !ownercanmanage(o)){
-		vobjput(o);
-		error(Eperm);
-	}
+	/* Vcommit is sufficient regardless of GE object provenance. */
 	if(waserror()){
 		vobjput(o);
 		nexterror();
@@ -2417,10 +2399,8 @@ vobjrevoke(int handle)
 
     h = vlookup(handle, 0);
     if(waserror()){vhandput(h);nexterror();}
-    if(!ownercanmanage(h->obj) && h->obj->kind != VkindSpace &&
-       h->obj->kind != VkindNamespaceView){
-        error(Eperm);
-    }
+    /* Provider revocation is controlled by the exact Vhand rights; the
+     * immutable OwnerID never manufactures or negates control authority. */
     if(h->obj->kind == VkindRegion){
         r = h->obj->priv;
         if(r == nil || (h->rights & Vcontrol) == 0)
@@ -4118,11 +4098,8 @@ vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 		vobjput(o);
 		nexterror();
 	}
-	if(o->kind != VkindSpace && o->kind != VkindRegion &&
-	   o->kind != VkindProcess && !ownercanmanage(o)){
-		vobjput(o);
-		error(Eperm);
-	}
+	/* Vread/Vwrite Handle rights are checked before this provider switch.
+	 * Owner metadata is descriptive, never an extra access-control gate. */
 	switch(o->kind){
 	case VkindUart:
 		if(n < 0 || n > OBJ_STREAM_MAXIO)
