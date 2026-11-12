@@ -37,6 +37,7 @@ enum {
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
+	ObjOpenSpaceGraph	= 17,	/* authorized restore from GE/O snapshot OID */
 };
 
 /* obj_create kinds.  ObjKindBytes is volatile immutable content and
@@ -123,6 +124,7 @@ enum {
 	ObjOpSpaceResolve = 55,	/* binding id -> attenuated target handle */
 	ObjOpSpaceEnumerate = 56,	/* paged stable-snapshot metadata */
 	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
+	ObjOpSpaceSave = 58,	/* durable, atomic graph snapshot (GE/O v2) */
 };
 
 /* ObjOpRegionMap arg1 flags. */
