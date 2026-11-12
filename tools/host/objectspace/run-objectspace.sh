@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 OUT=${OBJECTSPACE_TEST_OUT:-$ROOT/build/objectspace/run}
 export QEMU_O_BOOT_LIB=1
+# Synchronize each submitted line with the guest REPL after GE/O commit.
+export QOB_REPL_SYNC_LINES=1
 source "$ROOT/tools/qemu-o-boot.sh"
 qob_main --accel kvm:tcg --cpus 2 --ncpu 2 --obootcpu 0 \
   --obootexec 0x4f45584543000003 \

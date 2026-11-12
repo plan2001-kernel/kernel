@@ -1,5 +1,5 @@
 #!/bin/bash
-# N11: fresh GE/O v1 ream + seed with the native Linux host tools.
+# N11: fresh GE/O v2 ream + seed with the native Linux host tools.
 #
 # The formatter is the repository's real GE/O ream
 # (ge/format/ream.c::reamo) built as a Linux GCC host program by
@@ -120,8 +120,8 @@ if not env or not code:
 sbs = d['superblocks']
 if len(sbs) != 2 or not all(s['hash']['ok'] for s in sbs):
     sys.exit("primary/backup superblock validation failed")
-if any(s['flag'] != (1 << 63 | 1) for s in sbs):
-    sys.exit("not an O v1 volume")
+if any(s['flag'] != (1 << 63 | 2) for s in sbs):
+    sys.exit("not an O v2 volume")
 env_bytes = (extract / 'fffffffffffffffc.bin').read_bytes()
 code_bytes = (extract / 'ffffffff00000000.bin').read_bytes()
 if hashlib.sha256(env_bytes).hexdigest() != env['sha256']:
@@ -151,12 +151,12 @@ if code_bytes[1] != oseed.mpy_version():
              % (code_bytes[1], oseed.mpy_version()))
 if ((code_bytes[2] >> 2) & 0x2F) != 0 or code_bytes[2] & 0x40:
     sys.exit("stored .mpy contains native code")
-print("inspect: space=%s" % (d['space'],))
+print("inspect: volume=%s" % (d['volume'],))
 print("inspect: MPY=%d %s" % (o['bytes'], o['sha256']))
 print("inspect: Environment=%d %s" % (env['bytes'], env['sha256']))
 print("inspect: code=%d %s" % (code['bytes'], code['sha256']))
 print("inspect: runtime=%s .mpy v%d" % (oseed.runtime_id(), oseed.mpy_version()))
-print("inspect: superblocks primary+backup OK, O v1")
+print("inspect: superblocks primary+backup OK, O v2")
 PY
 	rm -rf "$tmp"
 }
@@ -254,8 +254,8 @@ if not o or o['bytes'] != int(sys.argv[2]) or o['sha256'] != sys.argv[3]:
     sys.exit("device MPY OID mismatch: %r" % (o,))
 if not all(s['hash']['ok'] for s in d['superblocks']):
     sys.exit("device superblock validation failed")
-print("device: MPY OID=%d %s space=%s superblocks=OK" %
-      (o['bytes'], o['sha256'], d['space']))
+print("device: MPY OID=%d %s volume=%s superblocks=OK" %
+      (o['bytes'], o['sha256'], d['volume']))
 PY
 	{
 		printf 'method=partition dd of native formatter image\n'

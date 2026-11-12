@@ -3,8 +3,8 @@
  *
  * The kernel supplies a pointer (in BP via otouser) to this argument block
  * in the user stack: the OID, the exact argv count and strings, the volume
- * spec and the native O Space name.  The loader uses only the existing user
- * O volume and OBJ Space syscalls; it has no pathname, FD, console or
+ * spec.  The loader uses only the existing user
+ * O volume and flat GE/O volume capability API; it has no pathname, FD, console or
  * writable global state.
  */
 #include <u.h>
@@ -22,7 +22,6 @@ struct Oargs
 	long	argc;
 	long	vollen;
 	char	volspec[128];
-	char	space[8];
 	char	argv[Maxargv][128];
 };
 
@@ -44,7 +43,7 @@ _main(struct Oargs *a)
 
 	if(ovolopen(a->volspec, a->vollen) != 1)
 		exits("ovolopen");
-	h = objopen(ObjOpenSpace, a->space, 4, 0, nil);
+	h = objopen(ObjOpenVolume, nil, 0, 0, nil);
 	if(h < 0)
 		exits("objopen");
 	if(a->argc < 0 || a->argc > Maxargv)
@@ -53,7 +52,7 @@ _main(struct Oargs *a)
 		av[i] = a->argv[i];
 	av[a->argc] = nil;
 	oexecute(h, a->oid, av, a->argc);
-	/* Failed load leaves ownership here; release the actual Space handle. */
+	/* Failed load leaves ownership here; release the volume capability. */
 	objclose(h);
 	exits("oexecute");
 }

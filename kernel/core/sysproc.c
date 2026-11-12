@@ -59,39 +59,31 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	/* Check flags before we commit */
 	if((flag & (RFFDG|RFCFDG)) == (RFFDG|RFCFDG))
 		error(Ebadarg);
-	if((flag & (RFNAMEG|RFCNAMEG)) == (RFNAMEG|RFCNAMEG))
+	if(flag & (RFNAMEG|RFCNAMEG|RFNOMNT))
 		error(Ebadarg);
 	if((flag & (RFENVG|RFCENVG)) == (RFENVG|RFCENVG))
 		error(Ebadarg);
 
-	/* Copying an absent resource is invalid; explicit empty-group flags
-	 * below still create exactly the resource requested by the caller.
-	 * Namespace flags require the old group to preserve its device mask. */
+	/* Process roots are exactly the explicitly delegated OBJ Handles.
+	 * Legacy namespace-fork flags cannot silently synthesize authority. */
 	if(((flag & RFFDG) && up->fdgrp == nil) ||
-	   ((flag & RFENVG) && up->egrp == nil) ||
-	   ((flag & (RFNAMEG|RFCNAMEG|RFNOMNT)) && up->pgrp == nil))
+	   ((flag & RFENVG) && up->egrp == nil))
 		error(Ebadarg);
 
 	if((flag&RFPROC) == 0) {
 		Ref *ofg;
-		Pgrp *opg;
 		Egrp *oeg;
 
 		if(flag & RFMEM)
 			error(Ebadarg);
 
 		ofg = up->fdgrp;
-		opg = up->pgrp;
 		oeg = up->egrp;
 
 		if(waserror()){
 			if(up->fdgrp != ofg){
 				closefdgrp(up->fdgrp);
 				up->fdgrp = ofg;
-			}
-			if(up->pgrp != opg){
-				closepgrp(up->pgrp);
-				up->pgrp = opg;
 			}
 			if(up->egrp != oeg){
 				closeegrp(up->egrp);
@@ -103,12 +95,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 		/* File descriptors */
 		if(flag & (RFFDG|RFCFDG))
 			up->fdgrp = newfdgrp();
-
-		/* Process group */
-		if(flag & (RFNAMEG|RFCNAMEG)) {
-			up->pgrp = newpgrp();
-			pgrpcpy(up->pgrp, opg, flag & RFNAMEG);
-		}
 
 		/* Environment group */
 		if(flag & (RFENVG|RFCENVG)) {
@@ -126,15 +112,10 @@ kernrforkcore(ulong flag, Vinherit *vi)
 
 		if(ofg != up->fdgrp)
 			closefdgrp(ofg);
-		if(opg != nil && opg != up->pgrp)
-			closepgrp(opg);
 		if(oeg != nil && oeg != up->egrp)
 			closeegrp(oeg);
 
 		poperror();
-
-		if(flag & RFNOMNT)
-			pgrpsealnamespace(up->pgrp);
 
 		if(flag & RFNOTEG){
 			qlock(&up->debug);
@@ -321,17 +302,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 			incref(up->fdgrp);
 	}
 
-	/* Process groups */
-	if(flag & (RFNAMEG|RFCNAMEG)) {
-		p->pgrp = newpgrp();
-		pgrpcpy(p->pgrp, up->pgrp, flag & RFNAMEG);
-	}
-	else {
-		p->pgrp = up->pgrp;
-		if(up->pgrp != nil)
-			incref(&up->pgrp->ref);
-	}
-
 	/* Environment group */
 	if(flag & (RFENVG|RFCENVG)) {
 		p->egrp = newegrp();
@@ -362,9 +332,6 @@ kernrforkcore(ulong flag, Vinherit *vi)
 	childhandle = vobjprocinstall(p->stat);
 
 	poperror();	/* prepublication error region */
-
-	if(flag & RFNOMNT)
-		pgrpsealnamespace(p->pgrp);
 
 	/*
 	 *  since the bss/data segments are now shareable,
@@ -1040,15 +1007,15 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
 
 /*
  * Shared spawn: create a real child from a published static x86-64 ELF.
- * The caller's Space handle is used only to read the image. The child
+ * The caller's volume handle is used only to read the image. The child
  * gets fresh segments and Egrp plus only the explicitly selected O view,
  * Pipe handles, environment and UDP6 permit.  CPU placement is applied
  * before ready().  The caller receives an independent process Handle.
  */
 /*
- * Shared spawn core.  The explicit GE/O Space capability is supplied by the
+ * Shared spawn core.  The explicit GE/O volume capability is supplied by the
  * caller: SPAWN(146) and OEXECUTE both resolve the pinned Ohand from a
- * VkindSpace Handle before reaching this core.  Everything else (ELF
+ * VkindGeVolume Handle before reaching this core.  Everything else (ELF
  * validation, argv, Ospawn/Oinherit layout, budgets, CPU pinning and child
  * setup) is unchanged.
  */
@@ -1178,7 +1145,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 		if(inh == nil) error(Enomem);
 		validaddr((uintptr)(uopt+1), sizeof *inh, 0);
 		memmove(inh, uopt+1, sizeof *inh);
-		if(inh->view > 2 || inh->nroles > 32 || inh->nenv > 8)
+		if(inh->view != 0 || inh->nroles != 0 || inh->nenv > 8)
 			error(Ebadarg);
 		if(inh->view == 0 && inh->nroles != 0) error(Ebadarg);
 	}
@@ -1316,17 +1283,14 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 
 	/* Fresh, empty environment group; no inherited namespace or handles. */
 	p->fdgrp = nil;
-	p->pgrp = nil;
 	p->egrp = newegrp();
 	/* Empty by default; selected initial values can be set by the child. */
 	p->vobjhandles = nil;
 	p->iomask = 0;
-	p->pgrp = newpgrp();
 	/* One atomic, already validated Handle delegation.  A failed commit
 	 * aborts the child; the parent's Handle state is untouched. */
 	vobjinheritcommit(p, &vi);
 	if(inh != nil){
-		ocontextspawn(p, inh->view, inh->roles, inh->nroles);
 		for(i = 0; i < inh->nenv; i++){
 			if(memchr(inh->env[i].name, 0, 32) == nil || inh->env[i].name[0] == 0 ||
 						memchr(inh->env[i].value, 0, 128) == nil) error(Ebadarg);
@@ -1435,7 +1399,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 	/* Latest safe prepublication point: the child is fully built,
-	 * including Handle-plan commit and Pgrp COPY/SHARE, but parent/child
+	 * including exact Handle-plan commit, but parent/child
 	 * accounting has not been committed and it is not schedulable. */
 	if(injectfault("spawn-child-late-abort"))
 		error("ospawn: injected late child abort");
@@ -1586,7 +1550,7 @@ sysspawn(sysva_list list)
 	argv = sysva_arg(list, char**);
 	argc = (int)sysva_arg(list, int);
 	opt = sysva_arg(list, struct Ospawn*);
-	soh = vobjholdohand(space, VkindSpace, Vexecute);
+	soh = vobjholdohand(space, VkindGeVolume, Vexecute);
 	if(waserror()){
 		oshandput(soh);
 		nexterror();

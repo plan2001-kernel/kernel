@@ -28,12 +28,11 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/objectspace.h"
-#include	"../../runtime/abi/namespace.h"
 #include	"owner.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 #include	"lifediag.h"
-#include	"ocontext.h"
+#include	"ohand.h"
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 #include	"env/envapi.h"
 #endif
@@ -466,10 +465,7 @@ vobjput(Vobj *o)
 
 		o->priv = nil;
 		procstatput(st);
-	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
-		lifecontrol(o->priv, -1);
-		closepgrp(o->priv);
-	}else if(o->kind == VkindGe || o->kind == VkindSpace || o->kind == VkindNamespaceView){
+	}else if(o->kind == VkindGe || o->kind == VkindGeVolume){
 		if(o->priv != nil)
 			oshandput(o->priv);
 	}
@@ -1811,7 +1807,7 @@ vlookupin(Proc *p, int handle, int need)
 		vhandput(h);
 		error(Eperm);
 	}
-  if(h->obj->kind==VkindGe || h->obj->kind==VkindSpace){
+  if(h->obj->kind==VkindGe || h->obj->kind==VkindGeVolume){
    if(waserror()){vhandput(h);nexterror();}
    oscheckhand(h->obj->priv);
    poperror();
@@ -1942,7 +1938,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 		if(gen == 0)
 			error("vobj: handle generation exhausted");
 		src = vi->e[i].src->obj;
-		if(src->kind == VkindSpace){
+		if(src->kind == VkindGeVolume){
 			/*
 			 * A bootstrap Space Ohand belongs to the boot owner.
 			 * An explicitly inherited Vexecute capability gets a
@@ -1953,7 +1949,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			 *  - before the handoff DOH exclusively owns the new
 			 *    Ohand and O, when it exists, has priv == nil;
 			 *  - after the handoff O->priv == DOH and DOH == nil, so
-			 *    O is the only owner and vobjput(O) closes the Ospace
+			 *    O is the only owner and vobjput(O) closes the GE/O transaction
 			 *    and drops the origin pin;
 			 *  - H is a local child Vhand owned by this function until
 			 *    it is installed in the child table T.  Once installed,
@@ -1982,16 +1978,16 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 				error("vobj: injected delegated Ohand failure");
 #endif
 			vgecaplimit(doh, vi->e[i].rights);
-			o = vobjalloc(VkindSpace, src->space, 0);
+			o = vobjalloc(VkindGeVolume, src->space, 0);
 			if(o == nil)
 				error(Enomem);
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 			if(injectfault("inherit-space-vobj"))
 				error("vobj: injected delegated Vobj failure");
 #endif
-			o->provider = VopenSpace;
+			o->provider = VopenGeVolume;
 			o->priv = doh;
-			o->space = ossid(doh);
+			o->space = 0;
 			o->oid = 0;
 			doh = nil;		/* O owns the Ohand now */
 #ifdef	PLAN2001_LIFECYCLE_DIAG
@@ -2111,7 +2107,7 @@ vobjcreat(int kind, uvlong space, void *buf, long n, VobjId *id)
 
 /*
  * Explicit persistent creation behind OBJCREATE(kind=Ge).  The scope
- * argument is an authorized process-local VkindSpace Handle, never a
+ * argument is an authorized process-local VkindGeVolume Handle, never a
  * volatile incarnation tag.  The new object gets its own capability copy so
  * later READ/WRITE/COMMIT use the same Ohand authority and gate.
  */
@@ -2155,13 +2151,13 @@ vobjinstallohand(Ohand *oh, int kind)
 {
  Vobj *o;
  int handle, rights;
- if(oh == nil || (kind != VkindSpace && kind != VkindGe && kind != VkindNamespaceView)) error(Ebadarg);
- rights = kind == VkindNamespaceView ? Vmeta|Vcontrol : vgerights(oh);
- o = vobjalloc(kind, kind == VkindNamespaceView ? 0 : ossid(oh), 0);
+ if(oh == nil || (kind != VkindGeVolume && kind != VkindGe)) error(Ebadarg);
+ rights = vgerights(oh);
+ o = vobjalloc(kind, 0, 0);
  if(o == nil) error(Enomem);
  o->priv = oh;
  o->oid = oh->oid;
- o->provider = kind == VkindNamespaceView ? 0 : (kind == VkindSpace ? VopenSpace : VopenGe);
+ o->provider = kind == VkindGeVolume ? VopenGeVolume : VopenGe;
  if(waserror()){o->priv=nil;vobjput(o);nexterror();}
  handle = vobjinstallobj(o, rights);
  poperror();
@@ -2183,7 +2179,7 @@ vobjholdohand(int handle, int kind, int rights)
 }
 
 int
-vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
+vobjcreatege(int volumehandle, void *buf, long n, uvlong *oidp)
 {
  Vhand *sh, *h;
  Vobj *o = nil;
@@ -2192,18 +2188,18 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  int handle = -1, rights;
  if(n<0 || n>Vobjpaymax || (n>0 && buf==nil)) error(Ebadarg);
  if(n>0) validaddr((uintptr)buf,n,0);
- sh=vlookup(spacehandle,Vcreate|Vcommit);
+ sh=vlookup(volumehandle,Vcreate|Vcommit);
  if(waserror()){
   if(handle>=0) vobjclosehandle(handle);
   vobjput(o);oshandput(cap);vhandput(sh);nexterror();
  }
- if(sh->obj->kind!=VkindSpace || sh->obj->priv==nil) error(Ebadarg);
+ if(sh->obj->kind!=VkindGeVolume || sh->obj->priv==nil) error(Ebadarg);
  /* Reserve the returned handle and provider before durable allocation.
   * An exhausted table therefore does not create an unreachable object. */
  cap=oscopycap(sh->obj->priv,0);
  rights=vgerights(cap) & sh->rights & ~Vcreate;
  vgecaplimit(cap,rights);
- o=vobjalloc(VkindGe,ossid(cap),0);
+ o=vobjalloc(VkindGe,0,0);
  if(o==nil) error(Enomem);
  o->provider=VopenGe;o->priv=cap;cap=nil;
  /* A newly published GE Handle descends from its authorized O Space. */
@@ -2214,7 +2210,6 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  oscreatehand(sh->obj->priv,buf,n,&oid); /* allocator publishes+syncs */
  o->oid=oid;((Ohand*)o->priv)->oid=oid;
  if(oidp) *oidp=oid;
- if(spaceid) *spaceid=o->space;
  poperror();vobjput(o);vhandput(sh);return handle;
 }
 
@@ -2243,7 +2238,7 @@ vobjcommit(int handle, uvlong *ver)
 
 	o = vobjholdobj(handle, Vcommit);
 	kind = o->kind;
-	if(kind != VkindGe && kind != VkindSpace){
+	if(kind != VkindGe && kind != VkindGeVolume){
 		vobjput(o);
 		error(Ebadarg);
 	}
@@ -2258,7 +2253,7 @@ vobjcommit(int handle, uvlong *ver)
 	return 0;
 }
 
-/* Replace one explicitly named persistent OID through a VkindSpace Handle.
+/* Replace one explicitly named persistent OID through a VkindGeVolume Handle.
  * It uses the same Ohand Owrite authority and Space gate as OSPACEPUT, has
  * no allocation and does not commit: the pending write joins the Space
  * transaction until a separate ObjOpCommit.  A GE Handle cannot name an
@@ -2272,7 +2267,7 @@ vobjputoid(int handle, uvlong oid, void *buf, long n)
 	if(n < 0 || n > 64*1024*1024 || (n > 0 && buf == nil))
 		error(Ebadarg);
 	o = vobjholdobj(handle, Vwrite);
-	if(o->kind != VkindSpace || o->priv == nil){
+	if(o->kind != VkindGeVolume || o->priv == nil){
 		vobjput(o);
 		error(Ebadarg);
 	}
@@ -2304,7 +2299,7 @@ vobjownerinfo(int handle, ObjOwnerInfo *out)
 	owner = o->owner;
 	switch(o->kind){
 	case VkindGe:
-	case VkindSpace:
+	case VkindGeVolume:
 		if(o->priv != nil)
 			owner = osownerof((Ohand*)o->priv, o->oid);
 		break;
@@ -2353,8 +2348,8 @@ vobjinfo(int handle, VobjInfo *out)
 	out->abi_version = VOBJ_ABI_VERSION;
 	out->rights = h->rights;
 	out->holds = o->ref.ref;
-	if((o->kind == VkindGe || o->kind == VkindSpace) && o->priv != nil){
-		out->space = ossid((Ohand*)o->priv);
+	if((o->kind == VkindGe || o->kind == VkindGeVolume) && o->priv != nil){
+		out->space = 0;
 		out->oid = o->oid;
 		osvolumeid((Ohand*)o->priv, out->volume);
 	}
@@ -3714,9 +3709,6 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	o = vspacehandle(handle, Vcontrol);
 	if(waserror()){vcapput(grant);vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
-	if(target->obj->kind == VkindNamespaceControl ||
-	   target->obj->kind == VkindNamespaceView)
-		error(Eperm); /* obsolete process-group namespace is not portable */
 	rights = req->rights == 0 ? target->rights : req->rights;
 	if(rights == 0 || (rights & ~target->rights) != 0 ||
 	   (rights & ~Vall) != 0)
@@ -3887,205 +3879,6 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 	return n;
 }
 
-int
-vobjnamespaceopen(uvlong rights, VobjId *id)
-{
-	Vobj *o;
-	int h;
-
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	if(up->pgrp == nil)
-		error(Eperm);
-	if(rights == 0)
-		rights = Vcontrol|Vmeta|Vdelegate;
-	if((rights & Vcontrol) == 0 ||
-	   (rights & ~(uvlong)(Vcontrol|Vmeta|Vdelegate)) != 0)
-		error(Eperm);
-	o = vobjnewkind(VkindNamespaceControl, 0);
-	if(o == nil)
-		error(Enomem);
-	o->provider = ObjOpenNamespaceCurrent;
-	o->priv = up->pgrp;
-	incref(&up->pgrp->ref);
-	lifecontrol(o->priv, 1);
-	if(waserror()){
-		vobjput(o);
-		nexterror();
-	}
-	h = vobjinstallobj(o, (int)rights);
-	poperror();
-	if(id != nil){
-		id->incarnation = o->incarnation;
-		id->space = o->space;
-		id->oid = o->oid;
-	}
-	vobjput(o);
-	return h;
-}
-
-static void
-vobjnamespacecheck(int handle)
-{
-	Vobj *o = vobjholdobj(handle, Vcontrol);
-	int ok = o->kind == VkindNamespaceControl && o->priv == up->pgrp;
-	vobjput(o);
-	if(!ok)
-		error(Eperm);
-}
-
-/* NamespaceControl is tied to the caller's current process group.  A copied
- * Handle cannot operate on a child or another namespace. */
-int
-vobjnamespacecreate(int control, char (*roles)[32], int nr)
-{
-	char names[Obindmax][Onamemax];
-	Ohand *view = nil;
-	uvlong epoch;
-	int i, j, handle;
-
-	vobjnamespacecheck(control);
-	if(roles == nil || nr <= 0 || nr > Obindmax)
-		error(Ebadarg);
-	validaddr((uintptr)roles, nr*Onamemax, 0);
-	memmove(names, roles, nr*Onamemax);
-	view = smalloc(sizeof *view);
-	view->ref.ref = 1;
-	if(waserror()){
-		ohandput(view);
-		nexterror();
-	}
-	view->provider = octxnew();
-	if(view->provider == nil)
-		error(Enomem);
-	epoch = octxepoch(up->pgrp->ocontext);
-	for(i=0; i<nr; i++){
-		if(memchr(names[i], 0, Onamemax) == nil || names[i][0] == 0)
-			error(Ebadarg);
-		for(j=0; names[i][j]; j++)
-			if(!((names[i][j]>='a' && names[i][j]<='z') ||
-			     (names[i][j]>='A' && names[i][j]<='Z') ||
-			     (names[i][j]>='0' && names[i][j]<='9') ||
-			      names[i][j]=='_' || names[i][j]=='-'))
-				error(Ebadarg);
-		for(j=0; j<i; j++)
-			if(strcmp(names[i], names[j]) == 0)
-				error(Ebadarg);
-		oscheckrole(up->pgrp->ocontext, names[i], 1);
-	}
-	/* The view's authority is acquired under the same gate as binding and
-	 * attachment, so RFNOMNT cannot interleave with creation. */
-	if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
-	if(waserror()){
-		pgrpnamespaceextendend(up->pgrp);
-		nexterror();
-	}
-	for(i=0; i<nr; i++)
-		octxcopybinding(view->provider, up->pgrp->ocontext, names[i]);
-	if(epoch != octxepoch(up->pgrp->ocontext))
-		error("O: namespace changed; retry");
-	poperror();
-	pgrpnamespaceextendend(up->pgrp);
-	handle = vobjinstallohand(view, VkindNamespaceView);
-	view = nil;
-	poperror();
-	return handle;
-}
-
-uvlong
-vobjnamespaceattach(int control, int handle, int mode)
-{
-	Ohand *view, *grants[Obindmax];
-	uvlong token;
-	int n=0, i;
-
-	vobjnamespacecheck(control);
-	if(mode < 0 || mode > 2)
-		error(Ebadarg);
-	view = vobjholdohand(handle, VkindNamespaceView, Vcontrol);
-	if(waserror()){
-		for(i=0; i<n; i++) ohandput(grants[i]);
-		ohandput(view);
-		nexterror();
-	}
-	if(view->provider == nil)
-		error(Ebadarg);
-	n = octxsnapshot(view->provider, grants, 1);
-	for(i=0; i<n; i++)
-		osviewgrantvalid(grants[i]);
-	token = voidget();
-	/* Admission and composition are one step against RFNOMNT. */
-	if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
-	if(waserror()){
-		pgrpnamespaceextendend(up->pgrp);
-		nexterror();
-	}
-	octxcompose(up->pgrp->ocontext, view->provider, mode, token);
-	poperror();
-	pgrpnamespaceextendend(up->pgrp);
-	poperror();
-	for(i=0; i<n; i++) ohandput(grants[i]);
-	ohandput(view);
-	return token;
-}
-
-void
-vobjnamespacedetach(int control, uvlong token)
-{
-	vobjnamespacecheck(control);
-	if(token == 0 || up->pgrp == nil)
-		error(Ebadarg);
-	octxunmount(up->pgrp->ocontext, token);
-}
-
-int
-vobjnamespacevisible(int control, void *out, long bytes)
-{
-	Ohand *grants[Obindmax];
-	NsVisible records[Obindmax];
-	NsIdentity id;
-	int allowed[Obindmax], n, i, j, count=0;
-	uvlong epoch;
-
-	vobjnamespacecheck(control);
-	if(bytes < 0 || bytes > sizeof records || bytes % sizeof records[0] ||
-	   (out == nil && bytes != 0))
-		error(Ebadarg);
-	epoch = octxepoch(up->pgrp->ocontext);
-	n = octxsnapshot(up->pgrp->ocontext, grants, 0);
-	if(waserror()){
-		for(i=0; i<n; i++) ohandput(grants[i]);
-		nexterror();
-	}
-	if(!osvisibility(grants, n, allowed) ||
-	   epoch != octxepoch(up->pgrp->ocontext))
-		error("O: namespace changed; retry");
-	for(i=0; i<n; i++) if(allowed[i]){
-		osvolumeid(grants[i], id.volume);
-		id.space = grants[i]->sid;
-		id.oid = grants[i]->oid;
-		for(j=0; j<count; j++)
-			if(memcmp(&records[j].object, &id, sizeof id) == 0)
-				break;
-		if(j == count){
-			records[count].object = id;
-			records[count].rights = 0;
-			records[count].reserved = 0;
-			count++;
-		}
-		records[j].rights |= grants[i]->rights;
-	}
-	if(count*sizeof records[0] > bytes)
-		error(Eshort);
-	if(count){
-		validaddr((uintptr)out, count*sizeof records[0], 1);
-		memmove(out, records, count*sizeof records[0]);
-	}
-	poperror();
-	for(i=0; i<n; i++) ohandput(grants[i]);
-	return count;
-}
-
 static long
 vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 {
@@ -4245,7 +4038,7 @@ int
 vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 {
 	Vobj *o;
-	VobjGeReq gr;
+	VobjGeOidReq gr;
 	Ohand *oh;
 	Vcap *sourcecap = nil;
 	int handle, defrights, ceiling;
@@ -4256,11 +4049,11 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		error(Ebadarg);
 	o = nil;
 	oh = nil;
-	if(provider == VopenSpace){
+	if(provider == VopenGeVolume){
 		Ohand *cap;
-		if(req == nil || len <= 0 || len >= 256)
+		if(req != nil || len != 0)
 			error(Ebadarg);
-		cap = osopenspace((char*)req, (int)len);
+		cap = osopenvolume();
 		oh = cap;
  /* Bootstrap authority remains bound to the original volume owner. */
 		defrights = vgerights(oh);
@@ -4270,19 +4063,19 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 			oshandput(oh);
 			error(Eperm);
 		}
-		o = vobjalloc(VkindSpace, 0, 0);
+		o = vobjalloc(VkindGeVolume, 0, 0);
 		if(o == nil){
 			oshandput(oh);
 			vcapput(sourcecap);
 			error(Enomem);
 		}
 		vgecaplimit(oh,(int)rights);
-		o->provider = VopenSpace;
-		o->space = ossid(oh);
+		o->provider = VopenGeVolume;
+		o->space = 0;
 		o->oid = 0;
 		o->owner = osownerof(oh, 0);
 		vobjsetpriv(o, oh);
-	}else if(provider == VopenGeSpace){
+	}else if(provider == VopenGeOid){
 		Vhand *sh;
 		Vobj *sp;
 		Ohand *cap;
@@ -4292,9 +4085,9 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		memmove(&gr, req, sizeof gr);
 		if(gr.rights != 0)
 			error(Ebadarg);
-		sh = vlookup(gr.ospace, Vmeta);
+		sh = vlookup(gr.volume, Vmeta);
 		sp = sh->obj;
-		if(sp->kind != VkindSpace || sp->priv == nil){
+		if(sp->kind != VkindGeVolume || sp->priv == nil){
 			vhandput(sh);
 			error(Ebadarg);
 		}
@@ -4327,7 +4120,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		vgecaplimit(oh,(int)rights);
 		o->provider = VopenGe;
 		o->oid = gr.oid;
-		o->space = ossid(oh);
+		o->space = 0;
 		o->owner = osownerof(oh, gr.oid);
 		vobjsetpriv(o, oh);
 	}else
@@ -4392,104 +4185,3 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 	return handle;
 }
 
-/* A role is a bounded ASCII label, never a path or a directory component. */
-static void
-vrolename(char *dst, char *src, int n)
-{
-	int i;
-
-	if(src == nil || n <= 0 || n >= Vnamemax)
-		error(Ebadarg);
-	validaddr((uintptr)src, n, 0);
-	memmove(dst, src, n);
-	dst[n] = 0;
-	for(i = 0; i < n; i++)
-		if(!((dst[i] >= 'a' && dst[i] <= 'z')
-		|| (dst[i] >= 'A' && dst[i] <= 'Z')
-		|| (dst[i] >= '0' && dst[i] <= '9')
-		|| dst[i] == '_' || dst[i] == '-'))
-			error(Ebadarg);
-}
-
-Ohand *vobjbindingcap(void *v) {
- Vhand *h=v;
- if(h==nil || h->obj==nil ||
-    (h->obj->kind!=VkindGe && h->obj->kind!=VkindSpace)) return nil;
- return h->obj->priv;
-}
-Ohand *vobjbindinggecap(void *v) {
- Vhand *h=v;
- return h!=nil && h->obj!=nil && h->obj->kind==VkindGe ? h->obj->priv : nil;
-}
-int vobjbindingdelegable(void *v) {
- Vhand *h=v;
- return h!=nil && (h->rights & Vdelegate)!=0 && vcapvalid(h->cap);
-}
-void vobjbindinghold(void *v) {if(v) incref(&((Vhand*)v)->ref);}
-void vobjbindingput(void *v) {vhandput(v);}
-
-int
-vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
-{
- Vhand *h=nil,*nh=nil;
- Vobj *bound=nil;
- Ohand *cap=nil;
- char name[Vnamemax];
- int m=mode & ObjBindModeMask;
- if(mode & ~(ObjBindModeMask|ObjBindRemove)) error(Ebadarg);
- vrolename(name,role,rolelen);
- if(up->pgrp==nil) error(Eperm);
- if(mode & ObjBindRemove){
-  if(mode!=ObjBindRemove || handle!=0 || rights!=0) error(Ebadarg);
-  octxunbind(up->pgrp->ocontext,name);
-  return 0;
- }
- if(m>ObjBindShare) error(Ebadarg);
- h=vlookup(handle,Vdelegate);
- if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
- if(h->obj->kind==VkindNamespaceControl) error(Eperm);
- if(rights==0) rights=h->rights;
- if(rights & ~(uvlong)h->rights) error(Eperm);
- if(h->obj->kind==VkindGe){
-  cap=oscopycap(h->obj->priv,h->obj->oid);
-  vgecaplimit(cap,(int)rights);
-  bound=vobjnewkind(VkindGe,0);
-  if(bound==nil) error(Enomem);
-  bound->provider=VopenGe;
-  bound->oid=h->obj->oid;
-  bound->space=ossid(cap);
-  bound->priv=cap;cap=nil;
-  nh=vhandallocchild(bound, (int)rights, h->cap);
-  vobjput(bound);bound=nil;
- }else
-  nh=vhandderive(h, (int)rights);
- /* RFNOMNT forbids namespace extension, not removal of an existing role.
-  * Admission and the bind are one step against pgrpsealnamespace(). */
- if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
- if(waserror()){pgrpnamespaceextendend(up->pgrp);nexterror();}
- octxbindobject(up->pgrp->ocontext,name,nh,m);
- poperror();
- pgrpnamespaceextendend(up->pgrp);
- poperror();vhandput(nh);vhandput(h);return 0;
-}
-
-int
-vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id)
-{
- Vhand *bh,*nh;int handle;char name[Vnamemax];
- if(id) validaddr((uintptr)id,sizeof *id,1);
- vrolename(name,role,rolelen);
- if(up->pgrp==nil) error(Eperm);
- bh=octxobject(up->pgrp->ocontext,name);
- if(waserror()){vhandput(bh);nexterror();}
- if(!vcapvalid(bh->cap)) error(Eperm);
- if(bh->obj->kind==VkindGe || bh->obj->kind==VkindSpace) oscheckhand(bh->obj->priv);
- if(rights==0) rights=bh->rights;
- if(rights & ~(uvlong)bh->rights) error(Eperm);
- nh=vhandderive(bh, (int)rights);
- if(vgettab(1)==nil){vhandput(nh);error(Enomem);}
- handle=vinstall(vgettab(1),nh);
- if(handle<0){vhandput(nh);error("vobj: too many handles");}
- if(id){id->incarnation=bh->obj->incarnation;id->space=bh->obj->space;id->oid=bh->obj->oid;}
- poperror();vhandput(bh);return handle;
-}

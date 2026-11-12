@@ -18,7 +18,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"vobjint.h"
-#include	"../../ge/storage/ocontext.h"
+#include	"../../ge/storage/ohand.h"
 #include	"owner.h"
 
 enum {
@@ -37,7 +37,7 @@ typedef struct OwnerProgram OwnerProgram;
 struct OwnerProgram {
 	char	name[OwnerProgramNameMax];
 	uvlong	owner;
-	Ohand	*space;
+	Ohand	*volume;
 	uvlong	oid;
 	int	policy;
 };
@@ -185,7 +185,7 @@ ownerprogrambootregister(void)
 		print("owner: boot program registration failed: %s\n", up->errstr);
 		return;
 	}
-	soh = osopenspacek("init", 4);
+	soh = osopenvolume();
 	if(waserror()){
 		oshandput(soh);
 		nexterror();
@@ -205,7 +205,7 @@ ownerprogrambootregister(void)
 	memset(p, 0, sizeof *p);
 	strcpy(p->name, "boot");
 	p->owner = ownerroot();
-	p->space = soh;
+	p->volume = soh;
 	p->oid = bootprogramoid;
 	p->policy = OwnerProgramAutostart | OwnerProgramLaunchable;
 	unlock(&proglk);
@@ -260,7 +260,7 @@ sysprogramregister(sysva_list list)
 	unlock(&proglk);
 
 	owner = ownercreate(r.owner_name, (int)r.ownerlen);
-	soh = vobjholdohand(r.space, VkindSpace, Vexecute);
+	soh = vobjholdohand(r.volume, VkindGeVolume, Vexecute);
 	buf = nil;
 	if(waserror()){
 		free(buf);
@@ -292,7 +292,7 @@ sysprogramregister(sysva_list list)
 		memmove(p->name, r.name, r.namelen);
 		p->name[r.namelen] = 0;
 		p->owner = owner;
-		p->space = soh;
+		p->volume = soh;
 		p->oid = oid;
 		p->policy = (int)policy;
 	}
@@ -354,7 +354,7 @@ sysprogramlaunch(sysva_list list)
 	}
 	unlock(&proglk);
 
-	h = kernospawn(p->space, p->oid, argv, argc, opt, p->owner, 1);
+	h = kernospawn(p->volume, p->oid, argv, argc, opt, p->owner, 1);
 	if(waserror()){
 		vobjclosehandle(h);
 		nexterror();

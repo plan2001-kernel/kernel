@@ -1,92 +1,97 @@
-# GE/O persistent object storage
+# GE/O v2: flat persistent object volume
 
-Plan 2001-kernel uses the GE/O object profile on the modified GE volume.
-Persistent objects are addressed by a pair `(SpaceID, OID)`. These are local
-identities inside a volume, not hierarchical paths. A stored *olio* is an
-uninterpreted occurrence; a contextual object is its interpretation or role.
+Plan2001-O uses one GE/O **volume** as the persistent identity and
+transaction domain. A stored *olio* is an uninterpreted OID-addressed
+record; an interpreted object and its ObjectSpace relationships are separate
+semantics. **There is no SpaceID dimension in the on-disk identity.**
 
-## On-volume contract
+## On-volume format
 
-- GE's superblock retains the version string `gefs9.00`.
-- Superblock flag bit 63 (`Ovolflag`) marks the O profile. The low eight bits
-  (`Ovolvermask`) carry format version **1**. The inherited FS profile does
-  not set the O bit.
-- The flat `Ko | name_bytes` catalog binds names to Space identifiers.
-  `init` maps to `SpaceID = 1` in the current seeded volume.
-  Catalog names are **flat labels**, not directory components.
-- Native object records use `Kobj` records, SpaceIDs, OIDs, versions and
-  chunks. Values are opaque bytes, not POSIX file metadata or application
-  class instances.
-- Immutable owner metadata is a separate versioned `Kowner` record keyed by
-  `store[8] oid[8] ~ver[8]` with a small magic plus the 64-bit `OwnerID`. It
-  does not wrap or reinterpret the object payload. The owner record, the
-  initial payload, and the allocator high-water mark are staged in the same
-  transaction and become visible with its one published version. A record
-  above the published `N` is not authority; aborted or interrupted creations
-  are ignored and swept by the next transaction. The owner is creation-only
-  and is never rewritten by content writes, commit, reopen, fork/spawn/exec
-  or restart, and there is no independent ownership-mutation call.
-- A Space that predates owner metadata is upgraded once, in the first
-  owner-aware write transaction: every object published at that point is
-  recorded as owned by the seeded volume owner (`root`), and the Space
-  header records that owner metadata is now required. Before that upgrade a
-  missing record means the seeded legacy owner; afterwards a missing record
-  for a live object is corruption, never an implicit `root` grant. A first
-  write to an unused OID is a creation and records the writer's trust-domain
-  owner atomically; it cannot select or attach an arbitrary owner number.
-- The native O opener rejects an FS-profile volume. Opening a volume must
-  not implicitly reformat it.
+- The GE superblock retains `gefs9.00`; bit 63 (`Ovolflag`) selects
+  the O profile and the low byte (`Ovolvermask`) is **2**.
+  An FS-profile or unsupported O-version volume is rejected, never
+  reformatted automatically.
+- The GE snapshot tree contains one `Kobj` header, key `07` (one byte):
+  value `N[8] K[8] W[8] user[]`. `N` is the published version, `K`
+  the oldest retained version and `W` the last begun version.
+- Object chunks have key `Kobj | oid[8] | ~version[8] | index[4]`
+  (21 bytes). Chunk zero starts with a 4-byte length; `0xffffffff`
+  represents a tombstone. The newest object version at or below `N`
+  is visible; versions above `N` are unpublished.
+- Immutable provenance has key `Kowner | oid[8] | ~version[8]`
+  (17 bytes), value `OOWNER01 | OwnerID[8]`. The owner is set on
+  first publication and does **not** grant authority. Reads/writes
+  require explicit, attenuable capabilities. Missing or malformed owner
+  metadata for a live object in owner-aware mode is corruption.
+- There is **no** `Ko` name catalog, `store[8]` prefix, per-Space
+  version header, SpaceID allocator or named storage selector. Boot volume
+  activation uses an explicit PARTUUID. GE/O handles are volume capabilities
+  and persistent objects are addressed directly by OID.
 
-## ObjectSpace target and storage identity
+## Volume-global allocator and transactions
 
-The [ObjectSpace architecture](OBJECTSPACE.md) treats GE/O `SpaceID`
-as a private storage allocation/transaction scope, not a graph node or
-namespace parent. Persistent ObjectSpaces will be ordinary native GE/O
-objects containing versioned BindingID/target/relation metadata. Their
-reconstructed capabilities require trusted authorization; persisting a
-target OID and rights field alone never mints authority.
+- The volume header's user bytes hold the seeded Environment metadata
+  (72 bytes), optional `OALLOC01 | nextOID[8]` at offset 72 and
+  optional `OOWNMODE | publishedVersion[8]` at offset 88.
+- Native automatic allocation starts at OID 64, skips reserved and
+  **any previously published OID**, including tombstones, and advances
+  the high-water mark in the same transaction as the initial payload and
+  immutable owner record. An interrupted pre-publication creation may
+  reuse its candidate, but never inherit unpublished owner metadata.
+- All O handles for the same volume share one allocator, one published
+  version and one active writer slot (`Gefs.otxs`). Allocation and
+  commit/sync serialization use a **per-volume** lock
+  (`Gefs.oalloclk`); writes through another handle cannot start a
+  competing transaction. Independent volumes do not share this lock.
+- A transaction stages keys at `W=N+1`; publishing the volume header
+  makes its records visible together. Abort removes unpublished object
+  and owner records. After a crash, the next writer sweeps unpublished
+  keys before reuse. The reader never interprets staged `Kowner`
+  records as authority.
+- Opening a volume never silently reformats it. A successful commit
+  performs GE sync, but this does not eliminate hardware power-loss or
+  device flush failure risks.
 
-The first implementation is volatile. Persistent relations, atomic graph
-updates, verified reboot reconstruction and an ObjectSpace-root process
-context are not implemented. The v1 storage layout may be replaced without
-compatibility or migration; do not silently reformat hardware volumes.
+## Owner metadata upgrade
 
-## Historical stored definitions versus runtime namespaces
+A v2 volume formatted without owner metadata can be upgraded once on
+its first owner-aware write. All published live OIDs are assigned the
+trusted seeded owner; tombstones are skipped. Staged owner records and
+the owner-mode marker become visible together on the volume's single
+published version. This is **not** migration from the obsolete SpaceID
+disk format, which has no compatibility promise.
 
-A target namespace is a lookup/data view independent of process ancestry,
-not a source of ownership. Objects have one named owner from creation until
-destruction; an OID or namespace label grants no ownership. The current
-AMD64 implementation uses capability-based reference-counted `Pgrp/OContext`;
-that is an implementation fact, not the new ObjectSpace target. GE/O may store
-namespace definitions as ordinary object data for future userspace
-interpretation; the format and loader are not implemented, and loading
-such data cannot grant access to objects it references.
+## ABI and transaction boundary (phase 3)
 
-The `(SpaceID, OID)` pair locates an object but never selects or changes its
-owner. The kernel integrity-checks the persistent owner record on GE/O open and
-read/write and exposes provenance through `ObjOpOwnerInfo`. OwnerID does not
-authorize or forbid an otherwise valid GE/O capability. Existing-object writes
-preserve the initial `Kowner` even when a different OwnerID holds `Vwrite`.
-A read-only publication mapping does not itself grant access to the stored
-object.
+`ObjOpenVolume` requires an empty request and boot-owner authority; it
+returns an attenuable, revocable `VkindGeVolume` capability. A separate
+`ObjOpenGeOid` request supplies an authorized volume Handle and a flat OID.
+An OID by itself never confers authority. Internal GE operations are
+`oobjopen/get/put/create/commit/close`: a handle is an `Otx` transaction
+context, not an Ospace or storage namespace. The obsolete named `Ospace`
+and `onative*` wrappers and the `init` storage selector were removed.
 
-Persistent GE/O objects may also represent object sets and OID membership
-relations as separate data. Those are not process namespaces and are not
-currently an implemented general set/relation engine. Stored object identity,
-versions and lifetime are independent of volatile namespace views, role
-removal, or last-Handle close.
+MicroPython boots with `-O PARTUUID=... -N` (or `-I`), and Python's
+`space.open()` restores the one application graph from flat OID records.
+The demonstration's Python Environment still uses the label `init`, but
+that label is not passed into GE/O or interpreted as a storage identity.
 
-## Writes and visibility
+Persisting native ObjectSpace relationship graphs, atomic binding updates
+and trusted capability reification remains **phase 4**, not part of the
+storage ABI migration.
 
-Published versions are visible to readers; an in-progress Space write is not
-published until commit. Closing with an unfinished transaction aborts it.
-Do **not** assume that a successful commit guarantees power-loss durability:
-device flush errors and recovery behavior must be checked in source and tests.
+## Acceptance and inspection
 
-The exact binary layout, allocator rules, error handling, and callable ABI
-come from `ge/storage/o.c`, `ge/storage/obj.c`,
-`ge/storage/gdat.h` and `ge/storage/sysgefs.c`, not from historical
-migration reports.
+- `tools/host/oinspect.py` rejects unexpected or SpaceID-qualified
+  keys, malformed volume headers and inconsistent version order in a
+  v2 image; it reports published OIDs and owner records.
+- `tools/host/ownerid/run-ownerid-reboot.sh` runs QEMU twice on the
+  same disk, testing that independent handles share the OID allocator,
+  writer slot, published objects and reboot-persistent high-water mark.
+- `tools/host/ownerid/run-ownerid-recovery.sh` tests crash/retry
+  points 101–104, owner migration and corruption handling.
 
-Object storage does not require a hierarchical filesystem, 9P service, a
-pathname-based open, or a synthetic directory tree.
+The format and native implementation are in `ge/format/ream.c`,
+`ge/storage/obj.c`, `ge/storage/o.c` and
+`ge/storage/gdat.h`. GE/O storage does not require a directory tree,
+9P, path-based open or a synthetic filesystem namespace.

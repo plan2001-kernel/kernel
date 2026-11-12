@@ -1,20 +1,17 @@
 /*
  * MicroPython: native GE/O boot and the in-memory source path.
- * In O-only boot, -O PARTUUID=... -S init -I restores the persistent
- * init Space, calls run() and hands the console to the native REPL;
- * -N is the same boot without the REPL.  There is no pathname file
- * argument, no built-in boot.py and no fd console fallback.
+ * Native boot opens the flat GE/O volume, restores the Python graph
+ * through space.open(), calls run(), and optionally starts the REPL.
+ * There is no named storage selector, pathname file argument,
+ * built-in boot.py, or fd console fallback.
  *	micropython -c source		run source
- *	micropython -O ... -S init -N	the native noninteractive server boot
- *	micropython -O ... -S init -I	the same, then the native REPL
- *	micropython -O volume ...	use the native O volume (a PARTUUID or
- *					a device) for the Space, its Environment
- *					and its code: no filesystem
- *	micropython -E env ...		import from the Environment env alone
- *	micropython -S space ...	in the Space space: its image restored,
- *					committed per statement and at the
- *					program's end
- *					(see p9space.c; O mode: docs/O-FORMAT.md)
+ *	micropython -O volume -N	native noninteractive server boot
+ *	micropython -O volume -I	native boot followed by the REPL
+ *	micropython -O volume -c source	run source with the GE/O graph
+ *	micropython -E env -c source	use a standalone Environment
+ * The O volume is specified by PARTUUID or device; objects are
+ * addressed by OID and exposed through the ObjectSpace graph.
+ * (see p9space.c; O mode: docs/O-FORMAT.md)
  * A failure exits with status micropython (usage: usage); sys.exit(n)
  * with n.
  */
@@ -123,26 +120,20 @@ static void bootfailed(const char *why) {
 int main(int argc, char **argv) {
     volatile uintptr_t stack_top;
     int fail = 0, nativeboot = 0, nativerepl = 0, autorun = 0, bootfail = 0;
-    const char *source = NULL, *ovol = NULL, *env = NULL, *space = NULL;
+    const char *source = NULL, *ovol = NULL, *env = NULL;
     const char *booterror = "initialization or run() failed (see error above)";
     char useenv[128];
 
-    // -O VOLUME: the native O volume; then -E or -S as before
+    // -O VOLUME: select the native flat GE/O volume before mode options
     if (argc >= 3 && strcmp(argv[1], "-O") == 0) {
         ovol = argv[2];
         argv[2] = argv[0];
         argv += 2;
         argc -= 2;
     }
-    // -E ENV: import from the Environment ENV alone; -S SPACE: in the
-    // Space SPACE (p9space.c)
+    // -E ENV selects a standalone Environment; native GE/O uses one graph.
     if (argc >= 3 && strcmp(argv[1], "-E") == 0) {
         env = argv[2];
-        argv[2] = argv[0];
-        argv += 2;
-        argc -= 2;
-    } else if (argc >= 3 && strcmp(argv[1], "-S") == 0) {
-        space = argv[2];
         argv[2] = argv[0];
         argv += 2;
         argc -= 2;
@@ -154,21 +145,21 @@ int main(int argc, char **argv) {
     } else if (argc == 3 && strcmp(argv[1], "-c") == 0) {
         source = argv[2];
     } else if (argc != 1) {
-        p9_dprintf("usage: micropython [-O volume] [-E env | -S space] [-N | -I | -c source]\n");
+        p9_dprintf("usage: micropython [-O volume] [-E env] [-N | -I | -c source]\n");
         exits("usage");
     }
     p9_space_native_mode(nativeboot || nativerepl);
     // D2a: only an -O run may look for the process-local native stream.
     p9_console_native(ovol != NULL);
     p9_console_probe();
-    if (nativeboot && (ovol == NULL || space == NULL)) {
-        p9_dprintf("micropython: -N requires -O volume and -S space\n");
-        bootfailed("-N requires -O volume and -S space");
+    if (nativeboot && (ovol == NULL)) {
+        p9_dprintf("micropython: -N requires -O volume\n");
+        bootfailed("-N requires -O volume");
         exits("usage");
     }
-    if (nativerepl && (ovol == NULL || space == NULL)) {
-        p9_dprintf("micropython: -I requires -O volume and -S space\n");
-        bootfailed("-I requires -O volume and -S space");
+    if (nativerepl && (ovol == NULL)) {
+        p9_dprintf("micropython: -I requires -O volume\n");
+        bootfailed("-I requires -O volume");
         for (;;) {
             sleep(1000);
         }
@@ -181,6 +172,12 @@ int main(int argc, char **argv) {
     gc_init(heap, (char *)heap + sizeof(heap));
     mp_pystack_init(pystack, (char *)pystack + sizeof(pystack));
     mp_init();
+    /* Expose native boot mode through the standard sys.argv interface. */
+    if (nativeboot || nativerepl) {
+        mp_obj_list_append(mp_sys_argv, mp_obj_new_str("micropython", 11));
+        mp_obj_list_append(mp_sys_argv,
+            mp_obj_new_str(nativeboot ? "-N" : "-I", 2));
+    }
     syscallt0checkpoint();
     if (ovol != NULL && p9_space_o(ovol) < 0) {
         if (nativeboot || nativerepl)
@@ -194,27 +191,12 @@ int main(int argc, char **argv) {
         p9_console_exit(1);
         return 1;
     }
-    if (space != NULL) {
-        // the name goes into Python's source: a plain one
-        if (strlen(space) >= 64 || space[strcspn(space, "'\\/\n")] != 0) {
-            p9_dprintf("micropython: -S %s: not a space name\n", space);
+    if (ovol != NULL) {
+        if (execstr("__import__('space').open()", MP_QSTR__lt_command_gt_) != 0) {
             if (nativeboot || nativerepl)
-                bootfailed("invalid Space name");
+                bootfailed("cannot restore GE/O Python graph");
             if (nativerepl) {
-                for (;;) {
-                    sleep(1000);
-                }
-            }
-            exits("usage");
-        }
-        snprint(useenv, sizeof useenv, "__import__('space').open('%s')", space);
-        if (execstr(useenv, MP_QSTR__lt_command_gt_) != 0) {
-            if (nativeboot || nativerepl)
-                bootfailed("cannot restore init Space (see error above)");
-            if (nativerepl) {
-                for (;;) {
-                    sleep(1000);
-                }
+                for (;;) sleep(1000);
             }
             mp_deinit();
             p9_console_exit(1);
@@ -240,7 +222,7 @@ int main(int argc, char **argv) {
     if (source != NULL) {
         fail = execstr(source, MP_QSTR__lt_command_gt_);
     } else if (nativeboot || nativerepl) {
-        // -O ... -S init -N: native noninteractive server boot.  -I is
+        // -O ... -N: native noninteractive server boot.  -I is
         // the same boot, after which the native REPL takes over.  No
         // boot.py, no /dev and no legacy fd console.
         autorun = 1;
@@ -249,7 +231,7 @@ int main(int argc, char **argv) {
             fail = 1;
         }
     } else {
-        p9_dprintf("usage: micropython -c source | -O volume -S space [-N|-I]\n");
+        p9_dprintf("usage: micropython -c source | -O volume [-N|-I]\n");
         exits("usage");
     }
     // the program's end, normal or SystemExit: a commit point

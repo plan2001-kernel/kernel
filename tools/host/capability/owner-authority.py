@@ -32,7 +32,7 @@ def findkind(kind, required):
 CREATE=COMMON+r"""
 if p.owner_info()[1]!='ownerA':
     fail('creator-identity')
-sh=findkind(p.VKIND_SPACE,p.VWRITE|p.VCOMMIT)
+sh=findkind(p.VKIND_GE_VOLUME,p.VWRITE|p.VCOMMIT)
 if not sh:
     fail('creator-missing-space')
 p.obj_put_oid(sh,@AOID@,b'A-OBJECT')
@@ -43,16 +43,18 @@ p.exits('CREATED')
 NO_GRANT=COMMON+r"""
 if p.owner_info()[1]!='ownerA':
     fail('nogrant-identity')
-if findkind(p.VKIND_SPACE,0) or findkind(p.VKIND_GE,0):
+if findkind(p.VKIND_GE_VOLUME,0) or findkind(p.VKIND_GE,0):
     fail('inherited-ambient-space')
+if p.space_roots():
+    fail('inherited-ambient-objectspace')
 try:
-    p.obj_open_space('init')
+    p.obj_open_volume()
 except OSError:
     pass
 else:
     fail('ambient-open-space')
 try:
-    p.obj_open_ge_space(1,@AOID@)
+    p.obj_open_ge_oid(1,@AOID@)
 except OSError:
     pass
 else:
@@ -64,6 +66,58 @@ except OSError:
 else:
     fail('untrusted-program-register')
 p.exits('NO-GRANT')
+"""
+
+GRAPH_ROOT=COMMON+r"""
+if p.owner_info()[1]!='ownerB':
+    fail('graph-root-owner')
+roots=p.space_roots()
+if len(roots)!=1:
+    fail('graph-root-count')
+rh=roots[0]
+records,cursor,epoch=p.space_list(rh)
+if len(records)!=1 or records[0][1]!='payload':
+    fail('graph-root-edges')
+h=p.space_resolve(rh,records[0][0],p.VREAD)
+if p.obj_read(h,8)!=b'B-UPDATE':
+    fail('graph-root-resolve')
+try:
+    p.obj_write(h,b'ESCALATE')
+except OSError:
+    pass
+else:
+    fail('graph-root-escalation')
+p.obj_close(h)
+try:
+    p.obj_open_volume()
+except OSError:
+    pass
+else:
+    fail('graph-root-ambient-space')
+p.exits('GRAPH-ROOT')
+"""
+
+MULTI_ROOT=COMMON+r"""
+if p.owner_info()[1]!='ownerB':
+    fail('multi-root-owner')
+roots=p.space_roots()
+if len(roots)!=2:
+    fail('multi-root-count')
+labels=set()
+for rh in roots:
+    records,cursor,epoch=p.space_list(rh)
+    if len(records)!=1:
+        fail('multi-root-edge-count')
+    labels.add(records[0][1])
+if labels!={'payload','second'}:
+    fail('multi-root-labels')
+try:
+    p.obj_open_volume()
+except OSError:
+    pass
+else:
+    fail('multi-root-ambient-space')
+p.exits('MULTI-ROOT')
 """
 
 READ_ONLY=COMMON+r"""
@@ -95,7 +149,7 @@ except OSError:
 else:
     fail('attenuation-escalation')
 try:
-    p.obj_open_space('init')
+    p.obj_open_volume()
 except OSError:
     pass
 else:
@@ -247,7 +301,7 @@ def run():
 
     root=p.owner_info()
     ok(root[1]=='root','trusted boot OwnerID')
-    sh=p.obj_open_space('init')
+    sh=p.obj_open_volume()
     aown,aoid=p.program_register('A','ownerA',sh,MPY)
     bown,boid=p.program_register('B','ownerB',sh,MPY)
     ok(aown!=bown and aown!=root[0] and bown!=root[0],
@@ -256,7 +310,7 @@ def run():
              p.VEXECUTE|p.VMETA|p.VDELEGATE)
     waited(launched('A',built(CREATE,AOID=AOBJ),(full,)),
            'CREATED','owner A creates an A-owned GE/O object')
-    gh=p.obj_open_ge_space(sh,AOBJ)
+    gh=p.obj_open_ge_oid(sh,AOBJ)
     ok(p.obj_owner(gh)[0]==aown and p.obj_read(gh,8)==b'A-OBJECT',
        'boot may open A object through its explicit root Space grant')
     waited(launched('A',built(NO_GRANT,AOID=AOBJ,MPY=MPY)),
@@ -268,14 +322,28 @@ def run():
     waited(launched('B',WRITE_CAP,(rw,)),
            'WRITE-CAP','cross-owner GE write/commit works without changing OwnerID')
     p.obj_close(gh)
-    gh=p.obj_open_ge_space(sh,AOBJ)
+    gh=p.obj_open_ge_oid(sh,AOBJ)
     ok(p.obj_owner(gh)[0]==aown and p.obj_read(gh,8)==b'B-UPDATE',
        'GE/O Kowner remains owner A after authorized owner B write')
+    # ObjectSpace roots are just explicitly delegated Handles. No
+    # process-global implicit root is installed at spawn time.
+    root_space=p.space_new()
+    p.space_bind(root_space,'payload',gh,p.VREAD|p.VMETA)
+    waited(launched('B',GRAPH_ROOT,((root_space,p.VREAD|p.VMETA|p.VDELEGATE),)),
+           'GRAPH-ROOT','B receives exactly one ObjectSpace root with attenuated edge')
+    second_space=p.space_new()
+    p.space_bind(second_space,'second',gh,p.VREAD|p.VMETA)
+    waited(launched('B',MULTI_ROOT,
+           ((root_space,p.VREAD|p.VMETA|p.VDELEGATE),
+            (second_space,p.VREAD|p.VMETA|p.VDELEGATE))),
+           'MULTI-ROOT','B receives two independently delegated ObjectSpace roots')
+    p.obj_close(second_space)
+    p.obj_close(root_space)
     p.obj_close(gh)
 
     # A source revokes an already inherited grandchild in owner B. Separate
     # region channels provide an explicit READY/GO barrier (no sleep race).
-    gh=p.obj_open_ge_space(sh,AOBJ)
+    gh=p.obj_open_ge_oid(sh,AOBJ)
     share=p.obj_open_handle(gh,p.VREAD|p.VMETA|p.VDELEGATE)
     ready=p.region_create(8192)
     go=p.region_create(8192)

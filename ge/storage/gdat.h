@@ -10,7 +10,6 @@ typedef struct Key	Key;
 typedef struct Kvp	Kvp;
 typedef struct Limbo	Limbo;
 typedef struct Msg	Msg;
-typedef struct Ospace	Ospace;
 typedef struct Osweepmsg	Osweepmsg;
 typedef struct Qent	Qent;
 typedef struct Scan	Scan;
@@ -85,7 +84,7 @@ enum {
 	 */
 
 	/*
-	 * Retained on-disk key numbers.  The native O engine uses Kobj/Ko;
+	 * Retained on-disk key numbers.  The native O engine uses flat Kobj/Kowner records;
 	 * the inherited FS pathname layer that used these is gone.
 	 */
 	Kdat,	/* qid[8] off[8] => ptr:		pointer to data page */
@@ -101,13 +100,12 @@ enum {
 	Kconf,	/* name[] => value[] */
 
 	/* Plan2001: native O object stores (obj.c, docs/O-FORMAT.md) */
-	Kobj,	/* store[8] [oid[8] ~ver[8] idx[4]] => header or chunk */
+	Kobj,	/* [oid[8] ~ver[8] idx[4]] => header or chunk */
 
 	/* Plan2001: native O volume records (docs/O-FORMAT.md) */
-	Ko,	/* name[] => value[]: catalog and volume records */
 
 	/* Plan2001: immutable per-object owner metadata. */
-	Kowner,	/* store[8] oid[8] ~ver[8] => magic[8] owner[8] */
+	Kowner,	/* oid[8] ~ver[8] => magic[8] owner[8] */
 };
 
 enum {
@@ -130,13 +128,12 @@ enum {
  * Plan2001: the native O volume profile (docs/O-FORMAT.md).  The
  * low byte of fs->flag is the PoC format version; the high bit tells O
  * from a legacy FS volume (whose flag is 0).  O records live in the GE
- * snapshot tree under the Ko key type.
+ * snapshot tree under flat Kobj/Kowner keys.
  */
 enum {
 	Ovolflag	= 1ULL << 63,
-	Ovolvers	= 1,
+	Ovolvers	= 2,
 	Ovolvermask	= 0xff,
-	OspaceInit	= 1ULL,
 };
 
 #define Zb (Bptr){-1, -1, -1}
@@ -599,6 +596,7 @@ struct Gefs {
 	Gkern	k;
 	Proc	*syncproc;	/* the syncing process: it may take the reserve */
 	Proc	*sweepproc;
+	QLock	oalloclk;	/* volume-local allocator and commit/sync gate */
 	void	*otxs;		/* obj.c's transactions, under mutlk */
 	void	*ck;		/* check.c's state while it runs */
 };
@@ -623,19 +621,6 @@ struct Arena {
 	Bptr	loghd;		/* allocation log */
 	Blk	*logtl;		/* end of the log, open for writing */
 	Syncq	*sync;
-};
-
-/*
- * Plan2001 Stage 3: a native O Space handle.  Its objects are Kobj keys
- * scoped by the catalog's stable SpaceID; there is no file, qid, path or
- * Fid.  The lock serializes this handle's writer; obj.c's begin() excludes
- * any other transaction on the same SpaceID.
- */
-struct Ospace {
-	Gefs	*fs;
-	uvlong	sid;
-	QLock	lk;
-	void	*tx;		/* obj.c's Otx, while the handle has one */
 };
 
 enum {

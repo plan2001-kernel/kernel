@@ -628,13 +628,16 @@ PY
 # hard error rather than silently sending the wrong key.
 qob_inject_input()
 {
-	local mon=$1 input=$2
-	python3 - "$mon" "$input" <<'PY'
+	local mon=$1 input=$2 serial=${3:-}
+	python3 - "$mon" "$input" "$serial" "${QOB_REPL_SYNC_LINES:-0}" <<'PY'
 import socket
 import sys
 import time
 
-mon, path = sys.argv[1], sys.argv[2]
+mon, path, serial, sync = sys.argv[1:5]
+sync = sync == "1"
+if sync and not serial:
+    raise SystemExit("REPL line synchronization requires a serial log")
 
 # QEMU key names for the physical scan codes used by p9console.c.  The
 # guest layout is Finnish, so e.g. '+' is the unshifted key QEMU calls
@@ -702,14 +705,56 @@ def command(cmd):
     raise SystemExit("QEMU monitor did not acknowledge: " + cmd)
 
 
+# In graph acceptance the guest commits GE/O state after every REPL
+# statement.  Do not type the following statement while that commit runs:
+# the PS/2 keyboard queue can drop scancodes even though the QEMU monitor
+# acknowledges sendkey.  Check the actual guest echo before continuing.
+def serial_bytes():
+    with open(serial, "rb") as log:
+        return log.read().replace(b"\r", b"")
+
+def last_prompt():
+    position = serial_bytes().rfind(b">>> ")
+    if position < 0:
+        raise SystemExit("native REPL prompt missing before input")
+    return position
+
+def await_line(expected, previous_prompt):
+    expected_echo = b">>> " + expected.encode("ascii")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        log = serial_bytes()
+        # The next prompt proves that the previous statement and commit
+        # finished.  Compare the typed line before advancing, so dropped
+        # keystrokes fail at their source instead of corrupting later tests.
+        next_prompt = log.find(b">>> ", previous_prompt + 4)
+        if next_prompt >= 0:
+            echoed_line = log[previous_prompt:].split(b"\n", 1)[0]
+            if echoed_line != expected_echo:
+                raise SystemExit("guest REPL input mismatch: expected %r, got %r" %
+                                 (expected_echo, echoed_line))
+            return next_prompt
+        time.sleep(0.05)
+    raise SystemExit("native REPL did not finish statement: %r" % expected)
+
+prompt = last_prompt() if sync else -1
+line = []
 for ch in data:
     key = keys.get(ch)
     if key is None:
         raise SystemExit("unsupported REPL input character: %r" % ch)
     command("sendkey %s 20" % key)
     time.sleep(0.08)
+    if sync:
+        if ch in "\r\n":
+            prompt = await_line("".join(line), prompt)
+            line.clear()
+        else:
+            line.append(ch)
 if data and not data.endswith("\n"):
     command("sendkey ret 20")
+    if sync:
+        await_line("".join(line), prompt)
 s.close()
 PY
 }
@@ -819,7 +864,7 @@ qob_boot_once()
 				fi
 				qob_say "typing REPL input from $input"
 				prompts=$(qob_count_fixed '>>>' "$serial")
-				if ! qob_inject_input "$mon" "$input"; then
+				if ! qob_inject_input "$mon" "$input" "$serial"; then
 					reason="REPL input injection failed"
 					break
 				fi
@@ -1019,7 +1064,7 @@ qob_main()
 	nspace=$(python3 - "$QOB_OUT/o-after.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-print(d['space']['N'])
+print(d['volume']['N'])
 PY
 )
 	mp_sha=MISSING

@@ -16,7 +16,6 @@ typedef struct Page	Page;
 typedef struct Palloc	Palloc;
 typedef struct Perf	Perf;
 typedef struct PhysUart	PhysUart;
-typedef struct Pgrp	Pgrp;
 typedef struct Physseg	Physseg;
 typedef struct Proc	Proc;
 typedef struct Pte	Pte;
@@ -342,22 +341,6 @@ enum
 	ENVLOG =	5,
 	ENVHASH =	1<<ENVLOG,	/* Egrp hash for variable lookup */
 };
-enum
-{
-	PgrpNsSealed	= 1<<0,		/* no further namespace extension */
-};
-
-struct Pgrp
-{
-	Ref ref;
-	RWLock	ns;			/* protects flags; extension/ seal gate */
-	void	*ocontext;		/* bounded native object view */
-	uint	flags;
-#ifdef PLAN2001_LIFECYCLE_DIAG
-	ulong	diagid;			/* diagnostic identity, never an ABI handle */
-#endif
-};
-
 struct Evalue
 {
 	char	*value;
@@ -555,10 +538,9 @@ struct Proc
 	QLock	seglock;	/* locked whenever seg[] changes */
 	Segment	*seg[NSEG];
 
-	Pgrp	*pgrp;		/* Process group for namespace */
 	Egrp 	*egrp;		/* Environment group */
 	Ref	*fdgrp;		/* legacy RFORK FD-group presence token, nil = absent */
-	void	*vobjhandles;	/* Unified process-local OBJ, GE and namespace Handles */
+	void	*vobjhandles;	/* Process-local typed, revocable capability roots */
 	ulong	iomask;		/* Process-local native output grants */
 
 	int	insyscall;

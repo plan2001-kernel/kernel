@@ -28,10 +28,10 @@ Their authorization now uses capability admission, GE/O Ohand scope,
 trusted bootstrap gates and provider-specific safety checks.
 
 The first implemented ObjectSpace is volatile and uses the existing
-five-call object ABI; persistent graph transactions and capability roots
-in execution contexts are unfinished. GE storage SpaceID remains an
-internal version/allocator bucket and must not be confused with
-ObjectSpace. No prior ABI, on-disk-format or Unix/Plan 9 compatibility
+five-call object ABI. Processes have explicit ObjectSpace roots; persistent
+graph transactions and trusted reboot reification remain unfinished.
+GE/O v2 has one flat OID allocator and publication domain per volume;
+there is no SpaceID bucket or implicit storage hierarchy. No prior ABI, on-disk-format or Unix/Plan 9 compatibility
 is required. All phases and limitations are defined in
 [ObjectSpace](OBJECTSPACE.md).
 

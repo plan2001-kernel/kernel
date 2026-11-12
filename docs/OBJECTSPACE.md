@@ -7,7 +7,7 @@ No historical object ABI, disk format, Unix or Plan 9 compatibility is required.
 ## Normative concepts
 
 - `ObjectID`: identity only. Volatile ID = `(incarnation, scope, oid)`.
-  Durable GE/O ID = `(VolumeUUID, private-storage-SpaceID, oid)`.
+  Durable GE/O ID = `(VolumeUUID, OID)` (flat v2 volume).
 - `OwnerID`: immutable provenance and object lifecycle responsibility.
   Trusted boot may use it to issue initial capabilities; knowing the owner
   is not itself an all-access token.
@@ -127,13 +127,15 @@ p.space_unbind(root, a)
 
 ## Persistent GE/O integration (target, NOT IMPLEMENTED)
 
-**Do not use GE SpaceID as an ObjectSpace parent.** SpaceID presently
-selects an internal storage allocation and commit scope; it may later be
-removed or repurposed without migration. An ObjectSpace must itself have
-a durable OID and store versioned binding records, not live Handle
-numbers or kernel pointers. Each binding stores BindingID, label,
-target durable identity, relation, rights *ceiling*, generation and
-optional metadata object ID.
+GE/O v2 is already flat: each volume has one OID allocator, one
+published version and one transaction domain. **No persistent SpaceID**
+exists, and ObjectSpace is not a storage partition. Phase 3 removed the
+named `Ospace` wrappers and `init` GE/O selector. A future persistent
+ObjectSpace must itself have a durable
+OID and store versioned binding records, not live Handle numbers or
+kernel pointers. Each binding stores BindingID, label, target durable
+identity, relation, rights *ceiling*, generation and optional metadata
+object ID.
 
 Loading stored metadata from disk must never create authority simply
 because it contains an OID/rights pair. A trusted bootstrap policy
@@ -176,7 +178,7 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
    remove obsolete providers, public ABI, wrappers and tests. No shims.
 4. **Persistence:** define and implement GE/O ObjectSpace records and
    atomic graph transactions, persisted identities and trusted reboot
-   reification, then remove public storage-SpaceID namespace confusion.
+   reification. Phase 3 already retired the transitional Ospace/SpaceID API.
 5. **User view and hardening:** PVD, directory/project/container projections,
    multi-parent navigation, quotas, graph GC or specified lifetime semantics,
    recovery/race/fuzz tests, AMD64 physical hardware tests.

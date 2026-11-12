@@ -13,7 +13,7 @@
 #include "../../kernel/core/error.h"
 #include "../../kernel/core/sd.h"
 #include "../../kernel/core/lifediag.h"
-#include "ocontext.h"
+#include "ohand.h"
 #include "../../kernel/core/vobjint.h"
 
 /*
@@ -26,23 +26,20 @@ void	gestart(void*);
 void*	oopenblk(char*, void*, vlong, vlong, int,
 		long (*)(void*, void*, long, uvlong, int), int (*)(void*));
 typedef struct Gefs Gefs;
-typedef struct Ospace Ospace;
 typedef struct Oblock Oblock;
 struct Oblock {
 	SDunit	*unit;
 	vlong	start;		/* partition byte offset in the unit */
 	vlong	size;		/* partition bytes, for bounds */
 };
-void*	onativeopen(void*, char*);
-uvlong onativesid(void*);
-long	onativeget(void*, uvlong, void*, long, uvlong*);
-void	onativeput(void*, uvlong, void*, long, uvlong);
-long	onativecreate(void*, void*, long, uvlong*, uvlong);
-long	ospaceget(void*, uvlong, void*, long, uvlong*);
-uvlong	onativecommit(void*);
-void	onativeclose(void*);
-int	ospaceownerget(void*, uvlong, uvlong*, int*);
-void	ospaceownersetlegacy(uvlong);
+void*	oobjopen(void*);
+long	oobjget(void*, uvlong, void*, long, uvlong*);
+void	oobjput(void*, uvlong, void*, long, uvlong);
+long	oobjcreate(void*, void*, long, uvlong*, uvlong);
+uvlong	oobjcommit(void*);
+void	oobjclose(void*);
+int	oobjownerget(void*, uvlong, uvlong*, int*);
+void	oobjownersetlegacy(uvlong);
 extern int ownerfault;
 extern int ownercrash;
 extern uvlong ownerroot(void);
@@ -235,7 +232,7 @@ oblockopenpart(char *guid, char *dev, int ndev, vlong *off, vlong *size)
  * its GE instance; a legacy device specifier is rejected rather than
  * falling back to a pathname/Chan open. OBJOPEN gives a Space handle
  * from the flat catalog. Internal Ohand references authorize storage and
- * namespace operations; a process never sees an Ospace pointer.
+ * namespace operations; a process never sees a transaction pointer.
  */
 static Proc *bootowner;
 static ulong bootpid;
@@ -312,7 +309,7 @@ osvolumeopen(char *p, int n)
    }
    if(k!=16 || half) error(Ebadarg);
  }
-	ospaceownersetlegacy(ownerroot());
+	oobjownersetlegacy(ownerroot());
 	bootowner = up;
 	bootpid = up->pid;
 	/* Trusted boot registration: the actual autostart action remains the
@@ -342,7 +339,7 @@ okernelvol(char *spec)
 	v = ovolopenblk(spec, dev, sizeof dev, &off, &size, 0);
 	print("o: O volume %s@%lld, %lld MiB, opened read-only (kernel-only)\n",
 		dev, off, size/MiB);
-	ospaceownersetlegacy(ownerroot());
+	oobjownersetlegacy(ownerroot());
 	gestart(v);
 	addvol(v);
 	ovolbytes = size;
@@ -364,12 +361,11 @@ ohandput(Ohand *oh)
 		return;
 #ifdef PLAN2001_LIFECYCLE_DIAG
 	/* Only oscopycapdelegate() creates caps=2 capabilities; their own
-	 * Ospace and origin pin are separate live resources. */
+	 * GE/O transaction and origin pin are separate live resources. */
 	delegate = oh->caps == 2;
 #endif
-	if(oh->provider != nil) octxput(oh->provider);
-	if(oh->sp != nil){
-		onativeclose(oh->sp);
+	if(oh->tx != nil){
+		oobjclose(oh->tx);
 #ifdef PLAN2001_LIFECYCLE_DIAG
 		if(delegate)
 			lifedelegate('s', oh->diagid, -1);
@@ -407,14 +403,14 @@ ohgate(Ohand *h)
 static void
 oauthorize(Ohand *oh, uvlong oid, int rights)
 {
-	if(oh->provider != nil || oh->revoked || (oh->origin && oh->origin->revoked) || (oh->rights & rights) != rights)
+	if(oh->revoked || (oh->origin && oh->origin->revoked) || (oh->rights & rights) != rights)
 		error(Eperm);
 	/*
 	 * A capability copy is an explicitly delegated reference to one Space
 	 * handle.  Its rights and revocation are still checked; the process
 	 * view-membership check is intentionally not repeated because the
 	 * capability may cross a process boundary.  The copy owns its own
-	 * Ospace handle and pins its object-grant origin for revocation. caps=2
+	 * transaction handle and pins its object-grant origin for revocation. caps=2
   * is an explicitly delegated Space, not inherited bootstrap authority.
 	 */
 	if(oh->caps){
@@ -424,7 +420,7 @@ oauthorize(Ohand *oh, uvlong oid, int rights)
 	}
 	if(oh->bootstrap){
 		if(!oboot()) error(Eperm);
-	}else if(up->pgrp == nil || !octxmember(up->pgrp->ocontext, oh) || oid != oh->oid)
+	}else
 		error(Eperm);
 }
 
@@ -440,50 +436,22 @@ oprocexec(Proc *p)
  USED(p);
 }
 
-/*
- * Authorized Space capability acquisition for the canonical
- * OBJOPEN(ObjOpenSpace) path.  The caller owns the returned
- * reference.  The name is a bounded Space name, not a pathname; bootstrap
- * authority (the mounted O volume owner) is still required.
- */
-static Ohand*
-osopenspacecore(char *p, int n, int user)
+/* Bootstrap acquires an authorized flat-volume capability, not a SpaceID. */
+Ohand*
+osopenvolume(void)
 {
-	char name[256];
 	Ohand *oh;
 
-	if(!oboot()) error(Eperm);
-	if(ovol == nil || p == nil || n <= 0 || n >= (int)sizeof name)
-		error(Ebadarg);
-	if(user)
-		validaddr((uintptr)p, n, 0);
-	memmove(name, p, n);
-	name[n] = 0;
-	if(memchr(name, 0, n) != nil) error(Ebadarg);
+	if(!oboot() || ovol == nil)
+		error(Eperm);
 	oh = smalloc(sizeof *oh);
 	oh->ref.ref = 1;
 	if(waserror()){ ohandput(oh); nexterror(); }
-	oh->sp = onativeopen(ovol, name);
-	oh->sid = onativesid(oh->sp);
-	strcpy(oh->space, name);
+	oh->tx = oobjopen(ovol);
 	oh->rights = Oall;
 	oh->bootstrap = 1;
 	poperror();
 	return oh;
-}
-
-Ohand*
-osopenspace(char *p, int n)
-{
-	return osopenspacecore(p, n, 1);
-}
-
-/* Trusted kernel/registered-program Space open; the name is a kernel
- * string and no user-address validation is performed. */
-Ohand*
-osopenspacek(char *p, int n)
-{
-	return osopenspacecore(p, n, 0);
 }
 
 enum {
@@ -495,7 +463,7 @@ enum {
  * one Ohand/OID into a fresh kernel buffer and return it with the version.
  * The caller owns OH and its reference for the duration of the call; this
  * helper does not drop it, because the OBJ Space provider keeps its own
- * pinned capability.  No Ospace or disk handle escapes.
+ * pinned capability.  No storage transaction pointer escapes.
  */
 static long
 osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
@@ -517,7 +485,7 @@ osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
 	if(checkintegrity)
 		osownercheck(oh, oid);
 	if((buf = malloc(max)) == nil) error(Enomem);
-	n = onativeget(oh->sp, oid, buf, max, &v);
+	n = oobjget(oh->tx, oid, buf, max, &v);
 	if(n < 0) error("oexec: no such object");
 	if(ver != nil) *ver = v;
  *bp = buf;
@@ -540,7 +508,7 @@ osgetobjecthandk(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 	return osgetobjecthandcore(oh, oid, bp, max, ver, 0);
 }
 
-/* Space Handle form used by OEXECUTE. It resolves the unified process-local
+/* GE/O volume Handle form used by OEXECUTE. It resolves the unified process-local
  * Vhand to an internal Ohand, then shares
  * the one read/authorization core above. */
 long
@@ -549,7 +517,7 @@ osgetobject(int h, uvlong oid, uchar **bp, long max, uvlong *ver)
 	Ohand *oh;
 	long n;
 
-	oh = ogetspace(h, VkindSpace, Vexecute);
+	oh = ogetspace(h, VkindGeVolume, Vexecute);
 	if(waserror()){
 		ohandput(oh);
 		nexterror();
@@ -570,12 +538,6 @@ int
 oshandrights(Ohand *oh)
 {
 	return oh == nil ? 0 : oh->rights;
-}
-
-uvlong
-ossid(Ohand *oh)
-{
-	return oh == nil ? 0 : oh->sid;
 }
 
 void
@@ -601,25 +563,19 @@ oscopycap(Ohand *src, uvlong oid)
 	n = smalloc(sizeof *n);
 	n->ref.ref = 1;
 	n->rights = src->rights;
-	n->sid = src->sid;
 	n->oid = oid;
 	n->bootstrap = 0;
 	n->caps = 1;
-	memmove(n->space, src->space, sizeof n->space);
-	n->space[sizeof n->space - 1] = 0;
 	if(waserror()){
 		free(n);
 		nexterror();
 	}
-	n->sp = onativeopen(ovol, n->space);
+	n->tx = oobjopen(ovol);
 	poperror();
-	if(n->sp == nil){
+	if(n->tx == nil){
 		free(n);
 		error("O: capability open failed");
 	}
- if(onativesid(n->sp) != src->sid){
-  onativeclose(n->sp);free(n);error(Eperm);
- }
  if(!src->bootstrap && src->caps != 2){
   n->origin = src->origin ? src->origin : src;
   incref(&n->origin->ref);
@@ -630,10 +586,10 @@ oscopycap(Ohand *src, uvlong oid)
 
 /*
  * Explicitly delegated Space capability for a child process.  Unlike the
- * bootstrap Ohand obtained by osopenspace(), this copy is not tied to the
+ * bootstrap Ohand obtained from the volume, this copy is not tied to the
  * boot owner: oauthorize() accepts a caps=2 Space capability across a
  * process boundary.  The caller passes the already-validated O-rights
- * attenuation; the copy owns its own opened Ospace and gate.
+ * attenuation; the copy owns its own opened GE/O transaction and gate.
  */
 Ohand*
 oscopycapdelegate(Ohand *src, int rights)
@@ -655,29 +611,21 @@ oscopycapdelegate(Ohand *src, int rights)
 	n = smalloc(sizeof *n);
 	n->ref.ref = 1;
 	n->rights = rights;
-	n->sid = src->sid;
 	n->oid = 0;
 	n->bootstrap = 0;
 	n->caps = 2;
-	memmove(n->space, src->space, sizeof n->space);
-	n->space[sizeof n->space - 1] = 0;
 	if(waserror()){
 		free(n);
 		nexterror();
 	}
-	n->sp = onativeopen(ovol, n->space);
+	n->tx = oobjopen(ovol);
 	poperror();
-	if(n->sp == nil){
+	if(n->tx == nil){
 		free(n);
 		error("O: capability open failed");
 	}
-	if(onativesid(n->sp) != src->sid){
-		onativeclose(n->sp);
-		free(n);
-		error(Eperm);
-	}
 	/* Pin the grant origin across the process boundary.  The capability
-	 * copy owns its own Ospace, but revocation and its gate continue to
+	 * copy owns its own GE/O transaction, but revocation and its gate continue to
 	 * follow the originating Ohand. */
 	n->origin = src->origin ? src->origin : src;
 	incref(&n->origin->ref);
@@ -708,7 +656,7 @@ oscheckhand(Ohand *h)
  * The persistent object's immutable owner.  Before a Space is upgraded to
  * owner metadata, a missing Kowner record is a seeded object owned by
  * root.  After the upgrade every live object has a record, so a missing
- * one is corruption.  Knowing a SpaceID/OID never selects or changes it.
+ * one is corruption.  Knowing an OID never selects or changes it.
  */
 uvlong
 osownerof(Ohand *oh, uvlong oid)
@@ -716,14 +664,14 @@ osownerof(Ohand *oh, uvlong oid)
 	uvlong owner;
 	int required;
 
-	if(oh == nil || oh->sp == nil || oid == 0)
+	if(oh == nil || oh->tx == nil || oid == 0)
 		return ownerroot();
-	if(ospaceownerget(oh->sp, oid, &owner, &required))
+	if(oobjownerget(oh->tx, oid, &owner, &required))
 		return owner;
 	/* An absent or tombstoned OID has no owner to report.  It is not a
 	 * live object missing metadata; opening it yields a handle whose
 	 * read reports absence.  A live object with no record is corruption. */
-	if(required && ospaceget(oh->sp, oid, nil, 0, nil) >= 0)
+	if(required && oobjget(oh->tx, oid, nil, 0, nil) >= 0)
 		error("O: corrupt object owner metadata");
 	return ownerroot();
 }
@@ -748,10 +696,10 @@ osownercheckcore(Ohand *oh, uvlong oid)
 
 	if(oid == 0)
 		return;
-	if(ospaceownerget(oh->sp, oid, &owner, &required))
+	if(oobjownerget(oh->tx, oid, &owner, &required))
 		return;
 	/* A missing OID may be created with an Owrite capability. */
-	if(ospaceget(oh->sp, oid, nil, 0, nil) < 0)
+	if(oobjget(oh->tx, oid, nil, 0, nil) < 0)
 		return;
 	if(required)
 		error("O: corrupt object owner metadata");
@@ -806,7 +754,7 @@ osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 	}
 	oauthorize(oh, oid, Oread);
 	osownercheck(oh, oid);
-	r = onativeget(oh->sp, oid, buf, n, &v);
+	r = oobjget(oh->tx, oid, buf, n, &v);
 	poperror();
 	qunlock(ohgate(oh));
 	if(ver != nil)
@@ -830,7 +778,7 @@ oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
 	}
 	oauthorize(oh, oid, Owrite);
 	osownercheckcreate(oh, oid);
-	onativeput(oh->sp, oid, buf, n,
+	oobjput(oh->tx, oid, buf, n,
 		up != nil && up->owner != 0 ? up->owner : ownerroot());
 	poperror();
 	qunlock(ohgate(oh));
@@ -857,7 +805,7 @@ oscreatehandcore(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
 	}
 	oauthorize(oh, oh->oid, Ocreate);
 	v = 0;
-	onativecreate(oh->sp, buf, n, &v, owner);
+	oobjcreate(oh->tx, buf, n, &v, owner);
 	poperror();
 	qunlock(ohgate(oh));
 	*oid = v;
@@ -894,7 +842,7 @@ oscommithand(Ohand *oh, uvlong *ver)
 		nexterror();
 	}
 	oauthorize(oh, oh->oid, Ocommit);
-	v = onativecommit(oh->sp);
+	v = oobjcommit(oh->tx);
 	poperror();
 	qunlock(ohgate(oh));
 	if(ver != nil)
@@ -926,36 +874,6 @@ obootstrap(Proc *p)
 	return p != nil && p == bootowner && p->pid == bootpid;
 }
 
-void
-oscheckrole(void *context, char *name, int geonly)
-{
- Ohand *h;void *binding;
- if(context==nil) error(Eperm);
- binding=octxobject(context,name);
- if(waserror()){vobjbindingput(binding);nexterror();}
- if(!vobjbindingdelegable(binding) || (geonly && vobjbindinggecap(binding)==nil)) error(Eperm);
- h=vobjbindingcap(binding);
- if(h==nil){poperror();vobjbindingput(binding);return;}
- qlock(ohgate(h));
- if(waserror()){
-  qunlock(ohgate(h));nexterror();
- }
- oauthorize(h,h->oid,Odelegate);
- poperror();qunlock(ohgate(h));
- poperror();vobjbindingput(binding);
-}
-
-void
-osviewgrantvalid(Ohand *h)
-{
- if(h==nil) error(Ebadarg);
- qlock(ohgate(h));
- if(h->revoked || (h->origin && h->origin->revoked)){
-  qunlock(ohgate(h));error(Eperm);
- }
- qunlock(ohgate(h));
-}
-
 /* GE/O authority revocation is distinct from Handle close and role removal.
  * Descendants sharing an origin are revoked; independently opened grants are not. */
 void
@@ -968,88 +886,7 @@ osrevokehand(Ohand *h)
  if(h->bootstrap) error(Eperm);
  if(h->origin) h->origin->revoked=1;
  h->revoked=1;
- if(h->sp){onativeclose(h->sp);h->sp=nil;}
+ if(h->tx){oobjclose(h->tx);h->tx=nil;}
  poperror();qunlock(ohgate(h));
 }
 
-/* Snapshot selected bindings before the child can run. Grants stay live:
- * an unbind after selection affects the source map only (COPY), whereas
- * SHARE deliberately observes later edits to the same view. Revocation
- * always affects both. Kernel grant pointers never cross the ABI. */
-void
-ocontextspawn(Proc *child, int mode, char (*roles)[32], int nr)
-{
-	void *snapshot;
-	int i, j;
-	if(mode == 0) return;
-	if(up->pgrp == nil) error(Eperm);
-	snapshot = octxcopy(up->pgrp->ocontext);
-	if(waserror()){ octxput(snapshot); nexterror(); }
-	for(i = 0; i < nr; i++){
-		if(memchr(roles[i], 0, 32) == nil || roles[i][0] == 0) error(Ebadarg);
-		for(j = 0; j < i; j++)
-			if(strcmp(roles[j], roles[i]) == 0) error(Ebadarg);
-		oscheckrole(snapshot, roles[i], 0);
-		octxcopybinding(child->pgrp->ocontext, snapshot, roles[i]);
-	}
-	if(mode == 2){
-  if(!oboot() && !octxshareable(snapshot)) error(Eperm);
-  Ohand *layers[Obindmax]; int count=octxsnapshot(snapshot,layers,1),k;
-  for(k=0;k<count;k++){
-   int ok;
-   qlock(ohgate(layers[k]));
-   ok=!layers[k]->revoked && !(layers[k]->origin && layers[k]->origin->revoked) && (oboot() || (layers[k]->rights&Odelegate));
-   qunlock(ohgate(layers[k]));
-   if(!ok){for(int t=0;t<count;t++) ohandput(layers[t]);error(Eperm);}
-  }
-  for(k=0;k<count;k++) ohandput(layers[k]);
-		/* SHARE opts into the whole mutable view, with every role listed. */
-		if(!octxsame(snapshot, child->pgrp->ocontext) ||
-					!octxmatches(up->pgrp->ocontext, snapshot)) error("O: selected view changed");
-		/*
-		 * Acquire the parent's reference before dropping the child's
-		 * fresh group.  The child stays unpublished, but ordering the
-		 * transfer this way never leaves it with a released Pgrp and
-		 * makes a later spawn-failure rollback unambiguous.
-		 */
-		{
-			Pgrp *parent = up->pgrp;
-			Pgrp *old;
-
-			incref(&parent->ref);
-			old = child->pgrp;
-			child->pgrp = parent;
-			closepgrp(old);
-		}
-	}
-	poperror();
-	octxput(snapshot);
-}
-
-/* Current object-ABI namespace visibility. */
-static int nsreadable(Ohand *h,int rights) {
- return !h->provider && !h->bootstrap && !h->revoked && !(h->origin && h->origin->revoked) && (h->rights&rights)==rights &&
-  up->pgrp && octxmember(up->pgrp->ocontext,h);
-}
-/* Lock grants in address order, with duplicates removed, then verify an
- * unchanged map epoch. Never hold the context spinlock during I/O or sleep.
- * This provides a linearizable visibility snapshot without granting handles. */
-int
-osvisibility(Ohand **source,int n,int *allowed)
-{
- Ohand *ordered[Obindmax],*tmp;int i,j,k=0,stable;uvlong epoch;
- for(i=0;i<n;i++){
-  Ohand *root=source[i]->origin?source[i]->origin:source[i];
-  for(j=0;j<k;j++) if(ordered[j]==root) break;
-  if(j==k) ordered[k++]=root;
- }
- for(i=1;i<k;i++) for(j=i;j>0 && (uintptr)ordered[j]<(uintptr)ordered[j-1];j--){
-  tmp=ordered[j];ordered[j]=ordered[j-1];ordered[j-1]=tmp;
- }
- for(i=0;i<k;i++) qlock(&ordered[i]->gate);
- epoch=up->pgrp?octxepoch(up->pgrp->ocontext):0;
- for(i=0;i<n;i++) allowed[i]=nsreadable(source[i],Oread);
- stable=epoch==(up->pgrp?octxepoch(up->pgrp->ocontext):0);
- for(i=k;i>0;i--) qunlock(&ordered[i-1]->gate);
- return stable;
-}

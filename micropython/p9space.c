@@ -27,7 +27,6 @@ extern long ovolopen(char *, int);
 #include "../runtime/abi/sys.h"
 #include "../runtime/abi/vobj.h"
 #include "../runtime/abi/obj.h"
-#include "../runtime/abi/namespace.h"
 #endif
 
 // the runtime an Environment is made for: the .mpy's format
@@ -154,16 +153,16 @@ enum {
 };
 
 /* The canonical OBJ path: an authorized VkindSpace Handle from OBJOPEN
- * (ObjOpenSpace) and one OBJOPEN (ObjOpenGeSpace) capability per OID for
+ * (ObjOpenVolume) and one OBJOPEN (ObjOpenGeOid) capability per OID for
  * reads.  T2 stages writes to named OIDs through OBJINVOKE(ObjOpPutOid) and
  * commits them through OBJINVOKE(ObjOpCommit) on the same Space handle. */
 static long objgeopen_space(int sh, unsigned long long oid) {
-    ObjOpenGeSpaceReq req;
+    ObjOpenGeOidReq req;
 
     memset(&req, 0, sizeof req);
-    req.space = sh;
+    req.volume = sh;
     req.oid = oid;
-    return obj_open(ObjOpenGeSpace, &req, sizeof req, 0, NULL);
+    return obj_open(ObjOpenGeOid, &req, sizeof req, 0, NULL);
 }
 
 /* A whole persistent object through an already-open GE Handle: 0 ok,
@@ -593,13 +592,6 @@ mp_obj_t p9_import(size_t n, const mp_obj_t *a) {
     return MP_OBJ_FROM_PTR(ctx);
 }
 
-static void checkname(const char *name) {
-    if (*name == 0 || strlen(name) >= sizeof sp.name || strchr(name, '/') != NULL
-        || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("not a space name: '%s'"), name);
-    }
-}
-
 static void put64(byte *p, uint64_t u) {
     int i;
 
@@ -695,8 +687,8 @@ static void ouseenv(const char *name, const char *expect) {
 
 // Stage 4: a Space on the native O volume: its Environment from the
 // manifest, its graph from OID_GRAPH, restored by the V7 machinery
-static mp_obj_t ospace_open(size_t n_args, const mp_obj_t *args) {
-    const char *name = mp_obj_str_get_str(args[0]);
+static mp_obj_t ovolume_restore(void) {
+    const char *name = "init"; /* Python Environment label, never a GE/O SpaceID */
     const char *why;
     char user[256];
     shdr_t h;
@@ -706,10 +698,7 @@ static mp_obj_t ospace_open(size_t n_args, const mp_obj_t *args) {
     vstr_t st;
     nlr_buf_t nlr;
 
-    if (n_args > 1 && args[1] != mp_const_none) {
-        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("space: O: versions are not supported"));
-    }
-    if ((spread = obj_open(ObjOpenSpace, (void *)name, strlen(name), 0, NULL)) < 0)
+    if ((spread = obj_open(ObjOpenVolume, NULL, 0, 0, NULL)) < 0)
         raise_err();
     osp = spread;
     if (nlr_push(&nlr) != 0) {
@@ -842,22 +831,18 @@ int p9_space_report(void) {
     return -1;
 }
 
-// open(name[, version]): open the native O Space NAME.  Versions are
-// not supported by the O path; no pathname/file Space is opened.
-static mp_obj_t space_open(size_t n_args, const mp_obj_t *args) {
-    const char *name = mp_obj_str_get_str(args[0]);
-
+// open(): restore the one Python graph from the selected GE/O volume.
+// This does not select a storage namespace or grant access by a name.
+static mp_obj_t space_open(void) {
     if (sp.isopen) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a Space is open"));
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a Python graph is open"));
     }
-    checkname(name);
     if (ovol < 0) {
-        mp_raise_msg(&mp_type_OSError,
-            MP_ERROR_TEXT("space: no native O volume is selected"));
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("space: no native O volume is selected"));
     }
-    return ospace_open(n_args, args);
+    return ovolume_restore();
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_open_obj, 1, 2, space_open);
+static MP_DEFINE_CONST_FUN_OBJ_0(space_open_obj, space_open);
 
 // oid(o) -> o's OID in the open Space (kept over versions and boots),
 // or None: not committed yet, or no object of the heap
@@ -1103,13 +1088,12 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         { MP_QSTR_argv, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_membudget, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_handle, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_view, MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_roles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_env, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_vhandles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     struct {
-        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, env, vhandles;
+        mp_arg_val_t oid, cpu, argv, membudget, handle, roles, env, vhandles;
     } a;
     struct { struct Ospawn base; struct Oinherit extra; } ext;
     struct Oinheritv *hv;
@@ -1179,7 +1163,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     hasv = a.vhandles.u_obj != mp_const_none;
     hv = (struct Oinheritv *)&ext.extra;
     if (hasv) {
-        if (a.view.u_int != 0 || a.roles.u_obj != mp_const_none
+        if (a.roles.u_obj != mp_const_none
         || a.env.u_obj != mp_const_none) {
             mp_raise_msg(&mp_type_ValueError,
                 MP_ERROR_TEXT("space.spawn: vhandles cannot be combined with other inheritance"));
@@ -1207,7 +1191,8 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     }
     ext.base.flags = hasv ? 2 : 1;
     if (!hasv) {
-    ext.extra.view = a.view.u_int;
+    /* Legacy namespace view is gone. Process roots are explicit grants. */
+    ext.extra.view = 0;
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
@@ -1484,7 +1469,7 @@ static mp_obj_t space_hget(mp_obj_t h, mp_obj_t oid) {
     long r, size, gh;
 
     /* The explicit legacy Space Handle is converted through OBJOPEN
-     * (ObjOpenGeSpace), which applies the same Ohand authority. */
+     * (ObjOpenGeOid), which applies the same Ohand authority. */
     gh = objgeopen_space(mp_obj_get_int(h), obyteoid(oid));
     hcheck(gh);
     size = obj_read_version(gh, nil, 0, 0, &ver);
@@ -1545,80 +1530,27 @@ static mp_obj_t space_hexecute(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_hexecute_obj, 2, 3,
                                            space_hexecute);
 
-/* Native sealed provider and union operations. */
-static long namespace_call(ObjCall *call) {
- long control=obj_open(ObjOpenNamespaceCurrent,NULL,0,Vcontrol,NULL);
- if(control<0)return control;
- long result=obj_invoke(control,call,sizeof *call);
- obj_close(control);
- return result;
-}
-static ObjCall namespace_request(unsigned op) {
- ObjCall call={0};call.version=OBJ_ABI_VERSION;call.op=op;return call;
-}
-static mp_obj_t space_view(mp_obj_t roles) {
- size_t n;mp_obj_t *a;char names[32][32];
- mp_obj_get_array(roles,&n,&a);
- if(!n||n>32)mp_raise_ValueError(MP_ERROR_TEXT("view role count"));
- memset(names,0,sizeof names);
- for(size_t i=0;i<n;i++){
-  const char *role=mp_obj_str_get_str(a[i]);size_t len=strlen(role);
-  if(len>=32)mp_raise_ValueError(MP_ERROR_TEXT("role length"));
-  memcpy(names[i],role,len);
- }
- ObjCall call=namespace_request(ObjOpNamespaceCreate);
- call.in=names;call.inlen=n*32;
- long h=namespace_call(&call);hcheck(h);return mp_obj_new_int(h);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_view_obj,space_view);
-static mp_obj_t space_mount(mp_obj_t h,mp_obj_t mode) {
- ObjCall call=namespace_request(ObjOpNamespaceAttach);
- call.arg0=mp_obj_get_int(h);call.arg1=mp_obj_get_int(mode);
- long id=namespace_call(&call);hcheck(id);return mp_obj_new_int(id);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(space_mount_obj,space_mount);
-static mp_obj_t space_unmount(mp_obj_t id) {
- ObjCall call=namespace_request(ObjOpNamespaceDetach);
- call.arg0=mp_obj_get_uint(id);
- hcheck(namespace_call(&call));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_unmount_obj,space_unmount);
-static mp_obj_t space_visible(void) {
- NsVisible records[32];ObjCall call=namespace_request(ObjOpNamespaceVisible);
- call.out=records;call.outlen=sizeof records;
- long count=namespace_call(&call);hcheck(count);
- mp_obj_t result=mp_obj_new_list(0,NULL);
- for(long i=0;i<count;i++){
-  mp_obj_t fields[4]={mp_obj_new_bytes(records[i].object.volume,16),
-   mp_obj_new_int_from_ull(records[i].object.space),
-   mp_obj_new_int_from_ull(records[i].object.oid),
-   mp_obj_new_int(records[i].rights)};
-  mp_obj_list_append(result,mp_obj_new_tuple(4,fields));
- }
- return result;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(space_visible_obj,space_visible);
-static mp_obj_t space_open_handle(mp_obj_t name) {
- const char *s=mp_obj_str_get_str(name);long h=obj_open(ObjOpenSpace,(void*)s,strlen(s),0,NULL);
+static mp_obj_t space_open_handle(void) {
+ long h=obj_open(ObjOpenVolume,NULL,0,0,NULL);
  hcheck(h);return mp_obj_new_int(h);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(space_open_handle_obj,space_open_handle);
+static MP_DEFINE_CONST_FUN_OBJ_0(space_open_handle_obj,space_open_handle);
 
 /* Open a persistent GE/O object as a generic capability object through the
  * canonical OBJOPEN/OBJINVOKE/OBJCLOSE boundary.  Reads/writes resolve
  * through the existing O Space handle and GE/O provider.  Identity is the
  * persistent OID, not a new volatile OID. */
 static mp_obj_t space_openobj(mp_obj_t oid_obj) {
-    ObjOpenGeSpaceReq req;
+    ObjOpenGeOidReq req;
     long h;
     if (!mp_obj_is_int(oid_obj))
         mp_raise_TypeError(MP_ERROR_TEXT("space.openobj: oid must be an int"));
     if (osp < 0)
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("space.openobj: no O Space"));
     memset(&req, 0, sizeof req);
-    req.space = osp;
+    req.volume = osp;
     req.oid = (unsigned long long)mp_obj_get_uint(oid_obj);
-    h = obj_open(ObjOpenGeSpace, &req, sizeof req, 0, NULL);
+    h = obj_open(ObjOpenGeOid, &req, sizeof req, 0, NULL);
     if (h < 0) raise_err();
     return mp_obj_new_int(h);
 }
@@ -1626,10 +1558,6 @@ static MP_DEFINE_CONST_FUN_OBJ_1(space_openobj_obj,space_openobj);
 
 static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_space) },
-    { MP_ROM_QSTR(MP_QSTR_view), MP_ROM_PTR(&space_view_obj) },
-    { MP_ROM_QSTR(MP_QSTR_mount), MP_ROM_PTR(&space_mount_obj) },
-    { MP_ROM_QSTR(MP_QSTR_unmount), MP_ROM_PTR(&space_unmount_obj) },
-    { MP_ROM_QSTR(MP_QSTR_visible), MP_ROM_PTR(&space_visible_obj) },
     { MP_ROM_QSTR(MP_QSTR_open_handle), MP_ROM_PTR(&space_open_handle_obj) },
     { MP_ROM_QSTR(MP_QSTR_openobj), MP_ROM_PTR(&space_openobj_obj) },
     { MP_ROM_QSTR(MP_QSTR_MREPL), MP_ROM_INT(0) },

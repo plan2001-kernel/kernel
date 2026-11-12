@@ -21,8 +21,6 @@ extern long objcreate(unsigned long long, unsigned long long, void *,
 extern long objopen(unsigned long long, void *, long, unsigned long long,
 		void *);
 extern long objclose(int);
-extern long objbind(int, void *, long, unsigned long long,
-		unsigned long long);
 extern long objinvoke(int, void *, long);
 extern long sysctl(unsigned int, unsigned int, SysctlReq *, long);
 extern long ioctl(int, unsigned int, IoctlReq *, long);
@@ -51,13 +49,6 @@ long
 obj_close(int handle)
 {
 	return objclose(handle);
-}
-
-long
-obj_bind(int handle, const char *role, unsigned long long len,
-		unsigned long long rights, unsigned int mode)
-{
-	return objbind(handle, (void*)role, (long)len, rights, mode);
 }
 
 long

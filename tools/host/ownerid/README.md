@@ -14,7 +14,7 @@ guest does not shut down, flush, or unwind the failing syscall.
 | 101 | `before-owner-staging` | payload chunks staged, no Kowner record yet |
 | 102 | `after-owner-staging` | payload and Kowner staged in version W = N+1, header not committed |
 | 103 | `after-publication` | `objtxcommit()` published the header, before `gesync()` |
-| 104 | `migration-after-staging` | the first migration batch is staged at W = N+1, owner-mode header not committed |
+| 104 | `migration-after-staging` | the first flat-volume owner-upgrade batch is staged at W = N+1, owner-mode header not committed |
 
 The marker only proves where guest execution stopped.  It does not by itself
 prove that anything reached the disk image.  Each case reboots the same image
@@ -25,16 +25,18 @@ and asserts the actual recovered state:
 * create 103: if the target is present it has the intended bytes and owner;
   otherwise the retry reuses it.  The retry OID, owner, and owner-record count
   are checked in both outcomes;
-* migration 104: before retry every legacy live object still reads through
-  the seeded legacy owner and no owner-mode header is observable; after retry
-  every live object has exactly one owner record, tombstones have none, and
-  an empty legacy Space also upgrades;
-* migration abort: owner fault 4 raises inside the first migration batch.
-  The Space must remain in its legacy pre-migration state, and a retry must
-  publish one owner record for every live object and none for tombstones;
-* corruption: a live object with a missing, malformed (bad magic or length),
-  or zero-valued `Kowner` record fails closed for open and write, while the
-  authentic unmigrated seeded Space still resolves to its legacy owner.
+* migration 104: a flat GE/O v2 ownerless fixture (not an old SpaceID/Ko
+  disk format) crashes while staging the first batch. The host inspects the
+  unpublished owner mode and absence of published owner records. The same
+  disk then boots in retry mode, upgrades live objects exactly once, skips
+  tombstones and verifies empty-object ownership. The harness changes only
+  the ESP boot mode (-N to -I), never the GE/O partition;
+* migration abort: owner fault 4 raises inside the first flat-volume
+  upgrade batch. The published pre-upgrade state remains intact and retry
+  publishes exactly one owner record for each live OID;
+* corruption: an owner-aware flat-volume object with a missing, malformed
+  (bad magic or length), or zero-valued `Kowner` record fails closed for
+  open and write.
 
 ## Durability limits
 

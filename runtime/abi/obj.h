@@ -32,13 +32,11 @@ struct Ospawn;
  * ObjOpenDevices/ObjOpenDevice. */
 enum {
 	ObjOpenHandle		= 4,
-	ObjOpenBinding		= 5,
-	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */
-	ObjOpenGeSpace		= 7,	/* Space handle + OID -> persistent object */
+	ObjOpenVolume		= 6,	/* no request; boot-owner volume grant */
+	ObjOpenGeOid		= 7,	/* volume capability + OID -> object */
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
-	ObjOpenNamespaceCurrent = 17,	/* caller's namespace control */
 };
 
 /* obj_create kinds.  ObjKindBytes is volatile immutable content and
@@ -51,16 +49,6 @@ enum {
 	ObjKindRegion		= 4,	/* volatile capability-mapped pages */
 	ObjKindObjectSpace = 5,	/* capability-addressed relation graph */
 	ObjCreateKindMask	= 0xff,
-};
-
-/* obj_bind modes.  Remove uses handle=0 and rights=0; it changes only the
- * caller's current namespace and does not revoke already opened Handles. */
-enum {
-	ObjBindCopy		= 0,
-	ObjBindExclusive	= 1,
-	ObjBindShare		= 2,
-	ObjBindModeMask		= 0xff,
-	ObjBindRemove		= 0x100,
 };
 
 /* OBJINVOKE operations.  Numbers 4, 5, 6, 7, 8, 11, 14, 15, 16, 17, 18, 19,
@@ -105,10 +93,6 @@ enum {
 	ObjOpDeviceRecv = 39,	/* device: one USB completion Handle */
 	/* 40 is reserved: device control moved to IOCTL(145). */
 	ObjOpExit	= 36,	/* RETIRED: direct EXITS(8) is used */
-	ObjOpNamespaceCreate = 41,	/* selected roles -> sealed view Handle */
-	ObjOpNamespaceAttach = 42,	/* view Handle + mode -> attachment token */
-	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
-	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
 	ObjOpDeviceRx	= 45,	/* device: acquire the receive region Handle */
 	ObjOpDeviceTx	= 46,	/* device: acquire the transmit region Handle */
 	/* VkindRegion: install this region at arg0 (0 = choose) and return the
@@ -344,7 +328,7 @@ typedef struct ObjDeviceResult {
 } ObjDeviceResult;
 
 /* obj_invoke(ObjOpPutOid): replace the content of one explicitly named
- * persistent OID through a VkindSpace Handle carrying Vwrite.  arg0 is the
+ * persistent OID through a VkindGeVolume Handle carrying Vwrite.  arg0 is the
  * OID; in/inlen are the bounded payload.  It uses the same Ohand Owrite
  * authority and per-Space gate as OSPACEPUT and does NOT commit; the pending
  * write joins the Space transaction until an explicit ObjOpCommit.  The
@@ -383,17 +367,15 @@ typedef struct ObjOpenHandleReq {
 	unsigned int		reserved;
 } ObjOpenHandleReq;
 
-/* obj_open(ObjOpenSpace): a bounded name of an existing O Space.  The name
- * is not a path and grants nothing by itself; osopenspace() applies the
- * bootstrap/volume authorization and returns an attenuated handle. */
-/* obj_open(ObjOpenGeSpace): reopen an existing persistent object through an
- * authorized Space handle.  space is a process-local VkindSpace handle, not
- * an OID or a global name. */
-typedef struct ObjOpenGeSpaceReq {
-	int			space;
+/* obj_open(ObjOpenVolume) takes (NULL, 0). Only the active boot owner
+ * can mint this volume-wide capability. Its descendants are attenuated.
+ * obj_open(ObjOpenGeOid) requires a process-local authorized volume handle
+ * and an OID. OID knowledge never grants access. */
+typedef struct ObjOpenGeOidReq {
+	int			volume;
 	unsigned int		reserved;
 	unsigned long long	oid;
-} ObjOpenGeSpaceReq;
+} ObjOpenGeOidReq;
 
 /* obj_open(ObjOpenDevice) family requirements:
  *
@@ -521,7 +503,7 @@ typedef struct ObjOwnerInfo {
 
 /* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
  * struct Ospawn *options) creates one static x86-64 ELF child from an
- * explicit GE/O Space capability and OID.  The Handle must be a VkindSpace
+ * explicit GE/O Space capability and OID.  The Handle must be a VkindGeVolume
  * Handle carrying Vexecute; the same Ohand Oexecute gate and per-Space
  * authorization as OEXECUTE remain in force.  argv/options are validated by
  * the shared spawn core, including the Ospawn and optional
@@ -541,7 +523,7 @@ long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 
 /*
  * libc/libo-style wrappers over the five kernel entry points.  The raw
- * syscall stubs are objcreate/objopen/objclose/objbind/objinvoke; these
+ * syscall stubs are objcreate/objopen/objclose/objinvoke; these
  * underscored names add argument packing and typed adapters.
  */
 long obj_create(unsigned long long space, unsigned int kind,
@@ -549,8 +531,6 @@ long obj_create(unsigned long long space, unsigned int kind,
 long obj_open(unsigned long long provider, void *req, long reqlen,
 		unsigned long long rights, ObjId *out);
 long obj_close(int handle);
-long obj_bind(int handle, const char *role, unsigned long long len,
-		unsigned long long rights, unsigned int mode);
 long obj_invoke(int handle, ObjCall *call, long calllen);
 
 long obj_create_persist(int space, void *data, unsigned long long len,

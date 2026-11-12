@@ -1,10 +1,11 @@
 """OwnerID crash-recovery and corruption module for the recovery runner.
 
 The host replaces the MODE placeholder with create-101, create-102,
-create-103, migrate-104 or corrupt before mpy-cross compiles this file.
+create-103, migrate-104, abort-migrate or corrupt before mpy-cross compiles this file.
 """
 import plan9 as p
 import space
+import sys
 
 MODE = '__MODE__'
 STATE = 0x4f45584543000100
@@ -32,7 +33,7 @@ def fail(s):
 
 def read_state(sh):
     try:
-        h = p.obj_open_ge_space(sh, STATE)
+        h = p.obj_open_ge_oid(sh, STATE)
     except OSError:
         return None
     try:
@@ -60,13 +61,11 @@ def expected(i):
         return None
     if i % 17 == 0:
         return b''
-    if i % 3 == 0:
-        return ('v2-%04d' % i).encode()
     return ('v1-%04d' % i).encode()
 
 
 def probe(sh, oid):
-    h = p.obj_open_ge_space(sh, oid)
+    h = p.obj_open_ge_oid(sh, oid)
     try:
         data = p.obj_read(h, 64)
     except OSError:
@@ -78,7 +77,7 @@ def probe(sh, oid):
 
 
 def create_flow(case):
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
     st = read_state(sh)
     if st is not None and st[0] == 'CRASH':
         verify_create(sh, int(st[1]), int(st[2]))
@@ -98,7 +97,7 @@ def verify_create(sh, case, target):
     root = p.owner_info()[0]
     absent = False
     try:
-        h = p.obj_open_ge_space(sh, target)
+        h = p.obj_open_ge_oid(sh, target)
     except OSError as e:
         fail('target-open:' + repr(e))
     try:
@@ -152,35 +151,28 @@ def check_legacy(sp, root, phase):
 
 
 def migrate_flow():
-    sh = p.obj_open_space('init')
-    st = read_state(sh)
-    if st is not None and st[0] == 'MIGRATE':
-        verify_migrate()
-        return 1
-    if st is not None:
-        fail('unexpected-state')
-    write_state(sh, 'MIGRATE', '104', '0')
-    sp = p.obj_open_space('/')
-    p.ownerid_fault(104)
-    p.obj_create_ge(sp, b'migrate-trigger')
-    fail('migrate-did-not-stop')
+    sh = p.obj_open_volume()
+    # The host uses -N for crash and -I for retry, changing only the ESP.
+    # No pre-crash write is allowed: it would itself trigger migration.
+    if '-N' in sys.argv:
+        p.ownerid_fault(104)
+        p.obj_create_ge(sh, b'migrate-trigger')
+        fail('migrate-did-not-stop')
+    return verify_migrate()
 
 
 def verify_migrate():
     root = p.owner_info()[0]
-    sp = p.obj_open_space('/')
-    # Before retry the header must not claim owner mode: every legacy live
-    # object still resolves through the documented seeded-owner rule.
+    sp = p.obj_open_volume()
     check_legacy(sp, root, 'pre')
     g, oid = p.obj_create_ge(sp, b'migrate-retry')
     if p.obj_owner(g)[0] != root:
         fail('retry-owner')
     p.obj_close(g)
     check_legacy(sp, root, 'post')
-    e = p.obj_open_space('empty')
-    g, eoid = p.obj_create_ge(e, b'empty-space-object')
-    if p.obj_owner(g)[0] != root:
-        fail('empty-space-owner')
+    g, empty_oid = p.obj_create_ge(sp, b'')
+    if p.obj_owner(g)[0] != root or p.obj_read(g, 8) != b'':
+        fail('empty-object-owner')
     p.obj_close(g)
     print('RECOVERY-VERIFY-FINISH case=104 PASS')
     return 1
@@ -188,7 +180,7 @@ def verify_migrate():
 
 def abort_migrate_flow():
     root = p.owner_info()[0]
-    sp = p.obj_open_space('/')
+    sp = p.obj_open_volume()
     p.ownerid_fault(4)
     try:
         p.obj_create_ge(sp, b'abort-trigger')
@@ -196,39 +188,28 @@ def abort_migrate_flow():
         pass
     else:
         fail('abort-did-not-fail')
-    # The failed migration must leave the published Space in its legacy
-    # pre-migration state, with every live object still readable.
     check_legacy(sp, root, 'abort-pre')
     g, oid = p.obj_create_ge(sp, b'abort-retry')
     if p.obj_owner(g)[0] != root:
         fail('abort-retry-owner')
     p.obj_close(g)
     check_legacy(sp, root, 'abort-post')
-    e = p.obj_open_space('empty')
-    g, eoid = p.obj_create_ge(e, b'empty-space-object')
-    if p.obj_owner(g)[0] != root:
-        fail('abort-empty-space-owner')
+    g, empty_oid = p.obj_create_ge(sp, b'')
+    if p.obj_owner(g)[0] != root or p.obj_read(g, 8) != b'':
+        fail('abort-empty-object-owner')
     p.obj_close(g)
     print('RECOVERY-ABORT-FINISH PASS')
     return 1
 
 
 def corrupt_flow():
-    root = p.owner_info()[0]
-    sh = p.obj_open_space('init')
-    # The authentic unmigrated seeded Space still resolves to the seeded
-    # legacy owner; a missing record there is not corruption.
-    h = p.obj_open_ge_space(sh, MP_OID)
-    if p.obj_owner(h)[0] != root:
-        fail('legacy-owner')
-    p.obj_close(h)
-    sp = p.obj_open_space('/')
+    sp = p.obj_open_volume()
     labels = ('missing', 'badmagic', 'badlen', 'zeroowner')
     for i in range(4):
         oid = BASE + i
         label = labels[i]
         try:
-            h = p.obj_open_ge_space(sp, oid)
+            h = p.obj_open_ge_oid(sp, oid)
         except OSError as e:
             msg = str(e)
             if 'owner' not in msg and 'corrupt' not in msg:
