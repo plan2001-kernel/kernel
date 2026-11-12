@@ -3,7 +3,9 @@
 set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 OUT=${CAPLINEAGE_TEST_OUT:-$ROOT/build/capability/run}
-export QEMU_O_BOOT_LIB=1
+# Synchronize each injected statement against the actual REPL echo.
+# Without this, queued PS/2 scan codes can lose underscores in cap_revoke.
+export QEMU_O_BOOT_LIB=1 QOB_REPL_SYNC_LINES=1
 source "$ROOT/tools/qemu-o-boot.sh"
 qob_main --accel kvm:tcg --cpus 2 --ncpu 2 --obootcpu 0 \
   --obootexec 0x4f45584543000003 \
