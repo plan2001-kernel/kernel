@@ -1,5 +1,5 @@
 /*
- * Opt-in lifecycle accounting for Pgrp and OContext (issue #30).
+ * Opt-in lifecycle accounting for process and capability resources.
  *
  * This is a build-time diagnostic only (PLAN2001_LIFECYCLE_DIAG).  It adds
  * no syscall, object kind or ABI field; the emitted counters are consumed by
@@ -9,18 +9,12 @@
 #pragma once
 
 #ifdef PLAN2001_LIFECYCLE_DIAG
-void lifepgrp(void *pgrp, int delta);
-void lifecontrol(void *pgrp, int delta);
-void lifeoctx(int delta);
 void lifeproc(int delta);
 ulong lifedelegateid(void);
 void lifedelegate(int kind, ulong id, int delta);
 void lifefpu(int delta);
 void lifefpudiscard(int fpsave, int kfpsave);
 #else
-#define lifepgrp(pgrp, delta)
-#define lifecontrol(pgrp, delta)
-#define lifeoctx(delta)
 #define lifeproc(delta)
 #define lifedelegateid() 0
 #define lifedelegate(kind, id, delta)

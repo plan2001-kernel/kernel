@@ -2151,13 +2151,13 @@ vobjinstallohand(Ohand *oh, int kind)
 {
  Vobj *o;
  int handle, rights;
- if(oh == nil || (kind != VkindSpace && kind != VkindGe && kind != VkindNamespaceView)) error(Ebadarg);
- rights = kind == VkindNamespaceView ? Vmeta|Vcontrol : vgerights(oh);
- o = vobjalloc(kind, kind == VkindNamespaceView ? 0 : ossid(oh), 0);
+ if(oh == nil || (kind != VkindSpace && kind != VkindGe)) error(Ebadarg);
+ rights = vgerights(oh);
+ o = vobjalloc(kind, 0, 0);
  if(o == nil) error(Enomem);
  o->priv = oh;
  o->oid = oh->oid;
- o->provider = kind == VkindNamespaceView ? 0 : (kind == VkindSpace ? VopenSpace : VopenGe);
+ o->provider = kind == VkindSpace ? VopenSpace : VopenGe;
  if(waserror()){o->priv=nil;vobjput(o);nexterror();}
  handle = vobjinstallobj(o, rights);
  poperror();
