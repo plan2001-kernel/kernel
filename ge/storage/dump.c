@@ -39,15 +39,22 @@ showkey(Fmt *fmt, Key *k)
 	case Kconf:
 		n = fmtprint(fmt, "Conf %.*s", k->nk-1, k->k+1);
 		break;
-	case Kobj:	/* Plan2001: store[8] [oid[8] ~ver[8] idx[4]] */
-		if(k->nk == 1+8)
-			n = fmtprint(fmt, "obj store:%llx header", UNPACK64(k->k+1));
-		else if(k->nk == 1+8+8+8+4)
-			n = fmtprint(fmt, "obj store:%llx oid:%llx ver:%lld idx:%d",
-				UNPACK64(k->k+1), UNPACK64(k->k+9),
-				~UNPACK64(k->k+17), UNPACK32(k->k+25));
+	case Kobj:	/* v2: header or oid[8] ~ver[8] idx[4] */
+		if(k->nk == 1)
+			n = fmtprint(fmt, "obj volume header");
+		else if(k->nk == 1+8+8+4)
+			n = fmtprint(fmt, "obj oid:%llx ver:%llud idx:%ud",
+				UNPACK64(k->k+1), ~UNPACK64(k->k+9),
+				UNPACK32(k->k+17));
 		else
-			n = fmtprint(fmt, "obj ??? %.*H", k->nk, k->k);
+			n = fmtprint(fmt, "obj invalid key %.*H", k->nk, k->k);
+		break;
+	case Kowner:	/* v2: oid[8] ~ver[8] */
+		if(k->nk == 1+8+8)
+			n = fmtprint(fmt, "owner oid:%llx ver:%llud",
+				UNPACK64(k->k+1), ~UNPACK64(k->k+9));
+		else
+			n = fmtprint(fmt, "owner invalid key %.*H", k->nk, k->k);
 		break;
 	default:
 		n = fmtprint(fmt, "??? %.*H", k->nk, k->k);
@@ -129,6 +136,14 @@ showval(Fmt *fmt, Kvp *v, int op, int flg)
 		break;
 	case Kobj:
 		n = fmtprint(fmt, "%d bytes", 	v->val.nv);
+		break;
+	case Kowner:
+		if(v->val.nv == 16 &&
+		   memcmp(v->val.v, "OOWNER01", 8) == 0)
+			n = fmtprint(fmt, "owner:%llx", UNPACK64(v->val.v+8));
+		else
+			n = fmtprint(fmt, "invalid owner value %.*H",
+				v->val.nv, v->val.v);
 		break;
 	default:
 		n = fmtprint(fmt, "??? %.*H", 	v->val.nv, v->val.v);
