@@ -7,6 +7,7 @@ on:
       - 'runtime/**'
       - 'micropython/**'
       - 'tools/host/capability/**'
+      - 'tools/host/ownerid/**'
       - '.github/workflows/owner-authority.yml'
   workflow_dispatch:
 
@@ -32,10 +33,14 @@ jobs:
         run: tools/build.sh
       - name: QEMU real cross-owner permission acceptance
         run: tools/host/capability/run-owner-authority.sh
+      - name: Two-boot immutable OwnerID and capability regression
+        run: tools/host/ownerid/run-ownerid-reboot.sh --no-build
       - name: Upload QEMU diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: owner-capability-qemu
-          path: build/capauth/run
+          path: |
+            build/capauth/run
+            build/t49-reboot/run
           if-no-files-found: ignore

@@ -44,12 +44,14 @@ allowed = valid_capability && required_rights_subset &&
           !revoked && provider_safety_conditions
 ```
 
-The earlier `process.owner == object.owner` general gate is superseded
-as a target, though it still exists across the current GE/O, device,
-region and process providers. Those gates must be migrated explicitly,
-not removed blindly. OwnerID stays immutable for trusted program identity,
-boot policy and lifecycle. Only an explicit delegator may attenuate and
-transfer capabilities; no OID, label or persisted metadata mints power.
+OwnerID-equality checks have now been replaced by explicit Handle
+admission for data, GE/O, region writer mapping, devices and process control.
+OwnerID is immutable provenance, not a bypass or a veto for authorized access.
+Creation assigns it atomically; later cross-owner writes retain the original
+stored owner. Trusted boot/installer authority remains separate: untrusted
+code cannot open a GE/O Space merely by guessing `init`, register privileged
+program identities, or forge a process owner. No OID, label or persisted
+metadata grants power without an authorized capability.
 
 Handle copies now create explicit, bounded derivation lineages. A source Handle
 with Vdelegate can call `cap_revoke(source)` to revoke **all previously
@@ -161,14 +163,14 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
    aliases, multiple labels, nested spaces, cycles, rights, stale handling,
    concurrent enumeration and AMD64 QEMU boot. This branch implements a
    foundation; full test execution is still required.
-2. **Capability security:** the generic volatile Handle-derivation and
-   selective subtree-revocation mechanism is now implemented, including
-   ObjectSpace bindings, handle duplication and inherited child handles.
-   The next security subphase must eliminate unintended new roots at
-   provider-open boundaries, migrate OwnerID-equality gates across GE/O,
-   region, devices and process control, and test explicit cross-owner
-   delegation. Neither persistent grants nor a global object-destruction
-   revoke operation are implemented.
+2. **Capability security:** generic Handle derivation, process delegation,
+   selective subtree revocation and explicit OwnerID-independent authorization
+   are implemented for the current providers. GE/O Ohand scope/rights and
+   Kowner record integrity remain enforced. Cross-owner GE/O reads and writes,
+   read-only attenuation, process control and region-writer publication are
+   covered by the native QEMU/OVMF fixture `owner-authority.py`. Hardware
+   permissions, concurrent revocation fault injection and durable grants are
+   not yet proven.
 3. **Execution roots:** replace Pgrp/OContext/NamespaceView role lookups
    and old process namespace lifecycle with explicit ObjectSpace roots;
    remove obsolete providers, public ABI, wrappers and tests. No shims.
@@ -195,8 +197,22 @@ revocation. Later derivation from the same source is allowed.
 
 Full-system acceptance is in `tools/host/capability/` with its own
 GitHub Actions workflow. The earlier ObjectSpace-v1 acceptance remains
-required. Success of these tests does not prove that every GE/O OID open,
-device-catalog open or provider-internal acquisition derives from its
-authorizing Handle. Removing the OwnerID gate before auditing every such
-entry point would create an authority bypass, so it remains a separate
-security migration task.
+required. OwnerID-equality checks have been removed after auditing the current
+GE/O, device and process Handle entry points. Cross-owner authority is now
+tested, including that OwnerID alone is insufficient. The trusted initial
+device catalog and boot-volume setup still deliberately require their
+existing bootstrap/administration gates. The volatile Handle graph does not
+serialize authority on disk or automatically cancel in-flight provider work.
+Independent testing of timing races, hardware device control and revocation
+during active I/O is still necessary.
+
+## Current OwnerID-independent authorization proof
+
+`tools/host/capability/run-owner-authority.sh` boots a real AMD64 guest
+with two registered nonroot OwnerIDs. The test checks positive and negative
+capability admission, object-level GE/O read/write and commit, immutable
+Kowner preservation, cross-owner process termination and region writer
+mapping, and absence of ambient Space or program-registration authority.
+The prior OwnerID fixtures retain their corruption/reboot coverage but
+now test that delegated Space authority overrides owner equality.
+`ObjOpOwnerInfo` and `owner_info` report provenance only.

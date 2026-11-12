@@ -63,9 +63,12 @@ interpretation; the format and loader are not implemented, and loading
 such data cannot grant access to objects it references.
 
 The `(SpaceID, OID)` pair locates an object but never selects or changes its
-owner. The current kernel checks the persistent owner record on GE/O
-open/read/write and exposes it through `ObjOpOwnerInfo`; a read-only
-publication mapping does not grant access to the stored object.
+owner. The kernel integrity-checks the persistent owner record on GE/O open and
+read/write and exposes provenance through `ObjOpOwnerInfo`. OwnerID does not
+authorize or forbid an otherwise valid GE/O capability. Existing-object writes
+preserve the initial `Kowner` even when a different OwnerID holds `Vwrite`.
+A read-only publication mapping does not itself grant access to the stored
+object.
 
 Persistent GE/O objects may also represent object sets and OID membership
 relations as separate data. Those are not process namespaces and are not

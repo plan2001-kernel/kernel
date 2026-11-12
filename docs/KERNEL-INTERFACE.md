@@ -27,9 +27,10 @@ siblings, provider object or already installed region mappings. A stored
 ObjectSpace binding preserves its own derived grant lineage; revoked
 bindings report `ObjSpaceFlagRevoked` and cannot mint fresh Handles.
 Generic subtree revocation is independent of provider `ObjOpRevoke`
-and binding removal. The implemented OwnerID gates and provider-origin
-capability reopening need a separate authority audit before cross-owner
-access can be enabled generally.
+and binding removal. Cross-owner reads, writes, mapping and control are
+authorized by explicit grants. The GE/O Ohand enforces object/Space scope
+and independent revocation state; owner records are integrity-checked,
+not used to authorize requests.
 
 The v1 limit is 64 bindings per space, 47 label bytes plus NUL, and eight
 records per enumeration page. An epoch rejects mixed snapshots. Space-to-space
@@ -38,8 +39,9 @@ independently owned target Handles keep them live. Unbind does not revoke an
 already resolved Handle. A generic volatile Handle derivation tree and descendant revocation are
 now implemented by `ObjOpCapRevoke=57`; GE/O persisted grant storage and
 explicit process ObjectSpace roots are not implemented. Existing
-Pgrp namespaces and OwnerID object gates remain **legacy current behavior**,
-not architectural target invariants.
+Pgrp namespaces remain **legacy current behavior**, not architectural
+target invariants. OwnerID access gates have been replaced by capability
+admission and provider safety conditions.
 
 The region-publication IPC with one RW writer, RO observers, WAIT/WAKE and
 release/acquire publication is retained. ObjectSpace may name regions, but
@@ -59,15 +61,16 @@ Handle; `SysctlOwnerInfo` reports the caller's own owner. Owner identity is
 never selectable by a process, an OID, a Handle, a namespace role or a right
 mask.
 
-Direct management of bytes, GE/O, process control and device objects requires
-`process.owner == object.owner`. Existing Handle rights remain an attenuation
-and addressing mechanism, but possession of another owner's Handle no longer
-authorizes management: GE/O open/read/write, creation, device operations,
-region revocation and process termination are denied across owners.
-Completion observation, `ObjOpInfo` metadata, owner metadata and read-only
-region publication remain separately auditable operations. A read-only region
-mapping is a publication view, not ownership of the publisher's region or
-source object; the unique writable mapping requires the region owner.
+A process accesses an object only through a valid, generation-checked Handle
+(or an explicitly authorized provider opening path). `Vread`, `Vwrite`,
+`Vcommit`, `Vcontrol`, `Vdelegate` and the other operation-specific rights
+are attenuable and revocable. Matching OwnerID does not manufacture a grant;
+a different OwnerID does not invalidate an otherwise valid grant. A region's
+single writable mapping still requires `Vwrite` and the unique writer slot;
+read-only publication requires a read-capable mapping. Cross-owner GE/O
+writes retain the first stored Kowner; provenance never follows the writer.
+GE/O object/Space rights, Ohand scope and O-store integrity are still checked
+before any persistent action. Physical device claims remain exclusive.
 
 Trusted boot registration (`PROGRAMREGISTER(149)`) records
 `{program name, OwnerID, executable GE/O object, startup policy}` in a bounded
@@ -81,23 +84,24 @@ independent process under that program's owner; the requester receives an
 observation-only process Handle and no control or launcher ancestry. The boot
 MicroPython entry is recorded as the default autostart entry by the volume-open
 path; the loader's in-place `OEXECUTE` remains the autostart action.
-Unregistered names, non-boot registration and cross-owner termination are
-rejected. The optional `Ospawn`/`Oinherit`/`Oinheritv` layout is unchanged and
-is an explicit IPC-reference/CPU/budget declaration, not an ownership grant.
+Unregistered names and non-boot registration are rejected. Cross-owner
+termination requires an explicitly delegated process `Vcontrol` Handle;
+`Vobserve` alone never authorizes it. The optional
+`Ospawn`/`Oinherit`/`Oinheritv` layout is unchanged and describes
+explicitly delegated capability rights, CPU placement and budgets.
 
 The named-owner and registered-program tables are volatile RAM. Stored object
 OwnerIDs survive restart, but the names and program records do not. Trusted
-boot/installation must therefore re-register every needed named owner and
-program on each boot **before** launching programs or accessing objects owned
-by those identities. Registration of the same trusted name deterministically
+boot/installation must therefore re-register program identities and names
+needed for launch and symbolic metadata on each boot. Authorization to an
+already delegated object does not depend on re-registering its OwnerID. Registration of the same trusted name deterministically
 resolves to the same 64-bit OwnerID, so stored owners continue to match.
 Existing stored OwnerIDs are never reassigned or inferred from a requesting
 process. If a stored object's OwnerID has no current name in the registry, the
 numeric owner is reported as unresolved (empty name); it is not mapped to
-`root`, rewritten, or granted to the requester, and direct access remains
-owner-gated. A two-boot test restores the same O volume, reconstructs the
-trusted registrations, and verifies the original owners and bidirectional
-cross-owner denials.
+`root`, rewritten, or granted to the requester. A two-boot test restores
+the same O volume, reconstructs the trusted registrations, and verifies
+immutable provenance with explicitly delegated cross-owner access.
 
 `OWNERIDFAULT(151)` is a boot-only, test-only deterministic fault point for
 creation/publication recovery tests. It does not grant ownership or expose a
