@@ -3,11 +3,11 @@
 
 /*
  * GE versioned object engine for the native O profile (docs/O-FORMAT.md).
- * A Space is a catalog SpaceID and its objects are Kobj records in the
+ * A volume holds all Kobj records in the
  * O volume's snapshot tree; there is no fid, qid or pathname:
  *
- *	Kobj store[8]				=> N[8] K[8] W[8] user[]
- *	Kobj store[8] oid[8] ~ver[8] idx[4]	=> chunk (idx 0: len[4] first)
+ *	Kobj (header)			=> N[8] K[8] W[8] user[]
+ *	Kobj oid[8] ~ver[8] idx[4]	=> chunk (idx 0: len[4] first)
  *
  * N is the published version, K the oldest one kept, W the last begun.
  * What shows is, for each oid, its newest version <= N, unless that is
@@ -49,9 +49,9 @@ static char objownermode[8] = "OOWNMODE";
  * chunks.  The value keeps the payload format opaque.
  */
 enum {
-	Objownerksz	= 1+8+8+8,	/* Kowner store oid ~ver */
-	Objownerpfx	= 1+8,		/* Kowner store */
-	Objowneroidpfx	= 1+8+8,	/* Kowner store oid */
+	Objownerksz	= 1+8+8,	/* Kowner store oid ~ver */
+	Objownerpfx	= 1,		/* Kowner store */
+	Objowneroidpfx	= 1+8,	/* Kowner store oid */
 	Objownervallen	= 8+8,		/* magic owner */
 	Objmigbatch	= 32,		/* legacy OIDs per scan/stage batch */
 };
@@ -76,27 +76,25 @@ txupsert(Otx *tx, Msg *m, int nm)
 
 /* Plan2001: a volume's stores with a transaction, under its mutlk (Gefs.otxs) */
 
-static void	packownerkey(char*, vlong, uvlong, uvlong);
+static void	packownerkey(char*, uvlong, uvlong);
 
 static void
-packkey(char *k, vlong store, uvlong oid, uvlong ver, u32int idx)
+packkey(char *k, uvlong oid, uvlong ver, u32int idx)
 {
 	k[0] = Kobj;
-	PACK64(k+1, store);
-	PACK64(k+9, oid);
-	PACK64(k+17, ~ver);
-	PACK32(k+25, idx);
+	PACK64(k+1, oid);
+	PACK64(k+9, ~ver);
+	PACK32(k+17, idx);
 }
 
 int
-gethdr(Tree *t, vlong store, Ohdr *h)
+gethdr(Tree *t, Ohdr *h)
 {
 	char kb[Objhdrksz], buf[Kvmax];
 	Key k;
 	Kvp kv;
 
 	kb[0] = Kobj;
-	PACK64(kb+1, store);
 	k.k = kb;
 	k.nk = sizeof(kb);
 	memset(h, 0, sizeof(*h));
@@ -119,7 +117,6 @@ puthdr(Otx *tx, Ohdr *h)
 	Msg m;
 
 	kb[0] = Kobj;
-	PACK64(kb+1, tx->store);
 	PACK64(vb, h->n);
 	PACK64(vb+8, h->k);
 	PACK64(vb+16, h->w);
@@ -248,7 +245,7 @@ objtxsweep(Otx *tx, char *pfx, int npfx, int (*drop)(char*, int, void*), void *a
 uvlong
 keyver(char *k)
 {
-	return ~UNPACK64(k+17);
+	return ~UNPACK64(k+9);
 }
 
 static int
@@ -329,21 +326,17 @@ objtxbegin(Otx *tx)
 {
 	Gefs *fs = tx->fs;
 	Ohdr h;
-	Otx *o;
-
 	if(tx->ver != 0)
 		return;
-	for(o = fs->otxs; o != nil; o = o->next)
-		if(o->store == tx->store)
-			error("object store busy");
-	gethdr(txroot(tx), tx->store, &h);
+	if(fs->otxs != nil)
+		error("O: volume write transaction busy");
+	gethdr(txroot(tx), &h);
 	if(h.w > h.n){
 		/* a transaction cut short: its keys out */
 		char pfx[Objownerpfx];
 
 		pfx[0] = Kobj;
-		PACK64(pfx+1, tx->store);
-		objtxsweep(tx, pfx, sizeof(pfx), dropunpub, &h.n);
+			objtxsweep(tx, pfx, sizeof(pfx), dropunpub, &h.n);
 		pfx[0] = Kowner;
 		objtxsweep(tx, pfx, sizeof(pfx), dropunpub, &h.n);
 	}
@@ -408,7 +401,7 @@ objtxabort(Otx *tx)
 		nexterror();
 	}
 	tx->nm = 0;
-	gethdr(txroot(tx), tx->store, &h);
+	gethdr(txroot(tx), &h);
 	/*
 	 * Remove every unpublished Kobj/Kowner record, not only the keys
 	 * this Otx remembers: a failed owner migration stages records for
@@ -416,7 +409,6 @@ objtxabort(Otx *tx)
 	 * collected by a scan that is left before the next mutation.
 	 */
 	pfx[0] = Kobj;
-	PACK64(pfx+1, tx->store);
 	objtxsweep(tx, pfx, sizeof pfx, dropunpub, &h.n);
 	pfx[0] = Kowner;
 	objtxsweep(tx, pfx, sizeof pfx, dropunpub, &h.n);
@@ -431,7 +423,7 @@ objtxputchunk(Otx *tx)
 {
 	char k[Objksz];
 
-	packkey(k, tx->store, tx->oid, tx->ver, tx->idx);
+	packkey(k, tx->oid, tx->ver, tx->idx);
 	objtxaddmsg(tx, Oinsert, k, Objksz, tx->chunk, tx->nchunk);
 	tx->idx++;
 	tx->nchunk = 0;
@@ -450,7 +442,7 @@ objtxcommit(Otx *tx)
 	uvlong k0, pin;
 
 	objtxflush(tx);
-	gethdr(txroot(tx), tx->store, &h);
+	gethdr(txroot(tx), &h);
 	if(h.w != tx->ver)
 		error(Ecorrupt);
 	h.n = tx->ver;
@@ -481,7 +473,7 @@ objtxcommit(Otx *tx)
 	 */
 	tx->ver = 0;
 	if(waserror()){
-		print("gefs: store %llx: history not swept: %s\n", tx->store, errmsg());
+		print("gefs: volume history not swept: %s\n", errmsg());
 		tx->nm = 0;
 	}else{
 		if(objfail){	/* the console's objfail (T5.12) */
@@ -489,9 +481,8 @@ objtxcommit(Otx *tx)
 			error("objfail: history sweep");
 		}
 		pfx[0] = Kobj;
-		PACK64(pfx+1, tx->store);
-		for(e = tx->ent; e < tx->ent+tx->nent; e++){
-			PACK64(pfx+9, e->oid);
+			for(e = tx->ent; e < tx->ent+tx->nent; e++){
+			PACK64(pfx+1, e->oid);
 			o.k = h.k;
 			o.keep = 0;
 			objtxsweep(tx, pfx, sizeof(pfx), dropold, &o);
@@ -503,7 +494,7 @@ objtxcommit(Otx *tx)
 
 /*
  * NATIVE GE/O object API (docs/O-FORMAT.md).
- * A Space is the catalog's stable SpaceID; its objects are Kobj records
+ * A volume holds all Kobj records
  * in the O volume's snapshot tree.  There is no Fid, qid, mount, file or
  * path: these calls enter the engine directly.  The handle's lock is the
  * PoC's single writer.
@@ -515,7 +506,7 @@ static void	objunpubclear(Otx*, uvlong, uvlong, int);
 static void	ownerensure(Otx*, Ohdr*);
 static void	ownerassign(Otx*, Ohdr*, uvlong, uvlong);
 static void	setuserstate(Otx*, Ohdr*, uvlong, int);
-static void	packownerkey(char*, vlong, uvlong, uvlong);
+static void	packownerkey(char*, uvlong, uvlong);
 
 /* serializes a whole create (or commit) with its sync across handles */
 static QLock	oalloclk;
@@ -536,7 +527,7 @@ allocreserved(uvlong oid)
 }
 
 static int
-objectused(Gefs *fs, uvlong sid, uvlong oid, uvlong upto)
+objectused(Gefs *fs, uvlong oid, uvlong upto)
 {
 	char pfx[Objoidksz];
 	Scan *s;
@@ -548,8 +539,7 @@ objectused(Gefs *fs, uvlong sid, uvlong oid, uvlong upto)
 		nexterror();
 	}
 	pfx[0] = Kobj;
-	PACK64(pfx+1, sid);
-	PACK64(pfx+9, oid);
+	PACK64(pfx+1, oid);
 	btnewscan(fs, s, pfx, Objoidksz);
 	btenter(&fs->snap, s);
 	if(waserror()){
@@ -619,8 +609,7 @@ objunpubclear(Otx *tx, uvlong oid, uvlong upto, int owners)
 	char pfx[Objowneroidpfx];
 
 	pfx[0] = Kobj;
-	PACK64(pfx+1, tx->store);
-	PACK64(pfx+9, oid);
+	PACK64(pfx+1, oid);
 	objtxsweep(tx, pfx, Objoidksz, dropunpub, &upto);
 	if(owners){
 		pfx[0] = Kowner;
@@ -669,14 +658,14 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 	}
 	tx = ospacetx(sp);
 	objtxbegin(tx);
-	if(!gethdr(&fs->snap, sp->sid, &h))
+	if(!gethdr(&fs->snap, &h))
 		error("O: no Space header");
 	getalloc(&h, &next);
 	for(;;){
 		if(next >= Objalloclimit)
 			error("O: OID range exhausted");
 		if(allocreserved(next) || txhasoid(tx, next) ||
-		    objectused(fs, sp->sid, next, h.n)){
+		    objectused(fs, next, h.n)){
 			next++;
 			continue;
 		}
@@ -733,14 +722,14 @@ Ospace*
 ospaceopen(Gefs *fs, char *name)
 {
 	Ospace *sp;
-	uvlong sid;
 
 	if(!(fs->flag & Ovolflag))
 		error("O: not an O volume");
-	sid = ospaceid(fs, name);
+	/* Transitional boot name; no persistent name catalog exists. */
+	if(name == nil || strcmp(name, "init") != 0)
+		error(Ebadarg);
 	sp = emalloc(sizeof(Ospace), 1);
 	sp->fs = fs;
-	sp->sid = sid;
 	return sp;
 }
 
@@ -754,7 +743,6 @@ ospacetx(Ospace *sp)
 	tx = emalloc(sizeof(Otx), 1);
 	tx->fs = sp->fs;
 	tx->tree = &sp->fs->snap;
-	tx->store = sp->sid;
 	tx->id = -1;
 	sp->tx = tx;
 	return tx;
@@ -769,12 +757,11 @@ ospaceownersetlegacy(uvlong owner)
 }
 
 static void
-packownerkey(char *k, vlong store, uvlong oid, uvlong ver)
+packownerkey(char *k, uvlong oid, uvlong ver)
 {
 	k[0] = Kowner;
-	PACK64(k+1, store);
-	PACK64(k+9, oid);
-	PACK64(k+17, ~ver);
+	PACK64(k+1, oid);
+	PACK64(k+9, ~ver);
 }
 
 static int
@@ -816,8 +803,7 @@ ownerlookup(Otx *tx, uvlong oid, uvlong upto, uvlong *owner, uvlong *ownerver)
 		nexterror();
 	}
 	pfx[0] = Kowner;
-	PACK64(pfx+1, tx->store);
-	PACK64(pfx+9, oid);
+	PACK64(pfx+1, oid);
 	btnewscan(tx->fs, s, pfx, sizeof pfx);
 	btenter(tx->tree, s);
 	if(waserror()){
@@ -836,8 +822,7 @@ ownerlookup(Otx *tx, uvlong oid, uvlong upto, uvlong *owner, uvlong *ownerver)
 		   memcmp(s->kv.val.v, objownermagic,
 		    sizeof objownermagic) != 0 ||
 		   UNPACK64(s->kv.val.v+8) == 0)
-			error("O: corrupt object owner metadata: store %llx oid %llux",
-				tx->store, oid);
+			error("O: corrupt object owner metadata: oid %llux", oid);
 		best = v;
 		*owner = UNPACK64(s->kv.val.v+8);
 		found = 1;
@@ -866,8 +851,7 @@ objectlive(Otx *tx, uvlong oid, uvlong upto)
 		nexterror();
 	}
 	pfx[0] = Kobj;
-	PACK64(pfx+1, tx->store);
-	PACK64(pfx+9, oid);
+	PACK64(pfx+1, oid);
 	btnewscan(tx->fs, s, pfx, sizeof pfx);
 	btenter(tx->tree, s);
 	if(waserror()){
@@ -881,7 +865,7 @@ objectlive(Otx *tx, uvlong oid, uvlong upto)
 		v = keyver(s->kv.key.k);
 		if(v > upto)
 			continue;
-		idx = UNPACK32(s->kv.key.k+25);
+		idx = UNPACK32(s->kv.key.k+17);
 		if(idx == 0 && s->kv.val.nv >= 4){
 			len = UNPACK32(s->kv.val.v);
 			live = len != Objtomb;
@@ -900,7 +884,7 @@ owneradd(Otx *tx, uvlong oid, uvlong ver, uvlong owner)
 {
 	char k[Objownerksz], v[Objownervallen];
 
-	packownerkey(k, tx->store, oid, ver);
+	packownerkey(k, oid, ver);
 	memmove(v, objownermagic, sizeof objownermagic);
 	PACK64(v+8, owner);
 	objtxaddmsg(tx, Oinsert, k, sizeof k, v, sizeof v);
@@ -936,7 +920,6 @@ ownermigrate(Otx *tx, uvlong upto, uvlong owner)
 		nexterror();
 	}
 	pfx[0] = Kobj;
-	PACK64(pfx+1, tx->store);
 	nresume = 0;
 	do{
 		btnewscan(tx->fs, s, pfx, sizeof pfx);
@@ -961,7 +944,7 @@ ownermigrate(Otx *tx, uvlong upto, uvlong owner)
 		while(btnext(s, &s->kv)){
 			if(s->kv.key.nk != Objksz)
 				continue;
-			oid = UNPACK64(s->kv.key.k+9);
+			oid = UNPACK64(s->kv.key.k+1);
 			if(have && oid != prev){
 				if(prevlive){
 					batch[nb++] = prev;
@@ -982,7 +965,7 @@ ownermigrate(Otx *tx, uvlong upto, uvlong owner)
 			v = keyver(s->kv.key.k);
 			if(!seen && v <= upto){
 				seen = 1;
-				if(UNPACK32(s->kv.key.k+25) == 0 &&
+				if(UNPACK32(s->kv.key.k+17) == 0 &&
 				   s->kv.val.nv >= 4)
 					prevlive =
 					    UNPACK32(s->kv.val.v) != Objtomb;
@@ -1065,8 +1048,7 @@ ownerassign(Otx *tx, Ohdr *h, uvlong oid, uvlong owner)
 		if(ownerlookup(tx, oid, tx->ver, &stored, &over) &&
 		   over == tx->ver)
 			return; /* retain newly staged immutable provenance */
-		error("O: corrupt object owner metadata: live store %llx oid %llux",
-			tx->store, oid);
+		error("O: corrupt object owner metadata: live oid %llux", oid);
 	}
 	/* A reused OID with no published owner is a new publication.  Any
 	 * older unpublished record was cleared before staging this version. */
@@ -1097,7 +1079,7 @@ ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner, int *required)
 		nexterror();
 	}
 	tx = ospacetx(sp);
-	if(!gethdr(tx->tree, tx->store, &h)){
+	if(!gethdr(tx->tree, &h)){
 		poperror();
 		qunlock(&sp->lk);
 		return 0;
@@ -1171,7 +1153,7 @@ ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
 		nexterror();
 	}
 	objtxbegin(tx);
-	if(!gethdr(tx->tree, tx->store, &h))
+	if(!gethdr(tx->tree, &h))
 		error("O: no Space header");
 	/* A write may be the first publication of an OID after a crash.
 	 * Clear abandoned payload chunks; owner records of a live object are
@@ -1207,7 +1189,7 @@ ospacecommit(Ospace *sp)
 		nexterror();
 	}
 	if((tx = sp->tx) == nil || tx->ver == 0){
-		gethdr(&fs->snap, sp->sid, &h);
+		gethdr(&fs->snap, &h);
 		v = h.n;
 	}else{
 		qlock(&fs->mutlk);
@@ -1259,7 +1241,7 @@ ospaceget(Ospace *sp, uvlong oid, void *buf, long nbuf, uvlong *ver)
 		nexterror();
 	}
 	t = &fs->snap;
-	if(!gethdr(t, sp->sid, &h) || h.n == 0){
+	if(!gethdr(t, &h) || h.n == 0){
 		qunlock(&sp->lk);
 		poperror();
 		return -1;
@@ -1270,8 +1252,7 @@ ospaceget(Ospace *sp, uvlong oid, void *buf, long nbuf, uvlong *ver)
 		nexterror();
 	}
 	pfx[0] = Kobj;
-	PACK64(pfx+1, sp->sid);
-	PACK64(pfx+9, oid);
+	PACK64(pfx+1, oid);
 	btnewscan(fs, s, pfx, Objoidksz);
 	btenter(t, s);
 	if(waserror()){
@@ -1289,7 +1270,7 @@ ospaceget(Ospace *sp, uvlong oid, void *buf, long nbuf, uvlong *ver)
 		v = keyver(s->kv.key.k);
 		if(v > h.n)
 			continue;
-		idx = UNPACK32(s->kv.key.k+25);
+		idx = UNPACK32(s->kv.key.k+17);
 		if(!found){
 			if(idx != 0 || s->kv.val.nv < 4)
 				continue;
@@ -1368,7 +1349,7 @@ ospaceclose(Ospace *sp)
 		if(waserror()){
 			objtxend(tx);
 			qunlock(&fs->mutlk);
-			print("O: space %llud: transaction aborted late\n", sp->sid);
+			print("O: volume transaction aborted late\n");
 		}else{
 			objtxabort(tx);
 			qunlock(&fs->mutlk);
