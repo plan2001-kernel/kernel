@@ -60,6 +60,8 @@ int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
 /* ObjectSpace graph is independent of Pgrp, GE SpaceID, and process ancestry. */
 int	vobjspacecreate(VobjId *id);
+void	vobjspacesave(int spacehandle, ObjSpaceDiskReq*, uvlong *version);
+int	vobjspaceload(ObjSpaceDiskReq*, VobjId *id);
 uvlong	vobjspacebind(int spacehandle, ObjSpaceBindReq *req);
 void	vobjspaceunbind(int spacehandle, uvlong bindingid);
 int	vobjspaceresolve(int spacehandle, uvlong bindingid, uvlong rights);
@@ -189,6 +191,8 @@ long	osreadhand(Ohand*, uvlong oid, void *buf, long n, uvlong *ver);
 long	osgetobjecthand(Ohand*, uvlong oid, uchar **bp, long max, uvlong *ver);
 long	osgetobjecthandk(Ohand*, uvlong oid, uchar **bp, long max, uvlong *ver);
 void	oswritehand(Ohand*, uvlong oid, void *buf, long n);
+long	osreadhandk(Ohand*, uvlong oid, void *buf, long n, uvlong *ver);
+void	oswritehandk(Ohand*, uvlong oid, void *buf, long n);
 long	oscreatehand(Ohand*, void *buf, long n, uvlong *oid);
 long	oscreatehandowner(Ohand*, void *buf, long n, uvlong *oid, uvlong owner);
 void	osownercheck(Ohand*, uvlong oid);
