@@ -1,5 +1,2 @@
-# Unpublished GE/O write followed by an abrupt host SIGKILL.
-import plan9 as p
-v=p.obj_open_volume()
-p.obj_put_oid(v,@GRAPH@,b'not-a-valid-graph')
-print('PERSISTENT-UNCOMMITTED')
+# Write an unpublished graph version and emit the crash marker on one line.
+__import__('plan9').obj_put_oid(__import__('plan9').obj_open_volume(),@GRAPH@,b'not-a-valid-graph') or print('PERSISTENT-UNCOMMITTED')
