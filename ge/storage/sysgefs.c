@@ -733,17 +733,15 @@ osownerfault(int point)
 	return 0;
 }
 
-long
-osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
+static long
+osreadhandcore(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver, int user)
 {
 	uvlong v = 0;
 	long r;
 
-	if(oh == nil)
+	if(oh == nil || n < 0 || n > 64*MiB || (n > 0 && buf == nil))
 		error(Ebadarg);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
+	if(user && n > 0)
 		validaddr((uintptr)buf, n, 1);
 	/* VER is a kernel pointer supplied by the OBJ provider; the legacy
 	 * OSPACEGET boundary validates its own user pointer separately. */
@@ -762,14 +760,26 @@ osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 	return r;
 }
 
-void
-oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
+long
+osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 {
-	if(oh == nil)
+	return osreadhandcore(oh, oid, buf, n, ver, 1);
+}
+
+/* Kernel-only data pointers. Both paths enforce Ohand rights, owner-record
+ * integrity and GE transaction isolation; only user-address checking differs. */
+long
+osreadhandk(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
+{
+	return osreadhandcore(oh, oid, buf, n, ver, 0);
+}
+
+static void
+oswritehandcore(Ohand *oh, uvlong oid, void *buf, long n, int user)
+{
+	if(oh == nil || n < 0 || n > 64*MiB || (n > 0 && buf == nil))
 		error(Ebadarg);
-	if(n < 0 || n > 64*MiB)
-		error(Ebadarg);
-	if(n > 0)
+	if(user && n > 0)
 		validaddr((uintptr)buf, n, 0);
 	qlock(ohgate(oh));
 	if(waserror()){
@@ -782,6 +792,18 @@ oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
 		up != nil && up->owner != 0 ? up->owner : ownerroot());
 	poperror();
 	qunlock(ohgate(oh));
+}
+
+void
+oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
+{
+	oswritehandcore(oh, oid, buf, n, 1);
+}
+
+void
+oswritehandk(Ohand *oh, uvlong oid, void *buf, long n)
+{
+	oswritehandcore(oh, oid, buf, n, 0);
 }
 
 /*
