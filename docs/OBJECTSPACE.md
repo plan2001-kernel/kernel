@@ -161,10 +161,11 @@ nested ObjectSpaces, aliases and cycles using local node indices. During
 restore all nodes are allocated first and then their weak inter-node
 edges are rebuilt. The restored root pins the graph's other nodes for
 its lifetime, without introducing strong edge cycles. CI includes a
-two-boot three-node nested ObjectSpace test. Dedicated alias/diamond/cycle
-tests, concurrent update stress, sector-level torn-write fault injection,
-persistent process-root selection, garbage collection and cross-volume
-references remain outstanding. Phase 4 is not complete until those
+two-boot three-node nested ObjectSpace test. CI covers graph aliasing and cycles, and the new native two-process
+bind/unbind-versus-snapshot stress case verifies that each restored
+multi-node snapshot is complete and that its final image survives reboot.
+Persistent process-root selection, garbage collection, full cross-volume
+references and physical hardware remain outstanding. Phase 4 is not complete until those
 requirements are addressed and verified.
 
 Native tests in `tools/host/objectspace/run-persistent.sh` use one fresh,

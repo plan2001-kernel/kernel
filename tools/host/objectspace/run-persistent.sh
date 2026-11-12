@@ -114,7 +114,12 @@ fixtures, out = map(Path, sys.argv[1:])
 mid = (out / "graph-midcommit.txt").read_text()
 assert mid.count("ownerid_fault(105)") == 1
 (out / "graph-super-torn.txt").write_text(mid.replace("ownerid_fault(105)", "ownerid_fault(106)"))
-graph, oid, binding = (out / "graph-ids.txt").read_text().split()
+graph, _, _ = (out / "graph-ids.txt").read_text().split()
+import re
+log = (out / "boot-boot2.log").read_text(errors="replace")
+m = re.search(r"^PERSISTENT-BOOT2 (\\d+) (\\d+) (\\d+)", log, re.M)
+assert m and m.group(1) == graph
+binding = m.group(3)
 data = (fixtures / "graph-torn-recovery.txt.in").read_text()
 (out / "graph-torn-recovery.txt").write_text(
     data.replace("@GRAPH@", graph).replace("@NEWBINDING@", binding))
@@ -174,7 +179,7 @@ source = (fixtures / "graph-race.py").read_bytes()
 (out / "graph-race-repl.txt").write_text(
     "exec(bytes.fromhex('" + source.hex() + "').decode())\n")
 PY
-QOB_TIMEOUT=900 run_boot race1 "$QOB_OUT/graph-race-repl.txt" '^GRAPH-RACE-PASS [0-9]+ [0-9]+ [0-9]+'
+QOB_REPL_SYNC_LINES=0 QOB_REPL_COMPLETION_TIMEOUT=300 QOB_TIMEOUT=900 run_boot race1 "$QOB_OUT/graph-race-repl.txt" '^GRAPH-RACE-PASS [0-9]+ [0-9]+ [0-9]+'
 python3 - "$ROOT/tools/host/objectspace" "$QOB_OUT" <<'PY'
 from pathlib import Path
 import re

@@ -873,7 +873,7 @@ qob_boot_once()
 				# requiring the post-statement persistence prompt.
 				if [ "${QOB_CRASH_AFTER_EXPECT:-0}" != 1 ]; then
 					# Normal tests require a completed REPL statement/commit.
-					pdeadline=$(( $(date +%s) + 15 ))
+					pdeadline=$(( $(date +%s) + ${QOB_REPL_COMPLETION_TIMEOUT:-15} ))
 					while [ "$(qob_count_fixed '>>>' "$serial")" -le "$prompts" ] ||
                     ! tail -c 16 "$serial" | tr -d '\r' | tail -n 1 | grep -qxF '>>> '; do
 					if qob_fail_marker "$serial"; then
