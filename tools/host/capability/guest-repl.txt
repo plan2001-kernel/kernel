@@ -26,7 +26,8 @@ assert denied(lambda:p.space_resolve(root,edge,p.VREAD))
 entries,cursor,epoch=p.space_list(root)
 assert len(entries)==1
 entry=next(iter(entries))
-assert entry[6]==2
+bid,label,kind,rights,relation,identity,flags=entry
+assert flags==2
 assert p.obj_read(one,4)==b'data'
 assert p.obj_read(sibling,4)==b'data'
 p.space_unbind(root,edge)
