@@ -1,0 +1,47 @@
+# Native capability lineage and ObjectSpace revocation acceptance.
+import plan9 as p
+exec("def denied(f):"+chr(10)+" try:"+chr(10)+"  f()"+chr(10)+" except OSError:"+chr(10)+"  return True"+chr(10)+" return False")
+base=p.obj_create(b'data')
+one=p.obj_open_handle(base,p.VREAD+p.VDELEGATE)
+two=p.obj_open_handle(one,p.VREAD)
+sibling=p.obj_open_handle(base,p.VREAD)
+assert p.obj_read(two,4)==b'data'
+assert p.obj_read(sibling,4)==b'data'
+assert denied(lambda:p.cap_revoke(two))
+assert denied(lambda:p.obj_open_handle(two,p.VREAD))
+p.cap_revoke(one)
+assert denied(lambda:p.obj_read(two,4))
+assert p.obj_read(one,4)==b'data'
+assert p.obj_read(sibling,4)==b'data'
+new=p.obj_open_handle(one,p.VREAD)
+assert p.obj_read(new,4)==b'data'
+root=p.space_new()
+edge=p.space_bind(root,'item',one,p.VREAD)
+indirect=p.space_resolve(root,edge,p.VREAD)
+assert p.obj_read(indirect,4)==b'data'
+p.cap_revoke(one)
+assert denied(lambda:p.obj_read(new,4))
+assert denied(lambda:p.obj_read(indirect,4))
+assert denied(lambda:p.space_resolve(root,edge,p.VREAD))
+entries,cursor,epoch=p.space_list(root)
+assert len(entries)==1
+entry=next(iter(entries))
+assert entry[6]==2
+assert p.obj_read(one,4)==b'data'
+assert p.obj_read(sibling,4)==b'data'
+p.space_unbind(root,edge)
+p.obj_close(indirect)
+p.obj_close(two)
+p.obj_close(new)
+p.obj_close(root)
+p.cap_revoke(base)
+assert denied(lambda:p.obj_read(one,4))
+assert denied(lambda:p.obj_read(sibling,4))
+assert p.obj_read(base,4)==b'data'
+renew=p.obj_open_handle(base,p.VREAD)
+assert p.obj_read(renew,4)==b'data'
+p.obj_close(renew)
+p.obj_close(sibling)
+p.obj_close(one)
+p.obj_close(base)
+print('CAPLINEAGE-PASS')

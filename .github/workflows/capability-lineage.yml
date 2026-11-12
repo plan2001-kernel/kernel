@@ -1,0 +1,40 @@
+name: ObjectSpace capability lineage
+on:
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - 'runtime/**'
+      - 'micropython/**'
+      - 'tools/host/capability/**'
+      - '.github/workflows/capability-lineage.yml'
+  workflow_dispatch:
+
+jobs:
+  amd64-capability:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-14 binutils clang lld file mtools ovmf qemu-system-x86 python3
+      - name: Verify capability ABI and call graph
+        run: python3 tools/host/capability/contract-check.py
+      - name: Build AMD64 kernel
+        run: CC=gcc-14 tools/build-gcc.sh --kernel -j 4
+      - name: Build UEFI loader
+        run: tools/build-efi-gcc.sh -j 4
+      - name: Build MicroPython
+        run: CC=gcc-14 tools/build-mpy-gcc.sh -j 4
+      - name: Build GE tools
+        run: tools/build.sh
+      - name: Native capability revocation acceptance
+        run: tools/host/capability/run-capability.sh --no-build
+      - name: Upload failing QEMU logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: caplineage-qemu-logs
+          path: build/capability/run/
+          if-no-files-found: ignore
