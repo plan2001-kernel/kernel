@@ -1016,7 +1016,14 @@ vobjregionmap(int handle, uintptr va, int flags)
 
 	if((flags & ~ObjRegionMapFlags) != 0)
 		error(Ebadarg);
-	h = vlookup(handle, Vread);
+	/* A Vwrite-only capability grants one exclusive writable mapping;
+	 * a Vread-only capability grants only an RO mapping. Do not require
+	 * Vread additionally for a delegated writer. */
+	h = vlookup(handle, 0);
+	if((h->rights & (Vread|Vwrite)) == 0){
+		vhandput(h);
+		error(Eperm);
+	}
 	o = h->obj;
 	if(o->kind != VkindRegion || o->priv == nil){
 		vhandput(h);

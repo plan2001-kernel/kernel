@@ -148,7 +148,7 @@ p.exits('CROSS-CONTROL')
 REGION_WRITE=COMMON+r"""
 if p.owner_info()[1]!='ownerB':
     fail('region-owner')
-h=findkind(p.VKIND_REGION,p.VWRITE|p.VREAD)
+h=findkind(p.VKIND_REGION,p.VWRITE)
 if not h:
     fail('region-missing')
 if p.obj_owner(h)[1]!='root':
@@ -321,7 +321,7 @@ def run():
 
     reg=p.region_create(8192)
     ok(p.obj_owner(reg)[0]==root[0],'region provenance is root')
-    writer=(reg,p.VREAD|p.VWRITE|p.VMETA)
+    writer=(reg,p.VWRITE|p.VMETA)
     waited(launched('B',REGION_WRITE,(writer,)),
            'REGION-WRITE','B can publish via delegated root region Vwrite')
     view=p.obj_open_handle(reg,p.VREAD|p.VMETA)
