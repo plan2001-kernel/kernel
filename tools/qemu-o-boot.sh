@@ -711,7 +711,7 @@ def command(cmd):
 # acknowledges sendkey.  Check the actual guest echo before continuing.
 def serial_bytes():
     with open(serial, "rb") as log:
-        return log.read().replace(b"\\r", b"")
+        return log.read().replace(b"\r", b"")
 
 def last_prompt():
     position = serial_bytes().rfind(b">>> ")
@@ -729,7 +729,7 @@ def await_line(expected, previous_prompt):
         # keystrokes fail at their source instead of corrupting later tests.
         next_prompt = log.find(b">>> ", previous_prompt + 4)
         if next_prompt >= 0:
-            echoed_line = log[previous_prompt:].split(b"\\n", 1)[0]
+            echoed_line = log[previous_prompt:].split(b"\n", 1)[0]
             if echoed_line != expected_echo:
                 raise SystemExit("guest REPL input mismatch: expected %r, got %r" %
                                  (expected_echo, echoed_line))
@@ -746,12 +746,12 @@ for ch in data:
     command("sendkey %s 20" % key)
     time.sleep(0.08)
     if sync:
-        if ch in "\\r\\n":
+        if ch in "\r\n":
             prompt = await_line("".join(line), prompt)
             line.clear()
         else:
             line.append(ch)
-if data and not data.endswith("\\n"):
+if data and not data.endswith("\n"):
     command("sendkey ret 20")
     if sync:
         await_line("".join(line), prompt)
