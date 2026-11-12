@@ -1,0 +1,15 @@
+# Persist a three-node ObjectSpace chain and a GE leaf in one publication.
+import plan9 as p
+v=p.obj_open_volume()
+leaf,leaf_oid=p.obj_create_ge(v,b'nested-leaf-one')
+p.obj_commit(v)
+record,graph_oid=p.obj_create_ge(v,b'')
+p.obj_commit(v)
+root=p.space_new()
+child=p.space_new()
+grand=p.space_new()
+leaf_binding=p.space_bind(grand,'payload',leaf,p.VREAD+p.VMETA)
+grand_binding=p.space_bind(child,'grand',grand,p.VREAD+p.VMETA)
+child_binding=p.space_bind(root,'child',child,p.VREAD+p.VMETA)
+assert p.space_save(root,v,graph_oid)!=0
+print('NESTED-GRAPH-SAVED',graph_oid,child_binding,grand_binding,leaf_binding)

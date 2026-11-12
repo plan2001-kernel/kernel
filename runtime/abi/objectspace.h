@@ -19,6 +19,19 @@ enum {
     ObjSpaceFlagStale = 1,
     ObjSpaceFlagRevoked = 2, /* revoked binding derivation */
 };
+/* A graph snapshot is a single GE/O object: all binding changes are
+ * published by one GE transaction. The caller must already have a valid
+ * VkindGeVolume capability; OID alone does not authorize restoration.
+ * SAVE: OBJINVOKE(space, ObjOpSpaceSave, in=&req), aux=GE version.
+ * LOAD: OBJOPEN(ObjOpenSpaceGraph, &req, sizeof req, 0, nil).
+ * The GE/O object must already exist (e.g. OBJCREATE(ObjKindGe)); LOAD
+ * never reams a volume or invents a privileged grant. */
+typedef struct ObjSpaceDiskReq {
+    int volume;                       /* authorized volume Handle */
+    unsigned int reserved;            /* must be zero */
+    unsigned long long oid;           /* existing graph snapshot OID */
+} ObjSpaceDiskReq;
+
 typedef struct ObjSpaceBindReq {
     int target;                       /* process-local capability */
     unsigned int rights;              /* zero => source handle rights */

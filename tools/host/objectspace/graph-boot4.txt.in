@@ -1,0 +1,28 @@
+# Recover the last committed graph after abrupt QEMU termination.
+import plan9 as p
+v=p.obj_open_volume()
+space=p.space_load(v,@GRAPH@)
+rows,cursor,epoch=p.space_list(space)
+assert len(rows)==1
+first,=rows
+bid,label,kind,rights,relation,identity,flags=first
+assert bid==@NEWBINDING@
+assert label=='second'
+h=p.space_resolve(space,@NEWBINDING@,p.VREAD)
+assert p.obj_read(h,11)==b'payload-two'
+bad,boid=p.obj_create_ge(v,b'corrupt-metadata')
+p.obj_commit(v)
+invalid=list()
+exec('try:'+chr(10)+' p.space_load(v,boid)'+chr(10)+'except OSError:'+chr(10)+' invalid.append(1)')
+assert len(invalid)==1
+readonly=p.obj_open_handle(v,p.VREAD)
+denied=list()
+exec('try:'+chr(10)+' p.space_load(readonly,@GRAPH@)'+chr(10)+'except OSError:'+chr(10)+' denied.append(1)')
+assert len(denied)==1
+volatile=p.obj_create(b'volatile')
+other=p.space_new()
+p.space_bind(other,'volatile',volatile,p.VREAD)
+rejected=list()
+exec('try:'+chr(10)+' p.space_save(other,v,@GRAPH@)'+chr(10)+'except OSError:'+chr(10)+' rejected.append(1)')
+assert len(rejected)==1
+print('PERSISTENT-RECOVERY-PASS')

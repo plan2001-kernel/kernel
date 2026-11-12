@@ -1,0 +1,2 @@
+# Write an unpublished graph version and emit the crash marker on one line.
+__import__('plan9').obj_put_oid(__import__('plan9').obj_open_volume(),@GRAPH@,b'not-a-valid-graph') or print('PERSISTENT-UNCOMMITTED')

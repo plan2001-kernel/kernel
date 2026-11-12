@@ -1,0 +1,12 @@
+# Save a durable GE/O ObjectSpace snapshot.
+import plan9 as p
+v=p.obj_open_volume()
+obj,oid=p.obj_create_ge(v,b'payload-one')
+p.obj_commit(v)
+graph,goid=p.obj_create_ge(v,b'')
+p.obj_commit(v)
+space=p.space_new()
+binding=p.space_bind(space,'src',obj,p.VREAD+p.VMETA)
+version=p.space_save(space,v,goid)
+assert version!=0
+print('PERSISTENT-BOOT1',goid,oid,binding)
