@@ -125,12 +125,33 @@ PY
 run_boot nested2 "$QOB_OUT/graph-nested-boot2.txt" '^NESTED-GRAPH-REBOOT-PASS'
 
 
+# QEMU two-boot alias/cycle acceptance on the SAME GE/O disk.
+run_boot cyclic1 "$ROOT/tools/host/objectspace/graph-cyclic-boot1.txt" '^CYCLIC-GRAPH-SAVED [0-9]+'
+python3 - "$ROOT/tools/host/objectspace" "$QOB_OUT" <<'PY'
+from pathlib import Path
+import re
+import sys
+fixtures, out = map(Path, sys.argv[1:])
+log = (out / "boot-cyclic1.log").read_text(errors="replace")
+m = re.search(r"^CYCLIC-GRAPH-SAVED (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+)", log, re.M)
+assert m, "cyclic graph was not published"
+tokens = ("@GRAPH@", "@LEFT@", "@DIRECT@", "@ALIAS@", "@BACK@", "@CYCLE@", "@SELF@")
+data = (fixtures / "graph-cyclic-boot2.txt.in").read_text()
+for key, val in zip(tokens, m.groups()):
+    assert int(val) > 0
+    data = data.replace(key, val)
+assert "@" not in data, "unreplaced graph ID"
+(out / "graph-cyclic-boot2.txt").write_text(data)
+PY
+run_boot cyclic2 "$QOB_OUT/graph-cyclic-boot2.txt" '^CYCLIC-GRAPH-REBOOT-PASS'
+
+
 python3 - "$QOB_OUT" <<'PY'
 from pathlib import Path
 import re
 import sys
 out = Path(sys.argv[1])
-for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit", "nested1", "nested2"):
+for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit", "nested1", "nested2", "cyclic1", "cyclic2"):
     log = (out / ("boot-" + tag + ".log")).read_text(errors="replace")
     assert not re.search(r"^(?:Traceback|AssertionError|panic:)", log, re.M), f"guest exception in {tag}"
 assert "PERSISTENT-UNCOMMITTED" in (out / "boot-crash.log").read_text()
@@ -138,5 +159,6 @@ assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-boot4.log").read_text()
 assert "OWNERID-CRASH graph-before-publication" in (out / "boot-midcommit.log").read_text()
 assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-after-midcommit.log").read_text()
 assert "NESTED-GRAPH-REBOOT-PASS" in (out / "boot-nested2.log").read_text()
-print("PASS: GE/O ObjectSpace snapshots / nested graph reboot / pre-publication crash recovery")
+assert "CYCLIC-GRAPH-REBOOT-PASS" in (out / "boot-cyclic2.log").read_text()
+print("PASS: GE/O ObjectSpace snapshots / nested and cyclic aliasing reboot / pre-publication crash recovery")
 PY

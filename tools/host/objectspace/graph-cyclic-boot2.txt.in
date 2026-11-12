@@ -1,0 +1,38 @@
+# After reboot, prove common node identity, both cycles and stable IDs.
+import plan9 as p
+v=p.obj_open_volume()
+root=p.space_load(v,@GRAPH@)
+root_rows,_,_=p.space_list(root)
+assert len(root_rows)==2
+root_left,root_direct=root_rows
+lbid,llabel,lkind,lrights,lrel,lident,lflags=root_left
+dbid,dlabel,dkind,drights,drel,dident,dflags=root_direct
+assert (lbid,llabel,lkind,lflags)==(@LEFT@,'left',p.VKIND_OBJECT_SPACE,0)
+assert (dbid,dlabel,dkind,dflags)==(@DIRECT@,'direct',p.VKIND_OBJECT_SPACE,0)
+left=p.space_resolve(root,@LEFT@,p.VREAD+p.VMETA)
+shared=p.space_resolve(root,@DIRECT@,p.VREAD+p.VMETA)
+left_rows,_,_=p.space_list(left)
+shared_rows,_,_=p.space_list(shared)
+assert len(left_rows)==2 and len(shared_rows)==2
+left_alias,left_back=left_rows
+shared_cycle,shared_self=shared_rows
+abid,alabel,akind,arights,arel,aident,aflags=left_alias
+bbid,blabel,bkind,brights,brel,bident,bflags=left_back
+cbid,clabel,ckind,crights,crel,cident,cflags=shared_cycle
+sbid,slabel,skind,srights,srel,sident,sflags=shared_self
+assert (abid,alabel,akind,aflags)==(@ALIAS@,'alias',p.VKIND_OBJECT_SPACE,0)
+assert (bbid,blabel,bkind,bflags)==(@BACK@,'back',p.VKIND_OBJECT_SPACE,0)
+assert (cbid,clabel,ckind,cflags)==(@CYCLE@,'cycle',p.VKIND_OBJECT_SPACE,0)
+assert (sbid,slabel,skind,sflags)==(@SELF@,'self',p.VKIND_OBJECT_SPACE,0)
+assert dident==aident==sident
+assert bident==cident
+assert lident!=dident and dident!=cident
+shared_alias=p.space_resolve(left,@ALIAS@,p.VREAD+p.VMETA)
+assert p.space_list(shared_alias)==p.space_list(shared)
+root_back=p.space_resolve(left,@BACK@,p.VREAD+p.VMETA)
+assert p.space_list(root_back)==p.space_list(root)
+root_cycle=p.space_resolve(shared,@CYCLE@,p.VREAD+p.VMETA)
+assert p.space_list(root_cycle)==p.space_list(root)
+self_cycle=p.space_resolve(shared,@SELF@,p.VREAD+p.VMETA)
+assert p.space_list(self_cycle)==p.space_list(shared)
+print('CYCLIC-GRAPH-REBOOT-PASS')

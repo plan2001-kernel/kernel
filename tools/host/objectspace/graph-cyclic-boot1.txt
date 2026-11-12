@@ -1,0 +1,16 @@
+# Three nodes: two distinct paths to shared, root cycles, self-cycle.
+import plan9 as p
+v=p.obj_open_volume()
+record,graph_oid=p.obj_create_ge(v,b'')
+p.obj_commit(v)
+root=p.space_new()
+left=p.space_new()
+shared=p.space_new()
+left_id=p.space_bind(root,'left',left,p.VREAD+p.VMETA)
+direct_id=p.space_bind(root,'direct',shared,p.VREAD+p.VMETA)
+alias_id=p.space_bind(left,'alias',shared,p.VREAD+p.VMETA)
+back_id=p.space_bind(left,'back',root,p.VREAD+p.VMETA)
+cycle_id=p.space_bind(shared,'cycle',root,p.VREAD+p.VMETA)
+self_id=p.space_bind(shared,'self',shared,p.VREAD+p.VMETA)
+assert p.space_save(root,v,graph_oid)!=0
+print('CYCLIC-GRAPH-SAVED',graph_oid,left_id,direct_id,alias_id,back_id,cycle_id,self_id)
