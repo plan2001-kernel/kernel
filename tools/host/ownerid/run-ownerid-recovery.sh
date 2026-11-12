@@ -107,9 +107,9 @@ assert_migrated_image() {
 	qob_extract_o "$dir/disk.img" "$dir/o-after.img" "$dir/disk.layout"
 	rm -rf "$dir/extract"
 	python3 "$ROOT/tools/host/oinspect.py" "$dir/o-after.img" \
-		--space-id 2 --extract "$dir/extract" >"$dir/o-after.json"
+		--extract "$dir/extract" >"$dir/o-after.json"
 	python3 "$ROOT/tools/host/oinspect.py" "$dir/o-after.img" \
-		--space-id 3 >"$dir/o-after-3.json"
+		  >"$dir/o-after-3.json"
 	python3 - "$dir" <<'PY'
 import json
 import pathlib
@@ -117,7 +117,7 @@ import sys
 d = pathlib.Path(sys.argv[1])
 doc = json.load(open(d / 'o-after.json'))
 assert doc['owner_mode'] is True, 'legacy Space migration did not publish owner mode'
-N = doc['space']['N']
+N = doc['volume']['N']
 owners = doc['owners']
 base, count = 0x10000000000, 120
 live_owners = set()
@@ -159,7 +159,7 @@ for case in 101 102 103; do
 	qob_extract_o "$dir/disk.img" "$dir/o-after.img" "$dir/disk.layout"
 	rm -rf "$dir/extract"
 	python3 "$ROOT/tools/host/oinspect.py" "$dir/o-after.img" \
-		--space-id 1 --extract "$dir/extract" >"$dir/o-after.json"
+		--extract "$dir/extract" >"$dir/o-after.json"
 	python3 - "$dir" "$case" <<'PY'
 import json
 import pathlib
@@ -173,7 +173,7 @@ target = int(st[3])
 doc = json.load(open(d / 'o-after.json'))
 assert doc['owner_mode'] is True, 'owner mode was not published'
 recs = [r for r in doc['owners'].get('%016x' % target, [])
-        if r['version'] <= doc['space']['N']]
+        if r['version'] <= doc['volume']['N']]
 assert len(recs) == 1, ('target owner metadata is not write-once', target, recs)
 assert recs[0]['bytes'] == 16 and int(recs[0]['owner'], 16) != 0, recs
 print('RECOVERY-IMAGE case=%d target=%d owner-record=PASS' % (case, target))
