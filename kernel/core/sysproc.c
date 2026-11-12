@@ -1007,15 +1007,15 @@ spawnstackpage(Segment *s, uintptr va, void *data, ulong n)
 
 /*
  * Shared spawn: create a real child from a published static x86-64 ELF.
- * The caller's Space handle is used only to read the image. The child
+ * The caller's volume handle is used only to read the image. The child
  * gets fresh segments and Egrp plus only the explicitly selected O view,
  * Pipe handles, environment and UDP6 permit.  CPU placement is applied
  * before ready().  The caller receives an independent process Handle.
  */
 /*
- * Shared spawn core.  The explicit GE/O Space capability is supplied by the
+ * Shared spawn core.  The explicit GE/O volume capability is supplied by the
  * caller: SPAWN(146) and OEXECUTE both resolve the pinned Ohand from a
- * VkindSpace Handle before reaching this core.  Everything else (ELF
+ * VkindGeVolume Handle before reaching this core.  Everything else (ELF
  * validation, argv, Ospawn/Oinherit layout, budgets, CPU pinning and child
  * setup) is unchanged.
  */
@@ -1550,7 +1550,7 @@ sysspawn(sysva_list list)
 	argv = sysva_arg(list, char**);
 	argc = (int)sysva_arg(list, int);
 	opt = sysva_arg(list, struct Ospawn*);
-	soh = vobjholdohand(space, VkindSpace, Vexecute);
+	soh = vobjholdohand(space, VkindGeVolume, Vexecute);
 	if(waserror()){
 		oshandput(soh);
 		nexterror();
