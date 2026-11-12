@@ -1313,7 +1313,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_OWNER_INFO), MP_ROM_INT(ObjOpOwnerInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_BINDING), MP_ROM_INT(ObjOpenBinding) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_SPACE), MP_ROM_INT(ObjOpenGeSpace) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_USB_CONTROL), MP_ROM_INT(ObjDeviceUsbControl) },
