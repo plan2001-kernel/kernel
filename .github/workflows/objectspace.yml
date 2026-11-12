@@ -34,10 +34,14 @@ jobs:
         run: tools/build.sh
       - name: QEMU ObjectSpace graph acceptance
         run: tools/host/objectspace/run-objectspace.sh --no-build
+      - name: QEMU durable ObjectSpace reboot and crash recovery
+        run: bash tools/host/objectspace/run-persistent.sh --no-build
       - name: Upload QEMU diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: objectspace-qemu-logs
-          path: build/objectspace/run/
+          path: |
+            build/objectspace/run/
+            build/objectspace/persistent/
           if-no-files-found: ignore
