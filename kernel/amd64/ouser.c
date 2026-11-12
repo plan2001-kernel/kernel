@@ -289,6 +289,7 @@ ouserproc(void *arg)
 }
 
 extern int okernelvol(char*);
+extern void osbootrootselect(uvlong);
 
 static void
 kernelreadyproc(void *arg)
@@ -355,6 +356,35 @@ o_user_bootstrap(void)
 			bootismpy = 0;
 		}
 	}
+
+	/*
+	 * Trusted persistent ObjectSpace root selector: one durable graph
+	 * OID on the obootvol GE/O volume.  The graph payload carries no
+	 * authority; restoration uses only this boot configuration and the
+	 * current boot volume capability.
+	 */
+	p = getconf("obootgraph");
+	if(p != nil){
+		uvlong v;
+
+		if(parseoid(p, &v) < 0){
+			print("o-server: bad obootgraph \"%s\"\n", p);
+			panic("o-server: obootgraph must be a decimal or 0x hex OID");
+		}
+		if(v == 0){
+			print("o-server: obootgraph \"%s\"\n", p);
+			panic("o-server: obootgraph must be a non-zero OID");
+		}
+		if(bootkernelonly){
+			print("o-server: obootgraph \"%s\" without obootexec\n", p);
+			panic("o-server: obootgraph requires an executable bootstrap");
+		}
+		osbootrootselect(v);
+		print("o-server: BOOTROOT oid=%#llux\n", v);
+	}else if(bootkernelonly)
+		print("o-server: BOOTROOT none (kernel-only)\n");
+	else
+		print("o-server: BOOTROOT none\n");
 
 	p = getconf("obootcpu");
 	if(p != nil){

@@ -64,6 +64,7 @@ qob_set_defaults()
 	: "${QOB_INI_NCPU:=}"
 	: "${QOB_INI_BOOTEXEC:=}"
 	: "${QOB_INI_BOOTCPU:=}"
+	: "${QOB_INI_BOOTGRAPH:=}"
 	: "${QOB_HOLD:=15}"
 	: "${QOB_KERNEL_ONLY:=0}"
 }
@@ -106,6 +107,8 @@ options:
   --ncpu N              write *ncpu=N (default: the --cpus value)
   --obootexec OID       write obootexec=OID (decimal or 0x hex)
   --obootcpu CPU        write obootcpu=CPU (exact logical kernel CPU)
+  --obootgraph OID      write obootgraph=OID: trusted persistent ObjectSpace
+                        root graph on the obootvol GE/O volume
   --kernel-only         omit obootexec/obootrepl and require the kernel-only
                         PLAN2001 KERNEL READY idle state (no MicroPython)
   --jobs N              canonical build parallelism (default 8)
@@ -193,6 +196,11 @@ qob_preflight()
 	if [ -n "$QOB_INI_BOOTCPU" ]; then
 		case "$QOB_INI_BOOTCPU" in
 		''|*[!0-9]*) qob_die "--obootcpu must be a non-negative integer" ;;
+		esac
+	fi
+	if [ -n "$QOB_INI_BOOTGRAPH" ]; then
+		case "$QOB_INI_BOOTGRAPH" in
+		*[!0-9a-fA-FxX]*) qob_die "--obootgraph must be a decimal or 0x hex OID" ;;
 		esac
 	fi
 
@@ -326,6 +334,7 @@ qob_write_ini()
 		printf 'obootvol=PARTUUID=%s\n' "$puuid"
 		[ "$QOB_KERNEL_ONLY" = 1 ] || [ -z "$QOB_INI_BOOTEXEC" ] || printf 'obootexec=%s\n' "$QOB_INI_BOOTEXEC"
 		[ -n "$QOB_INI_BOOTCPU" ] && printf 'obootcpu=%s\n' "$QOB_INI_BOOTCPU"
+		[ -z "$QOB_INI_BOOTGRAPH" ] || printf 'obootgraph=%s\n' "$QOB_INI_BOOTGRAPH"
 		[ "$QOB_KERNEL_ONLY" = 1 ] || [ "$repl" != 1 ] || printf 'obootrepl=1\n'
 		printf 'sdflushlog=1\n'
 		printf 'console=0\n'
@@ -519,6 +528,27 @@ qob_extract_o()
 	qob_safe_rm "$dest"
 	dd if="$disk" of="$dest" bs=512 skip="$start" count="$count" status=none ||
 		qob_die "cannot extract the O partition from $disk"
+}
+
+# Replace /plan9.ini inside an existing disposable GPT disk without touching
+# the O partition.  Used by two-boot tests that change trusted boot selectors
+# between boots of the exact same image.
+qob_update_disk_ini()
+{
+	local disk=$1 layout=$2 ini=$3
+	local start count esp
+	start=$(qob_read_layout "$layout" esp_start_lba)
+	count=$(qob_read_layout "$layout" esp_sectors)
+	[ -n "$start" ] && [ -n "$count" ] || qob_die "bad disk layout $layout"
+	esp="$QOB_OUT/esp-update.img"
+	qob_safe_rm "$esp"
+	dd if="$disk" of="$esp" bs=512 skip="$start" count="$count" status=none ||
+		qob_die "cannot extract the ESP from $disk"
+	mcopy -o -i "$esp" "$ini" ::/plan9.ini ||
+		qob_die "cannot update plan9.ini in the ESP"
+	dd if="$esp" of="$disk" bs=512 seek="$start" conv=notrunc status=none ||
+		qob_die "cannot write the updated ESP into $disk"
+	qob_safe_rm "$esp"
 }
 
 qob_oinspect()
@@ -1007,6 +1037,7 @@ qob_main()
 		--ncpu) [ $# -ge 2 ] || qob_die "--ncpu needs a value"; QOB_INI_NCPU=$2; shift ;;
 		--obootexec) [ $# -ge 2 ] || qob_die "--obootexec needs an OID"; QOB_INI_BOOTEXEC=$2; shift ;;
 		--obootcpu) [ $# -ge 2 ] || qob_die "--obootcpu needs a CPU"; QOB_INI_BOOTCPU=$2; shift ;;
+		--obootgraph) [ $# -ge 2 ] || qob_die "--obootgraph needs an OID"; QOB_INI_BOOTGRAPH=$2; shift ;;
 		--kernel-only) QOB_KERNEL_ONLY=1 ;;
 		--jobs) [ $# -ge 2 ] || qob_die "--jobs needs a value"; QOB_JOBS=$2; shift ;;
 		-h|--help) qob_usage; exit 0 ;;
@@ -1028,6 +1059,7 @@ qob_main()
 	fi
 	if [ "$QOB_KERNEL_ONLY" = 1 ]; then
 		[ -z "$QOB_INI_BOOTEXEC" ] || qob_die "--kernel-only cannot be combined with --obootexec"
+		[ -z "$QOB_INI_BOOTGRAPH" ] || qob_die "--kernel-only cannot be combined with --obootgraph"
 		repl=0
 	fi
 	if [ -n "$QOB_REPL_INPUT" ] && [ "$repl" = 0 ]; then

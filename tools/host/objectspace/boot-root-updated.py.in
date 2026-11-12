@@ -1,0 +1,23 @@
+# A committed replacement survives reboot and replaces the old root edge.
+import plan9 as p
+
+roots = p.space_roots()
+assert len(roots) == 1
+root = roots[0]
+rows, _, _ = p.space_list(root)
+replacedid = 0
+for r in rows:
+    bid, label, kind, rights, relation, identity, flags = r
+    if label == 'replaced':
+        assert kind == p.VKIND_GE
+        assert rights == p.VREAD + p.VMETA
+        replacedid = bid
+    elif label == 'leaf':
+        raise AssertionError('stale root edge installed')
+assert replacedid != 0
+h = p.space_resolve(root, replacedid, p.VREAD)
+assert p.obj_read(h, 13) == b'replaced-data'
+print('BOOT-ROOT-UPDATED')
+v = p.obj_open_volume()
+p.obj_put_oid(v, @GRAPH@, b'not-a-valid-graph')
+print('BOOT-ROOT-UNCOMMITTED')

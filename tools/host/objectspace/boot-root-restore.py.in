@@ -1,0 +1,53 @@
+# The configured root was restored by boot before this REPL ran.
+import plan9 as p
+
+roots = p.space_roots()
+assert len(roots) == 1
+root = roots[0]
+rows, _, _ = p.space_list(root)
+assert len(rows) == 2
+leafid = 0
+childid = 0
+for r in rows:
+    bid, label, kind, rights, relation, identity, flags = r
+    if label == 'leaf':
+        assert kind == p.VKIND_GE
+        assert rights == p.VREAD + p.VMETA
+        leafid = bid
+    elif label == 'child':
+        assert kind == p.VKIND_OBJECT_SPACE
+        childid = bid
+    else:
+        raise AssertionError('unexpected root label')
+assert leafid != 0 and childid != 0
+leaf = p.space_resolve(root, leafid, p.VREAD)
+assert p.obj_read(leaf, 9) == b'root-data'
+walk = p.space_resolve(root, childid, p.VREAD + p.VMETA)
+crows, _, _ = p.space_list(walk)
+assert len(crows) == 2
+backid = 0
+aliasid = 0
+for r in crows:
+    bid, label, kind, rights, relation, identity, flags = r
+    if label == 'back':
+        assert kind == p.VKIND_OBJECT_SPACE
+        backid = bid
+    elif label == 'payload':
+        assert kind == p.VKIND_GE
+        assert rights == p.VREAD
+        aliasid = bid
+    else:
+        raise AssertionError('unexpected child label')
+assert backid != 0 and aliasid != 0
+alias = p.space_resolve(walk, aliasid, p.VREAD)
+assert p.obj_read(alias, 9) == b'root-data'
+denied = False
+try:
+    p.space_resolve(walk, aliasid, p.VMETA)
+except OSError:
+    denied = True
+assert denied
+back = p.space_resolve(walk, backid, p.VREAD + p.VMETA)
+brows, _, _ = p.space_list(back)
+assert len(brows) == 2
+print('BOOT-ROOT-RESTORED', leafid, childid, backid, aliasid)

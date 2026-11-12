@@ -1,0 +1,23 @@
+# Build two unusable boot roots: a short record and a valid image whose first
+# edge claims rights outside the capability vocabulary.
+import plan9 as p
+import struct
+
+v = p.obj_open_volume()
+bad, badoid = p.obj_create_ge(v, b'not-a-valid-graph')
+p.obj_commit(v)
+gh = p.obj_open_ge_oid(v, @GRAPH@)
+data = bytearray(p.vobjread(gh))
+p.obj_close(gh)
+# The saved root has two nodes, so the first edge rights field is at
+# 32 header + 2*24 nodes + 16 edge offset. Set a bit outside Vall.
+struct.pack_into('<I', data, 96, 0x80000000)
+struct.pack_into('<Q', data, 24, 0)
+fh = 0xcbf29ce484222325
+for c in data:
+    fh = fh ^ c
+    fh = (fh * 0x100000001b3) & 0xffffffffffffffff
+struct.pack_into('<Q', data, 24, fh)
+grant, grantoid = p.obj_create_ge(v, data)
+p.obj_commit(v)
+print('BOOT-ROOT-NEGATIVE-IDS', badoid, grantoid)

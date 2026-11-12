@@ -30,6 +30,8 @@
 #                      the MicroPython OID 0x4f45584543000003 is the explicit
 #                      compatibility mode and also sets obootrepl=1)
 #   --obootcpu CPU     add obootcpu=CPU (exact logical kernel CPU 0..127, < --ncpu)
+#   --obootgraph OID   add obootgraph=OID: trusted persistent ObjectSpace root
+#                      graph on the obootvol GE/O volume (requires --obootexec)
 #   --ncpu N           write *ncpu=N instead of *ncpu=1 (1..128, kernel MAXMACH)
 #
 # --install requires the GCC ESP directory to exist; --bootstrap may create
@@ -58,6 +60,7 @@ device=
 puuid=
 obootexec=
 obootcpu=
+obootgraph=
 ncpu=1
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -70,9 +73,10 @@ while [ $# -gt 0 ]; do
 	--partuuid) [ $# -ge 2 ] || { echo "--partuuid needs a value" >&2; exit 2; }; puuid=$2; shift ;;
 	--obootexec) [ $# -ge 2 ] || { echo "--obootexec needs an OID" >&2; exit 2; }; obootexec=$2; shift ;;
 	--obootcpu) [ $# -ge 2 ] || { echo "--obootcpu needs a CPU" >&2; exit 2; }; obootcpu=$2; shift ;;
+	--obootgraph) [ $# -ge 2 ] || { echo "--obootgraph needs an OID" >&2; exit 2; }; obootgraph=$2; shift ;;
 	--ncpu) [ $# -ge 2 ] || { echo "--ncpu needs a count" >&2; exit 2; }; ncpu=$2; shift ;;
 	-h|--help) sed -n '2,/^set -euo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
-	*) echo "usage: $0 --plan|--install|--bootstrap|--verify --device DEV --partuuid UUID [--esp PATH] [--obootexec OID] [--obootcpu CPU] [--ncpu N]" >&2; exit 2 ;;
+	*) echo "usage: $0 --plan|--install|--bootstrap|--verify --device DEV --partuuid UUID [--esp PATH] [--obootexec OID] [--obootcpu CPU] [--obootgraph OID] [--ncpu N]" >&2; exit 2 ;;
 	esac
 	shift
 done
@@ -132,26 +136,26 @@ stamp_for() {
 # Strict selector validation: a full-string decimal or 0x OID no wider than
 # 64 bits, and plain decimal CPU/count fields.  Defaults stay unchanged.
 valid_oid() {
-	local v=$1 h
+	local v=$1 name=${2:---obootexec} h
 	case "$v" in
 	0[xX]*)
 		h=${v#0[xX]}
-		[ -n "$h" ] || die "invalid --obootexec OID: '$v'"
-		[ "${#h}" -le 16 ] || die "invalid --obootexec OID (over 64 bits): '$v'"
+		[ -n "$h" ] || die "invalid $name OID: '$v'"
+		[ "${#h}" -le 16 ] || die "invalid $name OID (over 64 bits): '$v'"
 		case "$h" in
-		*[!0-9a-fA-F]*) die "invalid --obootexec OID: '$v'" ;;
+		*[!0-9a-fA-F]*) die "invalid $name OID: '$v'" ;;
 		esac
 		;;
 	[0-9]*)
 		case "$v" in
-		*[!0-9]*) die "invalid --obootexec OID: '$v'" ;;
+		*[!0-9]*) die "invalid $name OID: '$v'" ;;
 		esac
-		[ "${#v}" -le 20 ] || die "invalid --obootexec OID (over 64 bits): '$v'"
+		[ "${#v}" -le 20 ] || die "invalid $name OID (over 64 bits): '$v'"
 		if [ "${#v}" -eq 20 ] && [ "$v" \> "18446744073709551615" ]; then
-			die "invalid --obootexec OID (over 64 bits): '$v'"
+			die "invalid $name OID (over 64 bits): '$v'"
 		fi
 		;;
-	*) die "invalid --obootexec OID: '$v'" ;;
+	*) die "invalid $name OID: '$v'" ;;
 	esac
 }
 valid_dec() {
@@ -168,7 +172,8 @@ valid_dec() {
 maxmach=128
 val_num=0
 boot_is_mpy=0
-[ -z "$obootexec" ] || valid_oid "$obootexec"
+[ -z "$obootexec" ] || valid_oid "$obootexec" "--obootexec"
+[ -z "$obootgraph" ] || valid_oid "$obootgraph" "--obootgraph"
 if [ -n "$obootexec" ]; then
 	case "$obootexec" in
 	0[xX]*)
@@ -186,6 +191,22 @@ if [ -n "$obootexec" ]; then
 	case "$obootexec" in
 	0[xX]4[fF]45584543000003|5712068756889403395) boot_is_mpy=1 ;;
 	esac
+fi
+if [ -n "$obootgraph" ]; then
+	case "$obootgraph" in
+	0[xX]*)
+		case "$obootgraph" in
+		0[xX]0*) die "invalid --obootgraph OID: zero is not a selector" ;;
+		esac
+		;;
+	*)
+		case "$obootgraph" in
+		*[!0]*) ;;
+		*) die "invalid --obootgraph OID: zero is not a selector" ;;
+		esac
+		;;
+	esac
+	[ -n "$obootexec" ] || die "--obootgraph requires --obootexec"
 fi
 valid_dec "$ncpu" "--ncpu"
 ncpu_num=$val_num
@@ -278,6 +299,7 @@ write_ini() {
 	printf 'obootvol=PARTUUID=%s\n' "$puuid" >>"$f"
 	[ -z "$obootexec" ] || printf 'obootexec=%s\n' "$obootexec" >>"$f"
 	[ -z "$obootcpu" ] || printf 'obootcpu=%s\n' "$obootcpu" >>"$f"
+	[ -z "$obootgraph" ] || printf 'obootgraph=%s\n' "$obootgraph" >>"$f"
 	[ "$boot_is_mpy" = 1 ] && printf 'obootrepl=1\n' >>"$f"
 	printf '*ncpu=%s\n' "$ncpu" >>"$f"
 }
@@ -300,6 +322,11 @@ check_ini() {
 		grep -qxF "obootcpu=$obootcpu" "$f" || die "$label plan9.ini obootcpu mismatch"
 	else
 		! grep -q '^obootcpu=' "$f" || die "$label plan9.ini has an unexpected obootcpu"
+	fi
+	if [ -n "$obootgraph" ]; then
+		grep -qxF "obootgraph=$obootgraph" "$f" || die "$label plan9.ini obootgraph mismatch"
+	else
+		! grep -q '^obootgraph=' "$f" || die "$label plan9.ini has an unexpected obootgraph"
 	fi
 	if [ "$boot_is_mpy" = 1 ]; then
 		grep -qx 'obootrepl=1' "$f" || die "$label plan9.ini obootrepl mismatch"
@@ -377,7 +404,7 @@ plan2001_count_pre=$(awk 'tolower($0) ~ /^[ \t]*(menuentry|submenu)[ \t]/ && tol
 	printf 'loader=%s\nloader_sha256=%s\nloader_size=%s\n' "$loader" "$loader_sha" "$loader_size"
 	printf 'esp=%s\nesp_uuid=%s\nesp_source=%s\n' "$esp" "$esp_uuid" "$esp_source"
 	printf 'ini_sha256=%s\nini_size=%s\nini_last_byte=%s\n' "$ini_sha" "$ini_size" "$(last_byte "$stage/$newrel/plan9.ini")"
-	printf 'obootexec=%s\nobootcpu=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "$ncpu"
+	printf 'obootexec=%s\nobootcpu=%s\nobootgraph=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "${obootgraph:-none}" "$ncpu"
 	printf 'grub_plan2001_entries_before=%s\nnewscript_present=%s\n' "$plan2001_count_pre" "$newscript_present"
 	printf 'date=%s\n' "$(date -Is)"
 } >"$out/preflight.txt"
@@ -497,7 +524,7 @@ if [ "$mode" = verify ]; then
 		printf 'installed_ini_sha256=%s\n' "$ini_sha"
 		printf 'installed_ini_size=%s\n' "$ini_size"
 		printf 'installed_ini_last_byte=%s\n' "$(last_byte "$out/plan9.ini.installed")"
-		printf 'obootexec=%s\nobootcpu=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "$ncpu"
+		printf 'obootexec=%s\nobootcpu=%s\nobootgraph=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "${obootgraph:-none}" "$ncpu"
 		printf 'grub_plan2001_entries=%s\n' "$(count_plan2001_entries "$out/grub.cfg.verify")"
 		printf 'grub_entry_title=%s\ngrub_entry_id=%s\n' "$newtitle" "$newid"
 		printf 'legacy_scripts_deactivated=%s\n' "${legacy_scripts[*]:-none}"
@@ -594,7 +621,7 @@ done
 	printf 'installed_ini_sha256=%s\n' "$ini_sha"
 	printf 'installed_ini_size=%s\n' "$ini_size"
 	printf 'installed_ini_last_byte=%s\n' "$(last_byte "$out/plan9.ini.installed" 2>/dev/null || last_byte "$stage/$newrel/plan9.ini")"
-	printf 'obootexec=%s\nobootcpu=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "$ncpu"
+	printf 'obootexec=%s\nobootcpu=%s\nobootgraph=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "${obootgraph:-none}" "$ncpu"
 	printf 'grub_default=0 (Debian)\n'
 	printf 'grub_entry_title=%s\ngrub_entry_id=%s\n' "$newtitle" "$newid"
 	printf 'grub_plan2001_entries=%s\n' "$(count_plan2001_entries "$out/grub.cfg.post")"

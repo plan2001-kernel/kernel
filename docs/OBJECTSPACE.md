@@ -1,7 +1,8 @@
 # ObjectSpace: native capability graph
 
-**Target architecture**, November 2026. The first implementation is a
-**volatile proof of concept**, not the completed kernel migration.
+**Target architecture**, November 2026. The implemented core graph runtime
+is a proof of concept, and GE/O persistence is an experimental phase-4 layer;
+neither is the completed kernel migration.
 No historical object ABI, disk format, Unix or Plan 9 compatibility is required.
 
 ## Normative concepts
@@ -156,6 +157,34 @@ non-monotonic BindingIDs, missing objects and excess rights. Failed
 restore closes the unpublished partial graph. Knowing an OID or reading
 serialized rights never grants a capability.
 
+### Trusted boot root
+
+Persistent root selection is explicit and separate from the graph payload.
+Trusted boot reads `obootgraph=<OID>` from `plan9.ini`; the OID names one
+durable graph object on the same GE/O volume selected by `obootvol`
+(`PARTUUID=...`). No SpaceID, path, native directory, `init` selector or
+payload field selects a root. The selector grants no authority by itself:
+restoration opens the boot volume through the existing bootstrap volume
+capability, applies the same validation as `space_load`, and installs the
+restored `VkindObjectSpace` Handle only in the bootstrap process. That
+process can then see the root through `plan9.space_roots()` without a
+manual `space_load` call. Other processes still receive zero or more roots
+only through explicit Handle delegation; there is no ambient root or CWD.
+
+The boot process restores once, after `OEXECUTE` has replaced the loader's
+Handles. Every target capability is derived from the *current* boot volume
+grant, and saved rights must fit both that grant and the capability
+vocabulary. Owner records, graph version, length and checksum are checked
+before any root Handle is installed. With no `obootgraph`, boot continues
+normally and installs no automatic root. A configured selector that is
+syntactically invalid, names a missing object, has a corrupt/torn record,
+or requests unavailable rights fails closed with an actionable diagnostic;
+boot never chooses another OID, bypasses a capability check, or reformats
+or mutates storage as recovery. Removing the selector or restoring a known
+committed graph is the non-destructive recovery path. A committed graph
+replacement becomes the next boot's root; an uncommitted staged write is
+not visible.
+
 **Implementation status and limits:** The version-2 record can encode
 nested ObjectSpaces, aliases and cycles using local node indices. During
 restore all nodes are allocated first and then their weak inter-node
@@ -164,8 +193,11 @@ its lifetime, without introducing strong edge cycles. CI includes a
 two-boot three-node nested ObjectSpace test. CI covers graph aliasing and cycles, and the new native two-process
 bind/unbind-versus-snapshot stress case verifies that each restored
 multi-node snapshot is complete and that its final image survives reboot.
-Persistent process-root selection, garbage collection, full cross-volume
-references and physical hardware remain outstanding. Phase 4 is not complete until those
+`tools/host/objectspace/run-boot-root.sh` additionally proves the trusted
+selector, automatic restoration, committed replacement, uncommitted crash
+recovery and negative selector/record/grant cases across real QEMU/OVMF
+boots. Garbage collection, full cross-volume references and physical
+hardware remain outstanding. Phase 4 is not complete until those
 requirements are addressed and verified.
 
 Native tests in `tools/host/objectspace/run-persistent.sh` use one

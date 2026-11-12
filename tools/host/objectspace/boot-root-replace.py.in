@@ -1,0 +1,21 @@
+# Auto-restored root: commit one replacement for the configured graph OID.
+import plan9 as p
+
+v = p.obj_open_volume()
+roots = p.space_roots()
+assert len(roots) == 1
+root = roots[0]
+rows, _, _ = p.space_list(root)
+leafid = 0
+for r in rows:
+    bid, label, kind, rights, relation, identity, flags = r
+    if label == 'leaf':
+        leafid = bid
+assert leafid != 0
+newobj, newoid = p.obj_create_ge(v, b'replaced-data')
+p.obj_commit(v)
+p.space_unbind(root, leafid)
+newid = p.space_bind(root, 'replaced', newobj, p.VREAD + p.VMETA)
+assert newid != 0
+assert p.space_save(root, v, @GRAPH@) != 0
+print('BOOT-ROOT-REPLACED', @GRAPH@, newoid, newid)

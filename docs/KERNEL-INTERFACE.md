@@ -37,9 +37,14 @@ records per enumeration page. An epoch rejects mixed snapshots. Space-to-space
 references are weak in this first implementation to avoid retaining cycles;
 independently owned target Handles keep them live. Unbind does not revoke an
 already resolved Handle. A generic volatile Handle derivation tree and descendant revocation are
-now implemented by `ObjOpCapRevoke=57`; GE/O persisted grant storage and
-explicit process ObjectSpace roots are not implemented. Existing
-Pgrp namespaces remain **legacy current behavior**, not architectural
+now implemented by `ObjOpCapRevoke=57`. GE/O v2 can save and load one
+checksummed graph per durable OID through `ObjOpSpaceSave=58` and
+`OBJOPEN(ObjOpenSpaceGraph)`. Trusted boot treats `plan9.ini
+obootgraph=<OID>` as a selector, not authority: it automatically restores
+that graph on the `obootvol` GE/O volume and installs the root
+`VkindObjectSpace` Handle in the bootstrap process before user code runs.
+No selector means no automatic root; an invalid one fails closed.
+Existing Pgrp namespaces remain **legacy current behavior**, not architectural
 target invariants. OwnerID access gates have been replaced by capability
 admission and provider safety conditions.
 

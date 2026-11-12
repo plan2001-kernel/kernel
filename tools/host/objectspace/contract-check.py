@@ -30,4 +30,13 @@ assert "ObjSpaceBindingMax = 64" in records
 assert "ObjSpaceFlagStale" in records
 assert "vspaceweakref" in provider and "vspaceregistryremove" in provider
 assert "vobjspacecreate(&vid)" in dispatch
+boot = (root / "kernel/amd64/ouser.c").read_text()
+proc = (root / "kernel/core/sysproc.c").read_text()
+assert 'getconf("obootgraph")' in boot
+assert "osbootrootselect(" in boot
+persist = (root / "kernel/core/vspacepersist.inc").read_text()
+assert "osbootrootrestore" in persist and "osbootrootselect" in persist
+assert "osbootrootrestore();" in proc
+assert "obootgraph=<OID>" in (root / "docs/OBJECTSPACE.md").read_text()
+assert (root / "tools/host/objectspace/run-boot-root.sh").is_file()
 print("PASS: static ObjectSpace ABI and kernel/userspace closure")
