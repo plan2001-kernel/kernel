@@ -1334,6 +1334,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_UNBIND), MP_ROM_INT(ObjOpSpaceUnbind) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_RESOLVE), MP_ROM_INT(ObjOpSpaceResolve) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_ENUMERATE), MP_ROM_INT(ObjOpSpaceEnumerate) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_SAVE), MP_ROM_INT(ObjOpSpaceSave) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE_GRAPH), MP_ROM_INT(ObjOpenSpaceGraph) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_NAMES), MP_ROM_INT(ObjSpaceRelationNames) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_CONTAINS), MP_ROM_INT(ObjSpaceRelationContains) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_IMPORTS), MP_ROM_INT(ObjSpaceRelationImports) },
