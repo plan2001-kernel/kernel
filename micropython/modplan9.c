@@ -802,6 +802,15 @@ static mp_obj_t p9_objinfo(mp_obj_t h){
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objinfo_obj,p9_objinfo);
 
 
+/* cap_revoke: invalidate existing derived grants; source stays usable. */
+static mp_obj_t p9_caprevoke(mp_obj_t h)
+{
+    ObjCall c = p9_spacecall(ObjOpCapRevoke);
+    check(obj_invoke(mp_obj_get_int(h), &c, sizeof c));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_caprevoke_obj, p9_caprevoke);
+
 static mp_obj_t p9_objgrant(mp_obj_t h,mp_obj_t rights){
  return check(obj_grant(mp_obj_get_int(h),(unsigned long long)mp_obj_get_int(rights)));
 }
@@ -1266,6 +1275,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_put_oid), MP_ROM_PTR(&p9_objputoid_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cap_revoke), MP_ROM_PTR(&p9_caprevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_new), MP_ROM_PTR(&p9_spacenew_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_bind), MP_ROM_PTR(&p9_spacebind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_unbind), MP_ROM_PTR(&p9_spaceunbind_obj) },
@@ -1300,6 +1310,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_LAUNCHABLE), MP_ROM_INT(OWNER_PROGRAM_LAUNCHABLE) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_OBJECT_SPACE), MP_ROM_INT(ObjKindObjectSpace) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_OBJECT_SPACE), MP_ROM_INT(VkindObjectSpace) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_CAP_REVOKE), MP_ROM_INT(ObjOpCapRevoke) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_BIND), MP_ROM_INT(ObjOpSpaceBind) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_UNBIND), MP_ROM_INT(ObjOpSpaceUnbind) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_RESOLVE), MP_ROM_INT(ObjOpSpaceResolve) },

@@ -138,6 +138,7 @@ enum {
 	ObjOpSpaceUnbind = 54,	/* remove exactly one binding id */
 	ObjOpSpaceResolve = 55,	/* binding id -> attenuated target handle */
 	ObjOpSpaceEnumerate = 56,	/* paged stable-snapshot metadata */
+	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
 };
 
 /* ObjOpRegionMap arg1 flags. */

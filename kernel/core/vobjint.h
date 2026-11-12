@@ -131,6 +131,7 @@ int	vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode);
 int	vobjinfo(int handle, VobjInfo *out);
 int	vobjownerinfo(int handle, ObjOwnerInfo *out);
 int	vobjrevoke(int handle);
+int	vobjcaprevoke(int handle);
 long	vobjio(int handle, uvlong op, void *buf, long n, long timeout);
 long	vobjreadver(int handle, void *buf, long n, long timeout, uvlong *ver);
 int	vobjlist(void *buf, long n);
