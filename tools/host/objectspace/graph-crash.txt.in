@@ -1,4 +1,4 @@
-# Stage an unpublished replacement, then simulate abrupt host power loss.
+# Unpublished GE/O write followed by an abrupt host SIGKILL.
 import plan9 as p
 v=p.obj_open_volume()
 p.obj_put_oid(v,@GRAPH@,b'not-a-valid-graph')
