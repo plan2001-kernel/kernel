@@ -91,7 +91,7 @@ PY
 
 # SIGKILL is intentionally abrupt, with no guest shutdown. An unpublished
 # replacement must never become the graph read by the next boot.
-QOB_CRASH_AFTER_EXPECT=1 run_boot crash "$QOB_OUT/graph-crash.txt" '^PERSISTENT-UNCOMMITTED'
+QOB_REPL_SYNC_LINES=0 QOB_CRASH_AFTER_EXPECT=1 run_boot crash "$QOB_OUT/graph-crash.txt" '^PERSISTENT-UNCOMMITTED'
 run_boot boot4 "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
 
 python3 - "$QOB_OUT" <<'PY'
