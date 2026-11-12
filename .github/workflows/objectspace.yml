@@ -19,7 +19,7 @@ jobs:
       - name: Install build and QEMU dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-14 binutils clang lld mtools ovmf qemu-system-x86 python3
+          sudo apt-get install -y build-essential gcc-14 binutils clang lld file mtools ovmf qemu-system-x86 python3
       - name: Validate ABI and wiring (static)
         run: python3 tools/host/objectspace/contract-check.py
       - name: Build AMD64 kernel
