@@ -166,7 +166,16 @@ Native tests in `tools/host/objectspace/run-persistent.sh` use one fresh,
 disposable GE/O disk over four QEMU boots: initial snapshot, restore
 and replacement, abrupt QEMU SIGKILL after an unpublished replacement,
 and recovery of the last published graph with negative corruption and
-capability tests. Passing compilation or v1 regression tests alone is
+capability tests. The extended QEMU harness now also injects boot-only fault point 105
+inside `objtxcommit`, immediately after staging flush and before the
+published-version header update. It kills QEMU at the deterministic marker,
+boots the same disk again, and checks that the previous graph remains intact.
+This is a **pre-publication crash test**, not a sector-level torn-write test:
+interruptions during physical header-sector writes still need a separate
+block-device fault-injection test. The graph model remains restricted to GE/O
+leaves, so the multi-node/cyclic graph requirements are still outstanding.
+
+Passing compilation or v1 regression tests alone is
 not evidence of crash recovery or torn-write safety.
 
 NEVER silently reformat a hardware O volume; do not restore legacy
