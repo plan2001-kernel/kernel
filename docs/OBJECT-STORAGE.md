@@ -37,13 +37,27 @@ uninterpreted occurrence; a contextual object is its interpretation or role.
 - The native O opener rejects an FS-profile volume. Opening a volume must
   not implicitly reformat it.
 
-## Stored definitions versus runtime namespaces
+## ObjectSpace target and storage identity
+
+The [ObjectSpace architecture](OBJECTSPACE.md) treats GE/O `SpaceID`
+as a private storage allocation/transaction scope, not a graph node or
+namespace parent. Persistent ObjectSpaces will be ordinary native GE/O
+objects containing versioned BindingID/target/relation metadata. Their
+reconstructed capabilities require trusted authorization; persisting a
+target OID and rights field alone never mints authority.
+
+The first implementation is volatile. Persistent relations, atomic graph
+updates, verified reboot reconstruction and an ObjectSpace-root process
+context are not implemented. The v1 storage layout may be replaced without
+compatibility or migration; do not silently reformat hardware volumes.
+
+## Historical stored definitions versus runtime namespaces
 
 A target namespace is a lookup/data view independent of process ancestry,
 not a source of ownership. Objects have one named owner from creation until
 destruction; an OID or namespace label grants no ownership. The current
 AMD64 implementation uses capability-based reference-counted `Pgrp/OContext`;
-that is an implementation fact, not the single-owner target. GE/O may store
+that is an implementation fact, not the new ObjectSpace target. GE/O may store
 namespace definitions as ordinary object data for future userspace
 interpretation; the format and loader are not implemented, and loading
 such data cannot grant access to objects it references.

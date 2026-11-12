@@ -3,13 +3,13 @@
 ## Target architecture and mandatory deletion
 
 Read [the authoritative target architecture](docs/ARCHITECTURE.md) first.
-The **target** is one immutable named owner per object: only processes
-running under that owner have direct object access; no Unix UID/GID, rwx,
-ACL, general capability-rights, borrowing, ownership transfer or grants.
-Programs own their executable and persistent objects. Boot/installation
-registration binds program name, owner, image and startup policy; a launch
-request runs the registered program under **its own** identity, not the
-requester's, and grants no parent/child or launcher-control relationship.
+**Target:** [docs/OBJECTSPACE.md](docs/OBJECTSPACE.md). ObjectSpace is an
+independent named capability graph with explicit attenuation, local labels,
+BindingIDs, multiple roots and arbitrary object targets. There is no native
+directory or process parent tree. OwnerID is immutable provenance, not
+the eventual general direct-access rule. Existing OwnerID gates are
+transitional; a complete provider-by-provider security migration is
+required. No historical disk or syscall compatibility is required.
 
 **Do not redesign IPC.** The current memory-publication regions, one RW
 publisher, RO observers and WAIT/WAKE are retained. Data received through
@@ -28,9 +28,9 @@ rejected behavior. Every phase PR states Added, Deleted, Tests actually run,
 NOT RUN and Remaining obsolete code. Physical deletion includes dead code;
 compatibility retention is not the default.
 
-All Phase 1–6 issues, work branches and PRs in the architecture experiment
-must target `arch-reset`, not `main`, unless the owner explicitly changes
-this instruction. Unrelated maintenance PRs may target `main`.
+The previous arch-reset/ownerid phases are historical and merged to main.
+New ObjectSpace experiments branch from main. Keep bounded reviewable PRs
+and do not merge without explicit approval.
 
 This is an experimental AMD64/ARM64 operating-system kernel. AMD64 currently
 has the functional full-system path; ARM64 has a verified early-boot foundation,
@@ -42,18 +42,13 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 - Persistent identity: GE/O `(SpaceID, OID)`. There is no native hierarchical
   filesystem namespace. Runtime objects, owner identities and stored occurrences
   are different concepts.
-- Runtime namespace views are lookup/data constructs and do not grant
-  ownership. Current `Pgrp/OContext` sharing, copying and lifetime
-  are implementation facts, not target obligations.
-- A persistent GE/O object may hold a *namespace definition* for userspace to
-  construct or modify an authorized runtime view. The definition is data,
-  not a live namespace, and knowing its OID grants no object authority.
-  Definition loading and its format are architectural targets, not implemented
-  namespace-construction functionality.
-- Persistent GE/O object *sets* and OID membership relations are separate from
-  process namespaces. Set membership, union, intersection and difference are
-  future data/query semantics, not ownership grants or required
-  persistent namespace machinery.
+- Native ObjectSpace is a first-class kernel object, independent of Pgrp.
+  Each binding has a label, stable BindingID, target and attenuated rights.
+- GE SpaceID is a private storage bucket, NOT the ObjectSpace graph identity.
+  Persistent ObjectSpace metadata needs atomic GE/O transactions and trusted
+  capability reconstruction; these are not yet implemented.
+- Existing Pgrp/OContext and owner equality checks are legacy to delete in
+  later focused architecture phases; do not introduce compatibility wrappers.
 - Never implement or restore kernel hashtag/tag semantics: no `#`-tag
   validation, tag-name objects, tag-specific indexes or tag query parsers.
   Application-specific tags and query languages belong in userspace. An OID

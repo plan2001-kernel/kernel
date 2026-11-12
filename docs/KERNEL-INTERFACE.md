@@ -5,59 +5,34 @@ The mechanisms below are proposals, not a frozen ABI. `runtime/abi/sys.h`
 and kernel source define what works now. There is no fixed syscall count or
 historical ABI compatibility obligation.
 
-## Authority and identity
+## ObjectSpace graph and capability target
 
-The [target architecture](ARCHITECTURE.md) defines a single, named,
-immutable `OwnerID` per object. A process may directly operate only on
-objects with the same owner. There are no Unix UID/GID, rwx, ACL, general
-capability-rights, delegated ownership or ownership transfer in the target.
-An OID, name or namespace relation gives identity, never ownership.
+[ObjectSpace](OBJECTSPACE.md) is the current authority for target semantics.
+OwnerID is immutable identity/provenance, not a universal per-operation
+OwnerID-equality gate. Capability possession, reduced rights, revocation
+state and provider-specific safety determine access. No raw OID, process ID,
+label, kernel pointer or storage SpaceID can grant authority on its own.
 
-Trusted registration binds a program name, owner, executable object and
-startup policy. The kernel loads registered executables at boot or by
-a launch request and starts an independent process as the **program's**
-owner, never as the requester. Start does not grant access to the image,
-other program objects or the process lifecycle. Voluntary stop and object
-modification are owner-handled requests over the existing IPC.
+`OBJCREATE(ObjKindObjectSpace)` now creates a volatile independent graph.
+`OBJINVOKE` operations `ObjOpSpaceBind`, `ObjOpSpaceUnbind`,
+`ObjOpSpaceResolve`, `ObjOpSpaceEnumerate` manipulate unique labeled
+BindingIDs. Duplicate names and nested spaces are supported, without
+path parsing. Object ABI version 2 is intentionally incompatible with
+the earlier value. The ABI records are in `runtime/abi/objectspace.h`.
 
-The sender keeps ownership of its original data. Received data values
-belong entirely to the receiver, and stored received objects are owned
-by the receiver. No owner is allowed to directly change another's objects.
+The v1 limit is 64 bindings per space, 47 label bytes plus NUL, and eight
+records per enumeration page. An epoch rejects mixed snapshots. Space-to-space
+references are weak in this first implementation to avoid retaining cycles;
+independently owned target Handles keep them live. Unbind does not revoke an
+already resolved Handle. No generic revocation derivation tree, durable
+ObjectSpace/GE binding store, or process context root exists yet. Existing
+Pgrp namespaces and OwnerID object gates remain **legacy current behavior**,
+not architectural target invariants.
 
-## Capability regions and publication (target)
-
-The **existing** region-publication mechanism is the IPC transport: one
-writable publisher, read-only observers, release/acquire publication and
-blocking REGIONWAIT/REGIONWAKE. Do **not** add a message/send/receive
-transport, FIFO, Pipe, ObjectFIFO or generic kernel IPC provider.
-
-Observer mappings show offered data, not direct object-management authority
-over the publisher's underlying region. Any independently stored received
-data belongs to the receiver. Keep RO/RW page protection, bounds/alignment
-checks, region-relative offsets, unique writer mapping, lifetime cleanup,
-atomic WAIT enrollment and WAKE notifications. WAKE carries no payload.
-These memory-safety mechanisms are distinct from general rwx/capability
-object permissions.
-
-The capability handles, mapping rights and revocation in CURRENT
-IMPLEMENTATION remain accurate descriptions of the presently implemented
-ABI, **not** target permission requirements. The implemented owner gate makes
-those rights unable to authorize cross-owner management.
-
-## Process lifecycle and registered launch (target)
-
-Program code, configuration and stored data belong to the program's named
-owner. Trusted boot/installation registration supplies the image OID and
-startup policy. Kernel boot starts autostart entries, and a launch request
-resolves a registered entry and starts an independent process under the
-program's owner. There is no parent/child lifecycle, launcher-owned process
-or implicit launcher control.
-
-Process completion, voluntary exit, forced termination and cleanup remain
-separate kernel lifecycle operations. The process owner and explicit kernel
-lifecycle policy govern forced termination; userspace may offer a shutdown
-request that the program can choose to act upon. No new syscall family,
-permission-grant model or IPC transport is required by this design.
+The region-publication IPC with one RW writer, RO observers, WAIT/WAKE and
+release/acquire publication is retained. ObjectSpace may name regions, but
+does not introduce any new kernel message queue, FIFO or network transport.
+Processes are independent contexts; launch ancestry never grants ownership.
 
 ## CURRENT IMPLEMENTATION
 
