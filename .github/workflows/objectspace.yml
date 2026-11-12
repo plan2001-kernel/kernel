@@ -36,6 +36,8 @@ jobs:
         run: tools/host/objectspace/run-objectspace.sh --no-build
       - name: QEMU durable ObjectSpace reboot and crash recovery
         run: bash tools/host/objectspace/run-persistent.sh --no-build
+      - name: QEMU trusted ObjectSpace boot root acceptance
+        run: bash tools/host/objectspace/run-boot-root.sh --no-build
       - name: Upload QEMU diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -44,4 +46,5 @@ jobs:
           path: |
             build/objectspace/run/
             build/objectspace/persistent/
+            build/objectspace/bootroot/
           if-no-files-found: ignore

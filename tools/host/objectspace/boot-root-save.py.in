@@ -1,0 +1,17 @@
+# No boot selector: zero roots. Save one nested graph for the next boot.
+import plan9 as p
+
+assert p.space_roots() == ()
+v = p.obj_open_volume()
+payload, oid = p.obj_create_ge(v, b'root-data')
+p.obj_commit(v)
+graph, goid = p.obj_create_ge(v, b'')
+p.obj_commit(v)
+root = p.space_new()
+child = p.space_new()
+b1 = p.space_bind(root, 'leaf', payload, p.VREAD + p.VMETA)
+b2 = p.space_bind(root, 'child', child, p.VREAD + p.VMETA)
+b3 = p.space_bind(child, 'back', root, p.VREAD + p.VMETA)
+b4 = p.space_bind(child, 'payload', payload, p.VREAD)
+assert p.space_save(root, v, goid) != 0
+print('BOOT-ROOT-SAVED', goid, oid, b1, b2, b3, b4)

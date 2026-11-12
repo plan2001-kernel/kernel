@@ -27,9 +27,13 @@ been removed from current GE/O, region, device and process providers.
 Their authorization now uses capability admission, GE/O Ohand scope,
 trusted bootstrap gates and provider-specific safety checks.
 
-The first implemented ObjectSpace is volatile and uses the existing
-five-call object ABI. Processes have explicit ObjectSpace roots; persistent
-graph transactions and trusted reboot reification remain unfinished.
+The implemented ObjectSpace runtime uses the existing five-call object ABI.
+Processes have explicit ObjectSpace roots. GE/O v2 persistence supports one
+checksummed graph snapshot per durable OID, and
+trusted boot can select one graph with `plan9.ini obootgraph=<OID>` and
+restore it automatically into the bootstrap process as an explicit Handle.
+Persistent graph garbage collection, full cross-volume references and
+physical-hardware verification remain unfinished.
 GE/O v2 has one flat OID allocator and publication domain per volume;
 there is no SpaceID bucket or implicit storage hierarchy. No prior ABI, on-disk-format or Unix/Plan 9 compatibility
 is required. All phases and limitations are defined in

@@ -181,6 +181,10 @@ long	sysctlenvdelete(char *name, int namelen);
 long	sysctlenvlist(void *buf, long n, long *need);
 long	osvolumeopen(char *spec, int n);
 
+/* Trusted boot ObjectSpace root selector and one-shot restoration. */
+void	osbootrootselect(uvlong oid);
+void	osbootrootrestore(void);
+
 /* GE/O provider helpers implemented in sysgefs.c. */
 int	vobjrightsfromo(int rights);
 int	vobjinstallohand(Ohand*, int kind);

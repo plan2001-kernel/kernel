@@ -544,6 +544,12 @@ execcommit(Segment *ts, Segment *ds, Segment *bs, uintptr tstk,
 		up->procctl = Proc_stopme;
 	oprocexec(up);
 	vobjprocexec(up);
+	/*
+	 * The trusted boot selector restores one ObjectSpace root after the
+	 * loader's bootstrap Handles are cleared.  It is a no-op for other
+	 * processes and when no selector is configured.
+	 */
+	osbootrootrestore();
 	kbdprocexec(up);
 	uartprocexec(up);
 }
