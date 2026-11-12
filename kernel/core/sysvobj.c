@@ -105,6 +105,7 @@ struct Vcap {
 };
 static Lock vcaplock;
 enum { VcapDepthMax = 128 };
+static void vcapput(Vcap*);
 
 struct Vhand {
 	Ref	ref;
