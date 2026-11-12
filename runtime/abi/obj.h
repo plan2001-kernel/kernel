@@ -32,13 +32,11 @@ struct Ospawn;
  * ObjOpenDevices/ObjOpenDevice. */
 enum {
 	ObjOpenHandle		= 4,
-	ObjOpenBinding		= 5,
 	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */
 	ObjOpenGeSpace		= 7,	/* Space handle + OID -> persistent object */
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
-	ObjOpenNamespaceCurrent = 17,	/* caller's namespace control */
 };
 
 /* obj_create kinds.  ObjKindBytes is volatile immutable content and
@@ -51,16 +49,6 @@ enum {
 	ObjKindRegion		= 4,	/* volatile capability-mapped pages */
 	ObjKindObjectSpace = 5,	/* capability-addressed relation graph */
 	ObjCreateKindMask	= 0xff,
-};
-
-/* obj_bind modes.  Remove uses handle=0 and rights=0; it changes only the
- * caller's current namespace and does not revoke already opened Handles. */
-enum {
-	ObjBindCopy		= 0,
-	ObjBindExclusive	= 1,
-	ObjBindShare		= 2,
-	ObjBindModeMask		= 0xff,
-	ObjBindRemove		= 0x100,
 };
 
 /* OBJINVOKE operations.  Numbers 4, 5, 6, 7, 8, 11, 14, 15, 16, 17, 18, 19,
@@ -105,10 +93,6 @@ enum {
 	ObjOpDeviceRecv = 39,	/* device: one USB completion Handle */
 	/* 40 is reserved: device control moved to IOCTL(145). */
 	ObjOpExit	= 36,	/* RETIRED: direct EXITS(8) is used */
-	ObjOpNamespaceCreate = 41,	/* selected roles -> sealed view Handle */
-	ObjOpNamespaceAttach = 42,	/* view Handle + mode -> attachment token */
-	ObjOpNamespaceDetach = 43,	/* attachment token -> detach */
-	ObjOpNamespaceVisible = 44,	/* bounded visible identity records */
 	ObjOpDeviceRx	= 45,	/* device: acquire the receive region Handle */
 	ObjOpDeviceTx	= 46,	/* device: acquire the transmit region Handle */
 	/* VkindRegion: install this region at arg0 (0 = choose) and return the
@@ -549,7 +533,6 @@ long obj_create(unsigned long long space, unsigned int kind,
 long obj_open(unsigned long long provider, void *req, long reqlen,
 		unsigned long long rights, ObjId *out);
 long obj_close(int handle);
-long obj_bind(int handle, const char *role, unsigned long long len,
 		unsigned long long rights, unsigned int mode);
 long obj_invoke(int handle, ObjCall *call, long calllen);
 

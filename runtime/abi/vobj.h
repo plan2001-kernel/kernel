@@ -46,8 +46,6 @@ enum {
 	VkindConsole	= 11,	/* native process output stream */
 	VkindDevices = 13,	/* common device discovery/open authority */
 	VkindDevice = 14,
-	VkindNamespaceView = 15,	/* sealed role grants */
-	VkindNamespaceControl = 16,	/* caller's current namespace */
 	VkindRegion	= 17,	/* volatile capability-mapped memory region */
 	VkindProcess	= 18,	/* volatile process observation/control capability */
 	VkindObjectSpace = 19,	/* independent named capability graph node */

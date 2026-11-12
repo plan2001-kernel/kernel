@@ -27,7 +27,6 @@ extern long ovolopen(char *, int);
 #include "../runtime/abi/sys.h"
 #include "../runtime/abi/vobj.h"
 #include "../runtime/abi/obj.h"
-#include "../runtime/abi/namespace.h"
 #endif
 
 // the runtime an Environment is made for: the .mpy's format
@@ -1103,7 +1102,6 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         { MP_QSTR_argv, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_membudget, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_handle, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_view, MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_roles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_env, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_vhandles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
@@ -1545,59 +1543,6 @@ static mp_obj_t space_hexecute(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_hexecute_obj, 2, 3,
                                            space_hexecute);
 
-/* Native sealed provider and union operations. */
-static long namespace_call(ObjCall *call) {
- long control=obj_open(ObjOpenNamespaceCurrent,NULL,0,Vcontrol,NULL);
- if(control<0)return control;
- long result=obj_invoke(control,call,sizeof *call);
- obj_close(control);
- return result;
-}
-static ObjCall namespace_request(unsigned op) {
- ObjCall call={0};call.version=OBJ_ABI_VERSION;call.op=op;return call;
-}
-static mp_obj_t space_view(mp_obj_t roles) {
- size_t n;mp_obj_t *a;char names[32][32];
- mp_obj_get_array(roles,&n,&a);
- if(!n||n>32)mp_raise_ValueError(MP_ERROR_TEXT("view role count"));
- memset(names,0,sizeof names);
- for(size_t i=0;i<n;i++){
-  const char *role=mp_obj_str_get_str(a[i]);size_t len=strlen(role);
-  if(len>=32)mp_raise_ValueError(MP_ERROR_TEXT("role length"));
-  memcpy(names[i],role,len);
- }
- ObjCall call=namespace_request(ObjOpNamespaceCreate);
- call.in=names;call.inlen=n*32;
- long h=namespace_call(&call);hcheck(h);return mp_obj_new_int(h);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_view_obj,space_view);
-static mp_obj_t space_mount(mp_obj_t h,mp_obj_t mode) {
- ObjCall call=namespace_request(ObjOpNamespaceAttach);
- call.arg0=mp_obj_get_int(h);call.arg1=mp_obj_get_int(mode);
- long id=namespace_call(&call);hcheck(id);return mp_obj_new_int(id);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(space_mount_obj,space_mount);
-static mp_obj_t space_unmount(mp_obj_t id) {
- ObjCall call=namespace_request(ObjOpNamespaceDetach);
- call.arg0=mp_obj_get_uint(id);
- hcheck(namespace_call(&call));return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(space_unmount_obj,space_unmount);
-static mp_obj_t space_visible(void) {
- NsVisible records[32];ObjCall call=namespace_request(ObjOpNamespaceVisible);
- call.out=records;call.outlen=sizeof records;
- long count=namespace_call(&call);hcheck(count);
- mp_obj_t result=mp_obj_new_list(0,NULL);
- for(long i=0;i<count;i++){
-  mp_obj_t fields[4]={mp_obj_new_bytes(records[i].object.volume,16),
-   mp_obj_new_int_from_ull(records[i].object.space),
-   mp_obj_new_int_from_ull(records[i].object.oid),
-   mp_obj_new_int(records[i].rights)};
-  mp_obj_list_append(result,mp_obj_new_tuple(4,fields));
- }
- return result;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(space_visible_obj,space_visible);
 static mp_obj_t space_open_handle(mp_obj_t name) {
  const char *s=mp_obj_str_get_str(name);long h=obj_open(ObjOpenSpace,(void*)s,strlen(s),0,NULL);
  hcheck(h);return mp_obj_new_int(h);
@@ -1626,10 +1571,6 @@ static MP_DEFINE_CONST_FUN_OBJ_1(space_openobj_obj,space_openobj);
 
 static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_space) },
-    { MP_ROM_QSTR(MP_QSTR_view), MP_ROM_PTR(&space_view_obj) },
-    { MP_ROM_QSTR(MP_QSTR_mount), MP_ROM_PTR(&space_mount_obj) },
-    { MP_ROM_QSTR(MP_QSTR_unmount), MP_ROM_PTR(&space_unmount_obj) },
-    { MP_ROM_QSTR(MP_QSTR_visible), MP_ROM_PTR(&space_visible_obj) },
     { MP_ROM_QSTR(MP_QSTR_open_handle), MP_ROM_PTR(&space_open_handle_obj) },
     { MP_ROM_QSTR(MP_QSTR_openobj), MP_ROM_PTR(&space_openobj_obj) },
     { MP_ROM_QSTR(MP_QSTR_MREPL), MP_ROM_INT(0) },

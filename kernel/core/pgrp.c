@@ -6,9 +6,6 @@
 #include	"../core/error.h"
 #include	"lifediag.h"
 
-void* octxnew(void);
-void* octxcopy(void*);
-void octxput(void*);
 
 enum {
 	Whinesecs = 10,		/* frequency of out-of-resources printing */
