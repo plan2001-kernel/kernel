@@ -7,6 +7,7 @@ OUT=${OBJECTSPACE_TEST_OUT:-$ROOT/build/objectspace/run}
 export QEMU_O_BOOT_LIB=1
 source "$ROOT/tools/qemu-o-boot.sh"
 qob_main --accel kvm:tcg --cpus 2 --ncpu 2 --obootcpu 0 \
+  --obootexec 0x4f45584543000003 \
   --mib 129 --timeout 420 --repl-input \
   "$ROOT/tools/host/objectspace/guest-repl.txt" \
   --output-dir "$OUT" --expect '^OBJECTSPACE-PASS' "$@"
