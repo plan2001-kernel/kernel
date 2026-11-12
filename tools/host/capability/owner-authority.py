@@ -171,8 +171,17 @@ p.sleep(60000)
 p.exits('SLEEP-UNEXPECTED')
 """
 
+# The native boot reporter requires an initial persistent alias graph.
+# Keep it separate from security operations exercised in run().
+class Counter:
+    def __init__(self):
+        self.n = 0
+
+shared = Counter()
+alias = shared
+
 def init():
-    pass
+    shared.n = 0
 
 def run():
     import space
