@@ -97,6 +97,29 @@ else:
 p.exits('GRAPH-ROOT')
 """
 
+MULTI_ROOT=COMMON+r"""
+if p.owner_info()[1]!='ownerB':
+    fail('multi-root-owner')
+roots=p.space_roots()
+if len(roots)!=2:
+    fail('multi-root-count')
+labels=set()
+for rh in roots:
+    records,cursor,epoch=p.space_list(rh)
+    if len(records)!=1:
+        fail('multi-root-edge-count')
+    labels.add(records[0][1])
+if labels!={'payload','second'}:
+    fail('multi-root-labels')
+try:
+    p.obj_open_space('init')
+except OSError:
+    pass
+else:
+    fail('multi-root-ambient-space')
+p.exits('MULTI-ROOT')
+"""
+
 READ_ONLY=COMMON+r"""
 if p.owner_info()[1]!='ownerB':
     fail('read-owner')
@@ -308,6 +331,13 @@ def run():
     p.space_bind(root_space,'payload',gh,p.VREAD|p.VMETA)
     waited(launched('B',GRAPH_ROOT,((root_space,p.VREAD|p.VMETA|p.VDELEGATE),)),
            'GRAPH-ROOT','B receives exactly one ObjectSpace root with attenuated edge')
+    second_space=p.space_new()
+    p.space_bind(second_space,'second',gh,p.VREAD|p.VMETA)
+    waited(launched('B',MULTI_ROOT,
+           ((root_space,p.VREAD|p.VMETA|p.VDELEGATE),
+            (second_space,p.VREAD|p.VMETA|p.VDELEGATE))),
+           'MULTI-ROOT','B receives two independently delegated ObjectSpace roots')
+    p.obj_close(second_space)
     p.obj_close(root_space)
     p.obj_close(gh)
 
