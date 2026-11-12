@@ -181,6 +181,12 @@ int main(int argc, char **argv) {
     gc_init(heap, (char *)heap + sizeof(heap));
     mp_pystack_init(pystack, (char *)pystack + sizeof(pystack));
     mp_init();
+    /* Expose native boot mode through the standard sys.argv interface. */
+    if (nativeboot || nativerepl) {
+        mp_obj_list_append(mp_sys_argv, mp_obj_new_str("micropython", 11));
+        mp_obj_list_append(mp_sys_argv,
+            mp_obj_new_str(nativeboot ? "-N" : "-I", 2));
+    }
     syscallt0checkpoint();
     if (ovol != NULL && p9_space_o(ovol) < 0) {
         if (nativeboot || nativerepl)

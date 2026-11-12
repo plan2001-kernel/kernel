@@ -64,6 +64,13 @@ make_o_image() {
 		qob_die "seed compilation failed for $src"
 	}
 	[ -z "$raw" ] || cp "$raw" "$seed/raw"
+	if [ "$raw" = "$OUT/corrupt.raw" ]; then
+		# Owner-aware flat volume: append allocator and owner-mode state.
+		python3 - "$seed/alloc" <<'PY'
+import pathlib, struct, sys
+pathlib.Path(sys.argv[1]).write_bytes(b"OALLOC01" + struct.pack(">Q", 64) + b"OOWNMODE" + struct.pack(">Q", 1))
+PY
+	fi
 	"$QOB_FORMAT" --seed "$seed" --size "$QOB_MIB" "$img" >"$log.fmt" 2>&1 || {
 		cat "$log.fmt" >&2
 		qob_die "O image ream failed for $src"
@@ -102,6 +109,34 @@ run_verify() {
 		'PLAN2001-O: REPL READY' repl "" "$expect"
 }
 
+set_boot_mode() {
+    local dir=$1 repl=$2 puuid
+    puuid=$(cat "$dir/disk.partuuid")
+    qob_write_ini "$dir/plan9.ini" "$puuid" /9pc64.elf "$repl"
+    qob_make_esp "$dir/plan9.ini" "$dir/esp.img"
+    # Rewrite only the EFI partition, preserving the crashed GE/O image.
+    dd if="$dir/esp.img" of="$dir/disk.img" bs=512 \
+        seek="$QOB_ESP_START_LBA" conv=notrunc status=none
+}
+
+assert_pre_migration_image() {
+    local dir=$1
+    qob_extract_o "$dir/disk.img" "$dir/o-before.img" "$dir/disk.layout"
+    python3 "$ROOT/tools/host/oinspect.py" "$dir/o-before.img" >"$dir/o-before.json"
+    python3 - "$dir" <<'PY'
+import json, pathlib, sys
+d = pathlib.Path(sys.argv[1])
+doc = json.loads((d / 'o-before.json').read_text())
+assert doc['owner_mode'] is False, 'checkpoint 104 published owner mode'
+n = doc['volume']['N']
+for i in range(120):
+    oid = '%016x' % (0x10000000000 + i)
+    published = [r for r in doc['owners'].get(oid, []) if r['version'] <= n]
+    assert not published, ('checkpoint 104 published an owner', oid, published)
+print('RECOVERY-IMAGE case=104 unpublished-owner-batch=PASS')
+PY
+}
+
 assert_migrated_image() {
 	local dir=$1
 	qob_extract_o "$dir/disk.img" "$dir/o-after.img" "$dir/disk.layout"
@@ -116,7 +151,7 @@ import pathlib
 import sys
 d = pathlib.Path(sys.argv[1])
 doc = json.load(open(d / 'o-after.json'))
-assert doc['owner_mode'] is True, 'legacy Space migration did not publish owner mode'
+assert doc['owner_mode'] is True, 'flat-volume owner upgrade did not publish owner mode'
 N = doc['volume']['N']
 owners = doc['owners']
 base, count = 0x10000000000, 120
@@ -133,8 +168,8 @@ for i in range(count):
     live_owners.add(recs[0]['owner'])
 assert len(live_owners) == 1, ('live objects have different owners', live_owners)
 empty = json.load(open(d / 'o-after-3.json'))
-assert empty['owner_mode'] is True, 'empty legacy Space was not upgraded'
-print('RECOVERY-IMAGE legacy live=%d tombstones=%d owner=%s PASS' %
+assert empty['owner_mode'] is True, 'flat volume owner mode was not durable'
+print('RECOVERY-IMAGE flat-upgrade live=%d tombstones=%d owner=%s PASS' %
       (count - 12, 12, live_owners.pop()))
 PY
 }
@@ -182,10 +217,13 @@ done
 
 make_case migrate-104 "$legacy_raw" migrate-104
 dir=$CASE_DIR
+set_boot_mode "$dir" 0
 if ! run_crash "$dir" crash1; then
 	qob_show_tail "$dir/boot-crash1.log"
 	qob_die "migration crash boot FAIL: $QOB_BOOT_REASON"
 fi
+assert_pre_migration_image "$dir"
+set_boot_mode "$dir" 1
 if ! run_verify "$dir" verify1 '^RECOVERY-VERIFY-FINISH case=104 PASS'; then
 	qob_show_tail "$dir/boot-verify1.log"
 	qob_die "migration verify boot FAIL: $QOB_BOOT_REASON"
