@@ -11,10 +11,9 @@ struct Ohand {
     Ref ref;
     Ohand *origin; /* pinned origin of a derived GE/O grant */
     QLock gate;      /* admission + revocation serialization */
-    void *sp;        /* opaque flat O-volume transaction handle */
+    void *tx;        /* opaque flat O-volume transaction handle */
     uvlong oid;      /* 0 for volume-wide, nonzero for one object */
     int rights, bootstrap, revoked, caps;
-    char space[256]; /* transient bootstrap name, not on-disk SpaceID */
 #ifdef PLAN2001_LIFECYCLE_DIAG
     ulong diagid;
 #endif

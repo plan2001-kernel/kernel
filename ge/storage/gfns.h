@@ -94,20 +94,13 @@ void	gestart(void*);
 void	gesync(Gefs*, int);
 void*	oopenblk(char*, void*, vlong, vlong, int,
 		long (*)(void*, void*, long, uvlong, int), int (*)(void*));
-/* Plan2001 Stage 4: opaque wrappers for port/gefs/sysgefs.c's syscalls
- * (6c's cross-module signatures for an incomplete struct differ) */
-void*	onativeopen(void*, char*);
-long	onativeget(void*, uvlong, void*, long, uvlong*);
-void	onativeput(void*, uvlong, void*, long, uvlong);
-long	onativecreate(void*, void*, long, uvlong*, uvlong);
-uvlong	onativecommit(void*);
-void	onativeclose(void*);
-Ospace*	ospaceopen(Gefs*, char*);
-void	ospaceclose(Ospace*);
-long	ospaceget(Ospace*, uvlong, void*, long, uvlong*);
-void	ospaceput(Ospace*, uvlong, void*, long, uvlong);
-long	ospacecreate(Ospace*, void*, long, uvlong*, uvlong);
-uvlong	ospacecommit(Ospace*);
+/* Each handle owns a transaction on the one flat OID tree. */
+void*	oobjopen(void*);
+long	oobjget(void*, uvlong, void*, long, uvlong*);
+void	oobjput(void*, uvlong, void*, long, uvlong);
+long	oobjcreate(void*, void*, long, uvlong*, uvlong);
+uvlong	oobjcommit(void*);
+void	oobjclose(void*);
 void	loadlog(Arena*, Bptr);
 void	flushlog(Arena*);
 void	compresslog(Arena*);

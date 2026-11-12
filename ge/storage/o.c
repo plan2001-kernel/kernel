@@ -7,9 +7,7 @@
 #include "gefs.h"
 #include "objint.h"
 
-/* Reject FS profiles, unknown versions and damaged volume headers before
- * granting any O handle. The transitional "init" selector belongs only to
- * the phase-3 API wrapper, not to the GE/O on-disk format. */
+/* Reject non-O profiles and unknown versions before accessing flat OIDs. */
 static void*
 oopen0(char *dev, void *oblk, vlong off, vlong size, int rw,
 	long (*oblkrw)(void*, void*, long, uvlong, int),
@@ -42,48 +40,3 @@ oopenblk(char *dev, void *oblk, vlong off, vlong size, int rw,
 	return oopen0(dev, oblk, off, size, rw, oblkrw, oblkflush);
 }
 
-/* Plan2001 Stage 4: the port's syscall boundary.  These keep Ospace and
- * Gefs opaque to sysgefs.c, whose 6c signatures for an incomplete
- * struct would otherwise differ from this package's. */
-void*
-onativeopen(void *v, char *name)
-{
-	return ospaceopen(v, name);
-}
-
-uvlong
-onativesid(void *v)
-{
- USED(v);
-	return 0; /* flat volume: no SpaceID */
-}
-
-long
-onativeget(void *sp, uvlong oid, void *buf, long n, uvlong *ver)
-{
-	return ospaceget(sp, oid, buf, n, ver);
-}
-
-void
-onativeput(void *sp, uvlong oid, void *buf, long n, uvlong owner)
-{
-	ospaceput(sp, oid, buf, n, owner);
-}
-
-long
-onativecreate(void *sp, void *buf, long n, uvlong *oid, uvlong owner)
-{
-	return ospacecreate(sp, buf, n, oid, owner);
-}
-
-uvlong
-onativecommit(void *sp)
-{
-	return ospacecommit(sp);
-}
-
-void
-onativeclose(void *sp)
-{
-	ospaceclose(sp);
-}

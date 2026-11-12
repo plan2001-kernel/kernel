@@ -10,7 +10,6 @@ typedef struct Key	Key;
 typedef struct Kvp	Kvp;
 typedef struct Limbo	Limbo;
 typedef struct Msg	Msg;
-typedef struct Ospace	Ospace;
 typedef struct Osweepmsg	Osweepmsg;
 typedef struct Qent	Qent;
 typedef struct Scan	Scan;
@@ -622,16 +621,6 @@ struct Arena {
 	Bptr	loghd;		/* allocation log */
 	Blk	*logtl;		/* end of the log, open for writing */
 	Syncq	*sync;
-};
-
-/*
- * Flat O-volume transaction context, without SpaceID.
- * OID allocation, versioning and writer exclusivity are volume-scoped.
- */
-struct Ospace {
-	Gefs	*fs;
-	QLock	lk;
-	void	*tx;		/* obj.c's Otx, while the handle has one */
 };
 
 enum {

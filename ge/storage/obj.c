@@ -27,7 +27,7 @@ enum {
  * Native OID allocation state. It is appended to the volume header's
  * existing user part, so it advances in the same Kobj transaction as
  * the object it names; no allocator record is itself an OID, and no
- * ordinary ospaceput can reach it.  The first 72 bytes are the
+ * ordinary oobjput can reach it.  The first 72 bytes are the
  * pre-existing seed header (Environment digest and its next value),
  * kept for compatibility; the allocator starts below at offset 72.
  */
@@ -505,8 +505,7 @@ objtxcommit(Otx *tx)
  * PoC's single writer.
  */
 
-static Otx*	ospacetx(Ospace*);
-static void	ospaceputdata(Otx*, uvlong, void*, long);
+static void	objputdata(Otx*, uvlong, void*, long);
 static void	objunpubclear(Otx*, uvlong, uvlong, int);
 static void	ownerensure(Otx*, Ohdr*);
 static void	ownerassign(Otx*, Ohdr*, uvlong, uvlong);
@@ -519,7 +518,7 @@ static void	packownerkey(char*, uvlong, uvlong);
  * A candidate is never handed out if it falls in a reserved range or if
  * any published record (including a tombstone) already names it.  The
  * latter is checked in the same serialized transaction as the write, so
- * an explicitly numbered ospaceput in the candidate range is skipped
+ * an explicitly numbered oobjput in the candidate range is skipped
  * even though it did not advance the high-water mark.
  */
 static int
@@ -628,8 +627,9 @@ objunpubclear(Otx *tx, uvlong oid, uvlong upto, int owners)
  * with one commit; the caller sees the OID only after gesync succeeds.
  */
 long
-ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
+oobjcreate(void *handle, void *data, long n, uvlong *oid, uvlong owner)
 {
+	Otx *sp = handle;
 	Gefs *fs;
 	Otx *tx;
 	Ohdr h;
@@ -653,14 +653,14 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 	qlock(&fs->mutlk);
 	if(waserror()){
 		if(!waserror()){
-			if(sp->tx != nil)
-				objtxabort(sp->tx);
+			if(sp->ver != 0)
+				objtxabort(sp);
 			poperror();
 		}
 		qunlock(&fs->mutlk);
 		nexterror();
 	}
-	tx = ospacetx(sp);
+	tx = sp;
 	objtxbegin(tx);
 	if(!gethdr(&fs->snap, &h))
 		error("O: no volume header");
@@ -686,7 +686,7 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 
 	/* Payload and immutable owner are staged in the same version and
 	 * become visible with the one header commit. */
-	ospaceputdata(tx, cand, data, n);
+	objputdata(tx, cand, data, n);
 	if(ownerfault == 1){
 		ownerfault = 0;
 		error("ownerfault: before owner staging");
@@ -722,40 +722,26 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 	return 0;
 }
 
-Ospace*
-ospaceopen(Gefs *fs, char *name)
+/* One opaque transaction per capability, no named storage subspaces. */
+void*
+oobjopen(void *volume)
 {
-	Ospace *sp;
-
-	if(!(fs->flag & Ovolflag))
-		error("O: not an O volume");
-	/* Transitional boot name; no persistent name catalog exists. */
-	if(name == nil || strcmp(name, "init") != 0)
-		error(Ebadarg);
-	sp = emalloc(sizeof(Ospace), 1);
-	sp->fs = fs;
-	return sp;
-}
-
-static Otx*
-ospacetx(Ospace *sp)
-{
+	Gefs *fs = volume;
 	Otx *tx;
 
-	if((tx = sp->tx) != nil)
-		return tx;
+	if(fs == nil || !(fs->flag & Ovolflag))
+		error("O: not an O volume");
 	tx = emalloc(sizeof(Otx), 1);
-	tx->fs = sp->fs;
-	tx->tree = &sp->fs->snap;
+	tx->fs = fs;
+	tx->tree = &fs->snap;
 	tx->id = -1;
-	sp->tx = tx;
 	return tx;
 }
 
 static uvlong objlegacyowner;
 
 void
-ospaceownersetlegacy(uvlong owner)
+oobjownersetlegacy(uvlong owner)
 {
 	objlegacyowner = owner;
 }
@@ -1068,8 +1054,9 @@ ownerassign(Otx *tx, Ohdr *h, uvlong oid, uvlong owner)
  * so a missing record is corruption, not a legacy root object.
  */
 int
-ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner, int *required)
+oobjownerget(void *handle, uvlong oid, uvlong *owner, int *required)
 {
+	Otx *sp = handle;
 	Otx *tx;
 	Ohdr h;
 
@@ -1082,7 +1069,7 @@ ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner, int *required)
 		qunlock(&sp->lk);
 		nexterror();
 	}
-	tx = ospacetx(sp);
+	tx = sp;
 	if(!gethdr(tx->tree, &h)){
 		poperror();
 		qunlock(&sp->lk);
@@ -1101,7 +1088,7 @@ ospaceownerget(Ospace *sp, uvlong oid, uvlong *owner, int *required)
 }
 
 static void
-ospaceputdata(Otx *tx, uvlong oid, void *data, long n)
+objputdata(Otx *tx, uvlong oid, void *data, long n)
 {
 	char *p;
 	long k;
@@ -1134,8 +1121,9 @@ ospaceputdata(Otx *tx, uvlong oid, void *data, long n)
 }
 
 void
-ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
+oobjput(void *handle, uvlong oid, void *data, long n, uvlong owner)
 {
+	Otx *sp = handle;
 	Otx *tx;
 	Ohdr h;
 
@@ -1146,7 +1134,7 @@ ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
 		qunlock(&sp->lk);
 		nexterror();
 	}
-	tx = ospacetx(sp);
+	tx = sp;
 	qlock(&sp->fs->mutlk);
 	if(waserror()){
 		if(!waserror()){
@@ -1166,7 +1154,7 @@ ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
 	ownerensure(tx, &h);
 	objtxflush(tx);
 	ownerassign(tx, &h, oid, owner);
-	ospaceputdata(tx, oid, data, n);
+	objputdata(tx, oid, data, n);
 	objtxflush(tx);
 	qunlock(&sp->fs->mutlk);
 	poperror();
@@ -1175,8 +1163,9 @@ ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
 }
 
 uvlong
-ospacecommit(Ospace *sp)
+oobjcommit(void *handle)
 {
+	Otx *sp = handle;
 	Gefs *fs = sp->fs;
 	Otx *tx;
 	Ohdr h;
@@ -1192,7 +1181,8 @@ ospacecommit(Ospace *sp)
 		qunlock(&sp->lk);
 		nexterror();
 	}
-	if((tx = sp->tx) == nil || tx->ver == 0){
+	tx = sp;
+	if(tx->ver == 0){
 		gethdr(&fs->snap, &h);
 		v = h.n;
 	}else{
@@ -1224,8 +1214,9 @@ ospacecommit(Ospace *sp)
  * has no partial-read object handle.
  */
 long
-ospaceget(Ospace *sp, uvlong oid, void *buf, long nbuf, uvlong *ver)
+oobjget(void *handle, uvlong oid, void *buf, long nbuf, uvlong *ver)
 {
+	Otx *sp = handle;
 	Gefs *fs;
 	Tree *t;
 	Scan *s;
@@ -1337,8 +1328,9 @@ ospaceget(Ospace *sp, uvlong oid, void *buf, long nbuf, uvlong *ver)
 }
 
 void
-ospaceclose(Ospace *sp)
+oobjclose(void *handle)
 {
+	Otx *sp = handle;
 	Gefs *fs;
 	Otx *tx;
 
@@ -1346,8 +1338,7 @@ ospaceclose(Ospace *sp)
 		return;
 	fs = sp->fs;
 	qlock(&sp->lk);
-	tx = sp->tx;
-	sp->tx = nil;
+	tx = sp;
 	if(tx != nil && tx->ver != 0){
 		qlock(&fs->mutlk);
 		if(waserror()){
@@ -1360,8 +1351,6 @@ ospaceclose(Ospace *sp)
 			poperror();
 		}
 	}
-	if(tx != nil)
-		free(tx);
 	qunlock(&sp->lk);
 	free(sp);
 }

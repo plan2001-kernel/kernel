@@ -26,23 +26,20 @@ void	gestart(void*);
 void*	oopenblk(char*, void*, vlong, vlong, int,
 		long (*)(void*, void*, long, uvlong, int), int (*)(void*));
 typedef struct Gefs Gefs;
-typedef struct Ospace Ospace;
 typedef struct Oblock Oblock;
 struct Oblock {
 	SDunit	*unit;
 	vlong	start;		/* partition byte offset in the unit */
 	vlong	size;		/* partition bytes, for bounds */
 };
-void*	onativeopen(void*, char*);
-uvlong onativesid(void*);
-long	onativeget(void*, uvlong, void*, long, uvlong*);
-void	onativeput(void*, uvlong, void*, long, uvlong);
-long	onativecreate(void*, void*, long, uvlong*, uvlong);
-long	ospaceget(void*, uvlong, void*, long, uvlong*);
-uvlong	onativecommit(void*);
-void	onativeclose(void*);
-int	ospaceownerget(void*, uvlong, uvlong*, int*);
-void	ospaceownersetlegacy(uvlong);
+void*	oobjopen(void*);
+long	oobjget(void*, uvlong, void*, long, uvlong*);
+void	oobjput(void*, uvlong, void*, long, uvlong);
+long	oobjcreate(void*, void*, long, uvlong*, uvlong);
+uvlong	oobjcommit(void*);
+void	oobjclose(void*);
+int	oobjownerget(void*, uvlong, uvlong*, int*);
+void	oobjownersetlegacy(uvlong);
 extern int ownerfault;
 extern int ownercrash;
 extern uvlong ownerroot(void);
@@ -312,7 +309,7 @@ osvolumeopen(char *p, int n)
    }
    if(k!=16 || half) error(Ebadarg);
  }
-	ospaceownersetlegacy(ownerroot());
+	oobjownersetlegacy(ownerroot());
 	bootowner = up;
 	bootpid = up->pid;
 	/* Trusted boot registration: the actual autostart action remains the
@@ -342,7 +339,7 @@ okernelvol(char *spec)
 	v = ovolopenblk(spec, dev, sizeof dev, &off, &size, 0);
 	print("o: O volume %s@%lld, %lld MiB, opened read-only (kernel-only)\n",
 		dev, off, size/MiB);
-	ospaceownersetlegacy(ownerroot());
+	oobjownersetlegacy(ownerroot());
 	gestart(v);
 	addvol(v);
 	ovolbytes = size;
@@ -367,8 +364,8 @@ ohandput(Ohand *oh)
 	 * Ospace and origin pin are separate live resources. */
 	delegate = oh->caps == 2;
 #endif
-	if(oh->sp != nil){
-		onativeclose(oh->sp);
+	if(oh->tx != nil){
+		oobjclose(oh->tx);
 #ifdef PLAN2001_LIFECYCLE_DIAG
 		if(delegate)
 			lifedelegate('s', oh->diagid, -1);
@@ -439,49 +436,22 @@ oprocexec(Proc *p)
  USED(p);
 }
 
-/*
- * Authorized Space capability acquisition for the canonical
- * OBJOPEN(ObjOpenSpace) path.  The caller owns the returned
- * reference.  The name is a bounded Space name, not a pathname; bootstrap
- * authority (the mounted O volume owner) is still required.
- */
-static Ohand*
-osopenspacecore(char *p, int n, int user)
+/* Bootstrap acquires an authorized flat-volume capability, not a SpaceID. */
+Ohand*
+osopenvolume(void)
 {
-	char name[256];
 	Ohand *oh;
 
-	if(!oboot()) error(Eperm);
-	if(ovol == nil || p == nil || n <= 0 || n >= (int)sizeof name)
-		error(Ebadarg);
-	if(user)
-		validaddr((uintptr)p, n, 0);
-	memmove(name, p, n);
-	name[n] = 0;
-	if(memchr(name, 0, n) != nil) error(Ebadarg);
+	if(!oboot() || ovol == nil)
+		error(Eperm);
 	oh = smalloc(sizeof *oh);
 	oh->ref.ref = 1;
 	if(waserror()){ ohandput(oh); nexterror(); }
-	oh->sp = onativeopen(ovol, name);
-	strcpy(oh->space, name);
+	oh->tx = oobjopen(ovol);
 	oh->rights = Oall;
 	oh->bootstrap = 1;
 	poperror();
 	return oh;
-}
-
-Ohand*
-osopenspace(char *p, int n)
-{
-	return osopenspacecore(p, n, 1);
-}
-
-/* Trusted kernel/registered-program Space open; the name is a kernel
- * string and no user-address validation is performed. */
-Ohand*
-osopenspacek(char *p, int n)
-{
-	return osopenspacecore(p, n, 0);
 }
 
 enum {
@@ -515,7 +485,7 @@ osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
 	if(checkintegrity)
 		osownercheck(oh, oid);
 	if((buf = malloc(max)) == nil) error(Enomem);
-	n = onativeget(oh->sp, oid, buf, max, &v);
+	n = oobjget(oh->tx, oid, buf, max, &v);
 	if(n < 0) error("oexec: no such object");
 	if(ver != nil) *ver = v;
  *bp = buf;
@@ -570,13 +540,6 @@ oshandrights(Ohand *oh)
 	return oh == nil ? 0 : oh->rights;
 }
 
-uvlong
-ossid(Ohand *oh)
-{
-	USED(oh);
-	return 0; /* flat volume; no SpaceID */
-}
-
 void
 osvolumeid(Ohand *oh, uchar *out)
 {
@@ -603,15 +566,13 @@ oscopycap(Ohand *src, uvlong oid)
 	n->oid = oid;
 	n->bootstrap = 0;
 	n->caps = 1;
-	memmove(n->space, src->space, sizeof n->space);
-	n->space[sizeof n->space - 1] = 0;
 	if(waserror()){
 		free(n);
 		nexterror();
 	}
-	n->sp = onativeopen(ovol, n->space);
+	n->tx = oobjopen(ovol);
 	poperror();
-	if(n->sp == nil){
+	if(n->tx == nil){
 		free(n);
 		error("O: capability open failed");
 	}
@@ -653,15 +614,13 @@ oscopycapdelegate(Ohand *src, int rights)
 	n->oid = 0;
 	n->bootstrap = 0;
 	n->caps = 2;
-	memmove(n->space, src->space, sizeof n->space);
-	n->space[sizeof n->space - 1] = 0;
 	if(waserror()){
 		free(n);
 		nexterror();
 	}
-	n->sp = onativeopen(ovol, n->space);
+	n->tx = oobjopen(ovol);
 	poperror();
-	if(n->sp == nil){
+	if(n->tx == nil){
 		free(n);
 		error("O: capability open failed");
 	}
@@ -705,14 +664,14 @@ osownerof(Ohand *oh, uvlong oid)
 	uvlong owner;
 	int required;
 
-	if(oh == nil || oh->sp == nil || oid == 0)
+	if(oh == nil || oh->tx == nil || oid == 0)
 		return ownerroot();
-	if(ospaceownerget(oh->sp, oid, &owner, &required))
+	if(oobjownerget(oh->tx, oid, &owner, &required))
 		return owner;
 	/* An absent or tombstoned OID has no owner to report.  It is not a
 	 * live object missing metadata; opening it yields a handle whose
 	 * read reports absence.  A live object with no record is corruption. */
-	if(required && ospaceget(oh->sp, oid, nil, 0, nil) >= 0)
+	if(required && oobjget(oh->tx, oid, nil, 0, nil) >= 0)
 		error("O: corrupt object owner metadata");
 	return ownerroot();
 }
@@ -737,10 +696,10 @@ osownercheckcore(Ohand *oh, uvlong oid)
 
 	if(oid == 0)
 		return;
-	if(ospaceownerget(oh->sp, oid, &owner, &required))
+	if(oobjownerget(oh->tx, oid, &owner, &required))
 		return;
 	/* A missing OID may be created with an Owrite capability. */
-	if(ospaceget(oh->sp, oid, nil, 0, nil) < 0)
+	if(oobjget(oh->tx, oid, nil, 0, nil) < 0)
 		return;
 	if(required)
 		error("O: corrupt object owner metadata");
@@ -795,7 +754,7 @@ osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 	}
 	oauthorize(oh, oid, Oread);
 	osownercheck(oh, oid);
-	r = onativeget(oh->sp, oid, buf, n, &v);
+	r = oobjget(oh->tx, oid, buf, n, &v);
 	poperror();
 	qunlock(ohgate(oh));
 	if(ver != nil)
@@ -819,7 +778,7 @@ oswritehand(Ohand *oh, uvlong oid, void *buf, long n)
 	}
 	oauthorize(oh, oid, Owrite);
 	osownercheckcreate(oh, oid);
-	onativeput(oh->sp, oid, buf, n,
+	oobjput(oh->tx, oid, buf, n,
 		up != nil && up->owner != 0 ? up->owner : ownerroot());
 	poperror();
 	qunlock(ohgate(oh));
@@ -846,7 +805,7 @@ oscreatehandcore(Ohand *oh, void *buf, long n, uvlong *oid, uvlong owner)
 	}
 	oauthorize(oh, oh->oid, Ocreate);
 	v = 0;
-	onativecreate(oh->sp, buf, n, &v, owner);
+	oobjcreate(oh->tx, buf, n, &v, owner);
 	poperror();
 	qunlock(ohgate(oh));
 	*oid = v;
@@ -883,7 +842,7 @@ oscommithand(Ohand *oh, uvlong *ver)
 		nexterror();
 	}
 	oauthorize(oh, oh->oid, Ocommit);
-	v = onativecommit(oh->sp);
+	v = oobjcommit(oh->tx);
 	poperror();
 	qunlock(ohgate(oh));
 	if(ver != nil)
@@ -927,7 +886,7 @@ osrevokehand(Ohand *h)
  if(h->bootstrap) error(Eperm);
  if(h->origin) h->origin->revoked=1;
  h->revoked=1;
- if(h->sp){onativeclose(h->sp);h->sp=nil;}
+ if(h->tx){oobjclose(h->tx);h->tx=nil;}
  poperror();qunlock(ohgate(h));
 }
 

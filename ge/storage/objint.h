@@ -37,7 +37,8 @@ struct Oent {
 };
 
 struct Otx {
-	Gefs	*fs;		/* Plan2001: its volume */
+	Gefs	*fs;		/* flat GE/O volume */
+	QLock	lk;		/* transaction handle serialization */
 	Otx	*next;		/* the active ones, under mutlk */
 	Tree	*tree;		/* the volume's snapshot tree */
 
@@ -71,8 +72,8 @@ Tree*	txroot(Otx*);
 int	gethdr(Tree*, Ohdr*);
 uvlong	keyver(char*);
 void	objtxsweep(Otx*, char*, int, int (*)(char*, int, void*), void*);
-int	ospaceownerget(Ospace*, uvlong, uvlong*, int*);
-void	ospaceownersetlegacy(uvlong);
+int	oobjownerget(void*, uvlong, uvlong*, int*);
+void	oobjownersetlegacy(uvlong);
 void	objtxaddmsg(Otx*, int, char*, int, char*, int);
 void	objtxbegin(Otx*);
 void	objtxputchunk(Otx*);
