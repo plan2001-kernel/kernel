@@ -2,7 +2,7 @@
  * Volatile object and capability-system userspace ABI.
  *
  * Fixed-width, little-endian layout for amd64.  A volatile identity is
- * (incarnation, space, oid): the incarnation is per-boot, the space is a
+ * (incarnation, space, oid): the incarnation is per-boot, and space is a
  * caller-chosen scope tag (0 is the runtime/default scope), and the oid is
  * allocated monotonically within that boot.  An identity never implies GE/O
  * persistence and is never reused while the boot incarnation is alive.
@@ -29,8 +29,8 @@ enum {
 	Vwrite		= 1<<8,	/* write stream/GE bytes where the provider allows */
 	Vaccept		= 1<<9,	/* reserved historical connection right */
 	Vconnect	= 1<<10,	/* reserved historical connection right */
-	Vcreate		= 1<<11,	/* create persistent objects in an O Space */
-	Vcommit		= 1<<12,	/* commit a persistent O Space transaction */
+	Vcreate		= 1<<11,	/* create persistent objects in a GE/O volume */
+	Vcommit		= 1<<12,	/* commit a GE/O volume transaction */
 	Vexecute	= 1<<13,	/* execute/load a GE/O object into a child */
 	Vobserve	= 1<<14,	/* read a process completion record and wait */
 	Vall		= 0xffff,
@@ -39,7 +39,7 @@ enum {
 enum {
 	VkindBytes	= 0,	/* immutable byte content, including empty */
 	VkindGe		= 3,	/* persistent GE/O object capability (1,2 reserved) */
-	VkindSpace	= 4,	/* authorized open O Space capability */
+	VkindGeVolume	= 4,	/* authorized flat GE/O volume capability */
 	VkindUart	= 7,	/* native UART port, opened through the device catalog */
 	VkindKbd	= 8,	/* exclusive PS/2 scan-code source */
 	VkindUsbEp	= 10,	/* catalog-opened USB endpoint reference */
@@ -58,8 +58,8 @@ enum {
  * Providers 1, 2 and 6 are reserved historical TCP6/UDP6 identifiers. */
 enum {
 	VopenGe		= 3,
-	VopenSpace	= 4,	/* authorized name -> open O Space */
-	VopenGeSpace	= 5,	/* authorized open O Space + OID -> GE object */
+	VopenGeVolume	= 4,	/* authorized open of the activated GE/O volume */
+	VopenGeOid	= 5,	/* authorized GE/O volume handle + OID -> object */
 };
 
 /* Generic object I/O operations for VOBJIO. */
@@ -106,10 +106,10 @@ typedef struct VobjListRec {
 	unsigned long long	oid;
 } VobjListRec;
 
-typedef struct VobjGeReq {
-	int			ospace;
+typedef struct VobjGeOidReq {
+	int			volume;
 	unsigned int		rights;
 	unsigned long long	oid;
-} VobjGeReq;
+} VobjGeOidReq;
 
 #endif /* PLAN2001_ABI_VOBJ_H */

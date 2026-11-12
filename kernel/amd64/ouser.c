@@ -38,7 +38,6 @@ struct Oargs
 	long	argc;
 	long	vollen;
 	char	volspec[128];
-	char	space[8];
 	char	argv[Maxargv][128];
 };
 
@@ -210,25 +209,21 @@ ouserproc(void *arg)
 	memset(&oa, 0, sizeof oa);
 	oa.vollen = obootvollen;
 	memmove(oa.volspec, obootvol, obootvollen);
-	memmove(oa.space, "init", 4);
 	oa.oid = bootoid;
 	if(bootismpy){
-		oa.argc = 6;
+		oa.argc = 4;
 		memmove(oa.argv[0], "micropython", 12);
 		memmove(oa.argv[1], "-O", 3);
 		memmove(oa.argv[2], obootvol, obootvollen+1);
-		memmove(oa.argv[3], "-S", 3);
-		memmove(oa.argv[4], "init", 5);
 		repl = getconf("obootrepl");
 		if(repl != nil && strcmp(repl, "1") == 0)
-			memmove(oa.argv[5], "-I", 3);
+			memmove(oa.argv[3], "-I", 3);
 		else
-			memmove(oa.argv[5], "-N", 3);
+			memmove(oa.argv[3], "-N", 3);
 	} else {
-		oa.argc = 3;
+		oa.argc = 2;
 		memmove(oa.argv[0], "oexec", 6);
 		memmove(oa.argv[1], obootvol, obootvollen+1);
-		memmove(oa.argv[2], "init", 5);
 	}
 
 	argp = USTKTOP-2*BY2PG;

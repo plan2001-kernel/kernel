@@ -91,7 +91,7 @@ sysobjcreate(sysva_list list)
 		VobjId vid;
 		int h;
 
-		h = vobjcreatege((int)space, buf, n, nil, nil);
+		h = vobjcreatege((int)space, buf, n, nil);
 		if(id != nil){
 			validaddr((uintptr)id, sizeof(ObjId), 1);
 			vobjidentity(h, &vid);
@@ -131,16 +131,16 @@ sysobjopen(sysva_list list)
 		if(hr.reserved != 0)
 			error(Ebadarg);
 		return vobjopenhandle(hr.handle, rights, (VobjId*)id);
-	case ObjOpenSpace:
-		if(req == nil || len <= 0)
+	case ObjOpenVolume:
+		if(req != nil || len != 0)
 			error(Ebadarg);
-		return vobjopenstream(VopenSpace, req, len, rights, (VobjId*)id);
-	case ObjOpenGeSpace:
-		/* The on-wire request is layout-compatible with VobjGeReq, so the
+		return vobjopenstream(VopenGeVolume, req, len, rights, (VobjId*)id);
+	case ObjOpenGeOid:
+		/* The on-wire request is layout-compatible with VobjGeOidReq, so the
 		 * provider can validate and copy the user pointer itself. */
-		if(req == nil || len != sizeof(ObjOpenGeSpaceReq))
+		if(req == nil || len != sizeof(ObjOpenGeOidReq))
 			error(Ebadarg);
-		return vobjopenstream(VopenGeSpace, req, (long)sizeof(VobjGeReq),
+		return vobjopenstream(VopenGeOid, req, (long)sizeof(VobjGeOidReq),
 			rights, (VobjId*)id);
 	case ObjOpenConsole:
 		if(req == nil || len != sizeof(ObjOpenConsoleReq))

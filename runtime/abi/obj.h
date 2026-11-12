@@ -32,8 +32,8 @@ struct Ospawn;
  * ObjOpenDevices/ObjOpenDevice. */
 enum {
 	ObjOpenHandle		= 4,
-	ObjOpenSpace		= 6,	/* authorized name -> open O Space handle */
-	ObjOpenGeSpace		= 7,	/* Space handle + OID -> persistent object */
+	ObjOpenVolume		= 6,	/* no request; boot-owner volume grant */
+	ObjOpenGeOid		= 7,	/* volume capability + OID -> object */
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
@@ -328,7 +328,7 @@ typedef struct ObjDeviceResult {
 } ObjDeviceResult;
 
 /* obj_invoke(ObjOpPutOid): replace the content of one explicitly named
- * persistent OID through a VkindSpace Handle carrying Vwrite.  arg0 is the
+ * persistent OID through a VkindGeVolume Handle carrying Vwrite.  arg0 is the
  * OID; in/inlen are the bounded payload.  It uses the same Ohand Owrite
  * authority and per-Space gate as OSPACEPUT and does NOT commit; the pending
  * write joins the Space transaction until an explicit ObjOpCommit.  The
@@ -367,17 +367,15 @@ typedef struct ObjOpenHandleReq {
 	unsigned int		reserved;
 } ObjOpenHandleReq;
 
-/* obj_open(ObjOpenSpace): a bounded name of an existing O Space.  The name
- * is not a path and grants nothing by itself; osopenspace() applies the
- * bootstrap/volume authorization and returns an attenuated handle. */
-/* obj_open(ObjOpenGeSpace): reopen an existing persistent object through an
- * authorized Space handle.  space is a process-local VkindSpace handle, not
- * an OID or a global name. */
-typedef struct ObjOpenGeSpaceReq {
-	int			space;
+/* obj_open(ObjOpenVolume) takes (NULL, 0). Only the active boot owner
+ * can mint this volume-wide capability. Its descendants are attenuated.
+ * obj_open(ObjOpenGeOid) requires a process-local authorized volume handle
+ * and an OID. OID knowledge never grants access. */
+typedef struct ObjOpenGeOidReq {
+	int			volume;
 	unsigned int		reserved;
 	unsigned long long	oid;
-} ObjOpenGeSpaceReq;
+} ObjOpenGeOidReq;
 
 /* obj_open(ObjOpenDevice) family requirements:
  *
@@ -505,7 +503,7 @@ typedef struct ObjOwnerInfo {
 
 /* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
  * struct Ospawn *options) creates one static x86-64 ELF child from an
- * explicit GE/O Space capability and OID.  The Handle must be a VkindSpace
+ * explicit GE/O Space capability and OID.  The Handle must be a VkindGeVolume
  * Handle carrying Vexecute; the same Ohand Oexecute gate and per-Space
  * authorization as OEXECUTE remain in force.  argv/options are validated by
  * the shared spawn core, including the Ospawn and optional

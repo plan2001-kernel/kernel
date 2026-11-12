@@ -76,7 +76,7 @@ lifeproc(int delta)
 
 /*
  * Delegated caps=2 Space capabilities and the two resources they own: the
- * opened native Ospace and the pinned grant-origin reference.  The host
+ * opened GE/O transaction and the pinned grant-origin reference.  The host
  * parser rejects an unmatched alloc/free for any of the three kinds, so a
  * leaked internal reference that VobjInfo.holds cannot see still fails.
  */

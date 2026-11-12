@@ -60,16 +60,12 @@
 #define	PREAD		50 /* reserved */
 #define	PWRITE		51 /* reserved */
 #define _NSEC		53
-/* OVOLOPEN(54) is RESERVED: privileged bootstrap/administrative volume
- * activation is SYSCTL(144), operation SysctlVolumeOpen. */
+/* 54-59 and 61 remain reserved syscall numbers. Former OSPACE*
+ * entrypoints are deleted; only SYSCTL(SYSCTLVolumeOpen) activates a volume. */
 #define	OVOLOPEN	54 /* reserved */
-#define	OSPACEOPEN	55 /* reserved */
-#define	OSPACEGET	56 /* reserved */
-#define	OSPACEPUT	57 /* reserved */
-#define	OSPACECOMMIT	58 /* reserved */
-#define	OSPACECLOSE	59 /* reserved */
+/* 55-59 reserved */
 #define	OEXECUTE	60
-#define	OSPACECREATE	61 /* reserved */
+/* 61 reserved */
 #define	IOWRITE		62 /* reserved */
 #define	USBOPEN		63 /* reserved */
 #define	USBLIST		64 /* reserved */
@@ -295,7 +291,7 @@ typedef struct ProgramRegisterReq {
 	unsigned int	policy;		/* OWNER_PROGRAM_* flags */
 	unsigned int	namelen;	/* 1..OWNER_PROGRAM_NAME_MAX-1 */
 	unsigned int	ownerlen;	/* 1..OWNER_NAME_MAX-1 */
-	int		space;		/* VkindSpace handle */
+	int		volume;		/* VkindGeVolume handle */
 	unsigned int	reserved;	/* zero */
 	unsigned long long oid;		/* in: source; out: installed copy */
 	unsigned long long owner;	/* out: resolved OwnerID */

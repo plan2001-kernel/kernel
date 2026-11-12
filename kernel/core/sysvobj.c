@@ -465,7 +465,7 @@ vobjput(Vobj *o)
 
 		o->priv = nil;
 		procstatput(st);
-	}else if(o->kind == VkindGe || o->kind == VkindSpace){
+	}else if(o->kind == VkindGe || o->kind == VkindGeVolume){
 		if(o->priv != nil)
 			oshandput(o->priv);
 	}
@@ -1807,7 +1807,7 @@ vlookupin(Proc *p, int handle, int need)
 		vhandput(h);
 		error(Eperm);
 	}
-  if(h->obj->kind==VkindGe || h->obj->kind==VkindSpace){
+  if(h->obj->kind==VkindGe || h->obj->kind==VkindGeVolume){
    if(waserror()){vhandput(h);nexterror();}
    oscheckhand(h->obj->priv);
    poperror();
@@ -1938,7 +1938,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 		if(gen == 0)
 			error("vobj: handle generation exhausted");
 		src = vi->e[i].src->obj;
-		if(src->kind == VkindSpace){
+		if(src->kind == VkindGeVolume){
 			/*
 			 * A bootstrap Space Ohand belongs to the boot owner.
 			 * An explicitly inherited Vexecute capability gets a
@@ -1978,16 +1978,16 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 				error("vobj: injected delegated Ohand failure");
 #endif
 			vgecaplimit(doh, vi->e[i].rights);
-			o = vobjalloc(VkindSpace, src->space, 0);
+			o = vobjalloc(VkindGeVolume, src->space, 0);
 			if(o == nil)
 				error(Enomem);
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 			if(injectfault("inherit-space-vobj"))
 				error("vobj: injected delegated Vobj failure");
 #endif
-			o->provider = VopenSpace;
+			o->provider = VopenGeVolume;
 			o->priv = doh;
-			o->space = ossid(doh);
+			o->space = 0;
 			o->oid = 0;
 			doh = nil;		/* O owns the Ohand now */
 #ifdef	PLAN2001_LIFECYCLE_DIAG
@@ -2107,7 +2107,7 @@ vobjcreat(int kind, uvlong space, void *buf, long n, VobjId *id)
 
 /*
  * Explicit persistent creation behind OBJCREATE(kind=Ge).  The scope
- * argument is an authorized process-local VkindSpace Handle, never a
+ * argument is an authorized process-local VkindGeVolume Handle, never a
  * volatile incarnation tag.  The new object gets its own capability copy so
  * later READ/WRITE/COMMIT use the same Ohand authority and gate.
  */
@@ -2151,13 +2151,13 @@ vobjinstallohand(Ohand *oh, int kind)
 {
  Vobj *o;
  int handle, rights;
- if(oh == nil || (kind != VkindSpace && kind != VkindGe)) error(Ebadarg);
+ if(oh == nil || (kind != VkindGeVolume && kind != VkindGe)) error(Ebadarg);
  rights = vgerights(oh);
  o = vobjalloc(kind, 0, 0);
  if(o == nil) error(Enomem);
  o->priv = oh;
  o->oid = oh->oid;
- o->provider = kind == VkindSpace ? VopenSpace : VopenGe;
+ o->provider = kind == VkindGeVolume ? VopenGeVolume : VopenGe;
  if(waserror()){o->priv=nil;vobjput(o);nexterror();}
  handle = vobjinstallobj(o, rights);
  poperror();
@@ -2179,7 +2179,7 @@ vobjholdohand(int handle, int kind, int rights)
 }
 
 int
-vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
+vobjcreatege(int volumehandle, void *buf, long n, uvlong *oidp)
 {
  Vhand *sh, *h;
  Vobj *o = nil;
@@ -2188,18 +2188,18 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  int handle = -1, rights;
  if(n<0 || n>Vobjpaymax || (n>0 && buf==nil)) error(Ebadarg);
  if(n>0) validaddr((uintptr)buf,n,0);
- sh=vlookup(spacehandle,Vcreate|Vcommit);
+ sh=vlookup(volumehandle,Vcreate|Vcommit);
  if(waserror()){
   if(handle>=0) vobjclosehandle(handle);
   vobjput(o);oshandput(cap);vhandput(sh);nexterror();
  }
- if(sh->obj->kind!=VkindSpace || sh->obj->priv==nil) error(Ebadarg);
+ if(sh->obj->kind!=VkindGeVolume || sh->obj->priv==nil) error(Ebadarg);
  /* Reserve the returned handle and provider before durable allocation.
   * An exhausted table therefore does not create an unreachable object. */
  cap=oscopycap(sh->obj->priv,0);
  rights=vgerights(cap) & sh->rights & ~Vcreate;
  vgecaplimit(cap,rights);
- o=vobjalloc(VkindGe,ossid(cap),0);
+ o=vobjalloc(VkindGe,0,0);
  if(o==nil) error(Enomem);
  o->provider=VopenGe;o->priv=cap;cap=nil;
  /* A newly published GE Handle descends from its authorized O Space. */
@@ -2210,7 +2210,6 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  oscreatehand(sh->obj->priv,buf,n,&oid); /* allocator publishes+syncs */
  o->oid=oid;((Ohand*)o->priv)->oid=oid;
  if(oidp) *oidp=oid;
- if(spaceid) *spaceid=o->space;
  poperror();vobjput(o);vhandput(sh);return handle;
 }
 
@@ -2239,7 +2238,7 @@ vobjcommit(int handle, uvlong *ver)
 
 	o = vobjholdobj(handle, Vcommit);
 	kind = o->kind;
-	if(kind != VkindGe && kind != VkindSpace){
+	if(kind != VkindGe && kind != VkindGeVolume){
 		vobjput(o);
 		error(Ebadarg);
 	}
@@ -2254,7 +2253,7 @@ vobjcommit(int handle, uvlong *ver)
 	return 0;
 }
 
-/* Replace one explicitly named persistent OID through a VkindSpace Handle.
+/* Replace one explicitly named persistent OID through a VkindGeVolume Handle.
  * It uses the same Ohand Owrite authority and Space gate as OSPACEPUT, has
  * no allocation and does not commit: the pending write joins the Space
  * transaction until a separate ObjOpCommit.  A GE Handle cannot name an
@@ -2268,7 +2267,7 @@ vobjputoid(int handle, uvlong oid, void *buf, long n)
 	if(n < 0 || n > 64*1024*1024 || (n > 0 && buf == nil))
 		error(Ebadarg);
 	o = vobjholdobj(handle, Vwrite);
-	if(o->kind != VkindSpace || o->priv == nil){
+	if(o->kind != VkindGeVolume || o->priv == nil){
 		vobjput(o);
 		error(Ebadarg);
 	}
@@ -2300,7 +2299,7 @@ vobjownerinfo(int handle, ObjOwnerInfo *out)
 	owner = o->owner;
 	switch(o->kind){
 	case VkindGe:
-	case VkindSpace:
+	case VkindGeVolume:
 		if(o->priv != nil)
 			owner = osownerof((Ohand*)o->priv, o->oid);
 		break;
@@ -2349,8 +2348,8 @@ vobjinfo(int handle, VobjInfo *out)
 	out->abi_version = VOBJ_ABI_VERSION;
 	out->rights = h->rights;
 	out->holds = o->ref.ref;
-	if((o->kind == VkindGe || o->kind == VkindSpace) && o->priv != nil){
-		out->space = ossid((Ohand*)o->priv);
+	if((o->kind == VkindGe || o->kind == VkindGeVolume) && o->priv != nil){
+		out->space = 0o->priv);
 		out->oid = o->oid;
 		osvolumeid((Ohand*)o->priv, out->volume);
 	}
@@ -4039,7 +4038,7 @@ int
 vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 {
 	Vobj *o;
-	VobjGeReq gr;
+	VobjGeOidReq gr;
 	Ohand *oh;
 	Vcap *sourcecap = nil;
 	int handle, defrights, ceiling;
@@ -4050,11 +4049,11 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		error(Ebadarg);
 	o = nil;
 	oh = nil;
-	if(provider == VopenSpace){
+	if(provider == VopenGeVolume){
 		Ohand *cap;
-		if(req == nil || len <= 0 || len >= 256)
+		if(req != nil || len != 0)
 			error(Ebadarg);
-		cap = osopenspace((char*)req, (int)len);
+		cap = osopenvolume();
 		oh = cap;
  /* Bootstrap authority remains bound to the original volume owner. */
 		defrights = vgerights(oh);
@@ -4064,19 +4063,19 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 			oshandput(oh);
 			error(Eperm);
 		}
-		o = vobjalloc(VkindSpace, 0, 0);
+		o = vobjalloc(VkindGeVolume, 0, 0);
 		if(o == nil){
 			oshandput(oh);
 			vcapput(sourcecap);
 			error(Enomem);
 		}
 		vgecaplimit(oh,(int)rights);
-		o->provider = VopenSpace;
-		o->space = ossid(oh);
+		o->provider = VopenGeVolume;
+		o->space = 0;
 		o->oid = 0;
 		o->owner = osownerof(oh, 0);
 		vobjsetpriv(o, oh);
-	}else if(provider == VopenGeSpace){
+	}else if(provider == VopenGeOid){
 		Vhand *sh;
 		Vobj *sp;
 		Ohand *cap;
@@ -4086,9 +4085,9 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		memmove(&gr, req, sizeof gr);
 		if(gr.rights != 0)
 			error(Ebadarg);
-		sh = vlookup(gr.ospace, Vmeta);
+		sh = vlookup(gr.volume, Vmeta);
 		sp = sh->obj;
-		if(sp->kind != VkindSpace || sp->priv == nil){
+		if(sp->kind != VkindGeVolume || sp->priv == nil){
 			vhandput(sh);
 			error(Ebadarg);
 		}
@@ -4121,7 +4120,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		vgecaplimit(oh,(int)rights);
 		o->provider = VopenGe;
 		o->oid = gr.oid;
-		o->space = ossid(oh);
+		o->space = 0;
 		o->owner = osownerof(oh, gr.oid);
 		vobjsetpriv(o, oh);
 	}else

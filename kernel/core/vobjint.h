@@ -53,8 +53,7 @@ ulong	vobjsize(Vobj*);
  * Errors are raised through the normal kernel error mechanism.
  */
 int	vobjcreat(int kind, uvlong space, void *buf, long n, VobjId *id);
-int	vobjcreatege(int spacehandle, void *buf, long n, uvlong *oid,
-		uvlong *spaceid);
+int	vobjcreatege(int volumehandle, void *buf, long n, uvlong *oid);
 int	vobjidentity(int handle, VobjId *id);
 int	vobjcommit(int handle, uvlong *ver);
 int	vobjputoid(int handle, uvlong oid, void *buf, long n);
@@ -184,8 +183,7 @@ long	osvolumeopen(char *spec, int n);
 int	vobjrightsfromo(int rights);
 int	vobjinstallohand(Ohand*, int kind);
 Ohand*	vobjholdohand(int handle, int kind, int rights);
-Ohand*	osopenspace(char *name, int n);
-Ohand*	osopenspacek(char *name, int n);
+Ohand*	osopenvolume(void);
 void	oshandput(Ohand*);
 long	osreadhand(Ohand*, uvlong oid, void *buf, long n, uvlong *ver);
 long	osgetobjecthand(Ohand*, uvlong oid, uchar **bp, long max, uvlong *ver);
@@ -199,7 +197,6 @@ int	osownerfault(int point);
 long	oscommithand(Ohand*, uvlong *ver);
 Ohand*	oscopycap(Ohand*, uvlong oid);
 Ohand*	oscopycapdelegate(Ohand*, int rights);
-uvlong	ossid(Ohand*);
 void	osvolumeid(Ohand*, uchar *out);
 int	oshandrights(Ohand*);
 void	oscheckhand(Ohand*);
