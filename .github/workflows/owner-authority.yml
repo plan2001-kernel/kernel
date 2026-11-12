@@ -35,6 +35,8 @@ jobs:
         run: tools/host/capability/run-owner-authority.sh
       - name: Two-boot immutable OwnerID and capability regression
         run: tools/host/ownerid/run-ownerid-reboot.sh --no-build
+      - name: GE/O immutable Kowner crash-recovery and corruption regression
+        run: tools/host/ownerid/run-ownerid-recovery.sh --no-build
       - name: Upload QEMU diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -43,4 +45,5 @@ jobs:
           path: |
             build/capauth/run
             build/t49-reboot/run
+            build/t49-recovery/run
           if-no-files-found: ignore
