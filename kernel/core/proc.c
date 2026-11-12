@@ -1607,7 +1607,6 @@ pexit(char *exitstr)
 	ulong utime, stime, time[3];
 	Ref *fdgrp;
 	Egrp *egrp;
-	Pgrp *pgrp;
 	Segment *s;
 	char status[128];
 	int cause, i;
@@ -1637,8 +1636,6 @@ pexit(char *exitstr)
 	up->fdgrp = nil;
 	egrp = up->egrp;
 	up->egrp = nil;
-	pgrp = up->pgrp;
-	up->pgrp = nil;
 	qunlock(&up->debug);
 
 	oprocexit(up);
@@ -1649,8 +1646,6 @@ pexit(char *exitstr)
 		closefdgrp(fdgrp);
 	if(egrp != nil)
 		closeegrp(egrp);
-	if(pgrp != nil)
-		closepgrp(pgrp);
 
 	if(up->boot)
 		panic("boot process died: %s",
@@ -1736,7 +1731,6 @@ procdiscard(Proc *p)
 	Segment *s;
 	Ref *fdgrp;
 	Egrp *egrp;
-	Pgrp *pgrp;
 	int i;
 
 	if(p == nil)
@@ -1748,8 +1742,6 @@ procdiscard(Proc *p)
 	p->fdgrp = nil;
 	egrp = p->egrp;
 	p->egrp = nil;
-	pgrp = p->pgrp;
-	p->pgrp = nil;
 
 	oprocexit(p);
 	vobjprocexit(p);
@@ -1760,8 +1752,6 @@ procdiscard(Proc *p)
 		closefdgrp(fdgrp);
 	if(egrp != nil)
 		closeegrp(egrp);
-	if(pgrp != nil)
-		closepgrp(pgrp);
 
 	qlock(&p->seglock);
 	for(i = 0; i < NSEG; i++){
@@ -1962,16 +1952,13 @@ linkproc(void)
 void
 kproc(char *name, void (*func)(void *), void *arg)
 {
-	Pgrp *pg;
 	Proc *p;
 	char *text, *user, *args, *old;
 	int canerror;
 
-	pg = kprocpgrp();
 	text = user = args = nil;
 	canerror = up != nil;
 	if(canerror && waserror()){
-		closepgrp(pg);
 		free(text);
 		free(user);
 		free(args);
@@ -2015,7 +2002,6 @@ kproc(char *name, void (*func)(void *), void *arg)
 	p->nargs = 0;
 	p->setargs = 0;
 
-	p->pgrp = pg;       /* transfer the reference returned by kprocpgrp */
 	if(canerror)
 		poperror();
 

@@ -218,7 +218,7 @@ ksetenv(char *ename, char *eval, int conf)
 	Egrp *eg;
 	int n;
 
-	if(up == nil || up->pgrp == nil)
+	if(up == nil)
 		error(Eperm);
 	if(ename == nil || eval == nil)
 		error(Ebadarg);
