@@ -1107,7 +1107,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         { MP_QSTR_vhandles, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     struct {
-        mp_arg_val_t oid, cpu, argv, membudget, handle, view, roles, env, vhandles;
+        mp_arg_val_t oid, cpu, argv, membudget, handle, roles, env, vhandles;
     } a;
     struct { struct Ospawn base; struct Oinherit extra; } ext;
     struct Oinheritv *hv;
@@ -1177,7 +1177,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     hasv = a.vhandles.u_obj != mp_const_none;
     hv = (struct Oinheritv *)&ext.extra;
     if (hasv) {
-        if (a.view.u_int != 0 || a.roles.u_obj != mp_const_none
+        if (a.roles.u_obj != mp_const_none
         || a.env.u_obj != mp_const_none) {
             mp_raise_msg(&mp_type_ValueError,
                 MP_ERROR_TEXT("space.spawn: vhandles cannot be combined with other inheritance"));
@@ -1205,7 +1205,8 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     }
     ext.base.flags = hasv ? 2 : 1;
     if (!hasv) {
-    ext.extra.view = a.view.u_int;
+    /* Legacy namespace view is gone. Process roots are explicit grants. */
+    ext.extra.view = 0;
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
