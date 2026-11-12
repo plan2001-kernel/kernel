@@ -645,6 +645,108 @@ static mp_obj_t p9_objcommitversion(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objcommitversion_obj,p9_objcommitversion);
 
+
+/*
+ * First-class ObjectSpace capabilities.  These operations do not use Pgrp,
+ * the GE storage SpaceID, paths or process parentage.  Each binding has a
+ * stable ID; labels may collide and are not interpreted by the kernel.
+ */
+static ObjCall
+p9_spacecall(unsigned op)
+{
+    ObjCall c;
+    memset(&c, 0, sizeof c);
+    c.version = OBJ_ABI_VERSION;
+    c.op = op;
+    return c;
+}
+
+static mp_obj_t
+p9_spacenew(void)
+{
+    return check(obj_create(0, ObjKindObjectSpace, NULL, 0, NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_spacenew_obj, p9_spacenew);
+
+static mp_obj_t
+p9_spacebind(size_t n, const mp_obj_t *a)
+{
+    ObjSpaceBindReq r;
+    ObjCall c = p9_spacecall(ObjOpSpaceBind);
+    const char *name = mp_obj_str_get_str(a[1]);
+    size_t len = strlen(name);
+    if(len == 0 || len >= ObjSpaceLabelMax)
+        mp_raise_ValueError(MP_ERROR_TEXT("ObjectSpace label length"));
+    memset(&r, 0, sizeof r);
+    r.target = mp_obj_get_int(a[2]);
+    r.rights = n > 3 ? (unsigned)mp_obj_get_int(a[3]) : 0;
+    r.relation = n > 4 ? (unsigned)mp_obj_get_int(a[4]) : 0;
+    memcpy(r.label, name, len);
+    c.in = &r;
+    c.inlen = sizeof r;
+    return check(obj_invoke(mp_obj_get_int(a[0]), &c, sizeof c));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_spacebind_obj, 3, 5, p9_spacebind);
+
+static mp_obj_t
+p9_spaceunbind(mp_obj_t space, mp_obj_t id)
+{
+    ObjCall c = p9_spacecall(ObjOpSpaceUnbind);
+    c.arg0 = (unsigned long long)mp_obj_get_uint(id);
+    check(obj_invoke(mp_obj_get_int(space), &c, sizeof c));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_spaceunbind_obj, p9_spaceunbind);
+
+static mp_obj_t
+p9_spaceresolve(size_t n, const mp_obj_t *a)
+{
+    ObjCall c = p9_spacecall(ObjOpSpaceResolve);
+    c.arg0 = (unsigned long long)mp_obj_get_uint(a[1]);
+    c.arg1 = n > 2 ? (unsigned long long)mp_obj_get_uint(a[2]) : 0;
+    return check(obj_invoke(mp_obj_get_int(a[0]), &c, sizeof c));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_spaceresolve_obj, 2, 3, p9_spaceresolve);
+
+/* space_list(space, cursor=0, epoch=0) -> (records, next_cursor, epoch).
+ * Repeat with the returned epoch: concurrent mutation fails rather than
+ * returning a mixed snapshot. Each record includes a stable binding ID. */
+static mp_obj_t
+p9_spacelist(size_t n, const mp_obj_t *a)
+{
+    ObjCall c = p9_spacecall(ObjOpSpaceEnumerate);
+    ObjSpaceEntry records[ObjSpacePageMax];
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    unsigned long long cursor = n > 1 ? mp_obj_get_uint(a[1]) : 0;
+    c.arg0 = cursor;
+    c.arg1 = n > 2 ? mp_obj_get_uint(a[2]) : 0;
+    c.out = records;
+    c.outlen = sizeof records;
+    check(obj_invoke(mp_obj_get_int(a[0]), &c, sizeof c));
+    for(int i = 0; i < (int)c.result; i++){
+        size_t len = 0;
+        mp_obj_t identity[3], fields[7];
+        while(len < ObjSpaceLabelMax && records[i].label[len]) len++;
+        identity[0] = mp_obj_new_int_from_ull(records[i].incarnation);
+        identity[1] = mp_obj_new_int_from_ull(records[i].space);
+        identity[2] = mp_obj_new_int_from_ull(records[i].oid);
+        fields[0] = mp_obj_new_int_from_ull(records[i].binding_id);
+        fields[1] = mp_obj_new_str(records[i].label, len);
+        fields[2] = mp_obj_new_int(records[i].kind);
+        fields[3] = mp_obj_new_int(records[i].rights);
+        fields[4] = mp_obj_new_int(records[i].relation);
+        fields[5] = mp_obj_new_tuple(3, identity);
+        fields[6] = mp_obj_new_int(records[i].flags);
+        mp_obj_list_append(list, mp_obj_new_tuple(7, fields));
+    }
+    mp_obj_t result[3] = {
+        list, mp_obj_new_int_from_ull(cursor + c.result),
+        mp_obj_new_int_from_ull(c.aux)
+    };
+    return mp_obj_new_tuple(3, result);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_spacelist_obj, 1, 3, p9_spacelist);
+
 static mp_obj_t p9_objbind(size_t n,const mp_obj_t *a){
  const char *role=mp_obj_str_get_str(a[1]);
  unsigned long long rights=n>2?(unsigned long long)mp_obj_get_int(a[2]):0;
@@ -1164,6 +1266,11 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_put_oid), MP_ROM_PTR(&p9_objputoid_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_new), MP_ROM_PTR(&p9_spacenew_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_bind), MP_ROM_PTR(&p9_spacebind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_unbind), MP_ROM_PTR(&p9_spaceunbind_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_resolve), MP_ROM_PTR(&p9_spaceresolve_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_list), MP_ROM_PTR(&p9_spacelist_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_bind), MP_ROM_PTR(&p9_objbind_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_read), MP_ROM_PTR(&p9_objread_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_read_version), MP_ROM_PTR(&p9_objreadver_obj) },
@@ -1191,6 +1298,16 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_notify_probe_framevals), MP_ROM_PTR(&p9_notify_probe_framevals_obj) },
     { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_AUTOSTART), MP_ROM_INT(OWNER_PROGRAM_AUTOSTART) },
     { MP_ROM_QSTR(MP_QSTR_OWNER_PROGRAM_LAUNCHABLE), MP_ROM_INT(OWNER_PROGRAM_LAUNCHABLE) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_KIND_OBJECT_SPACE), MP_ROM_INT(ObjKindObjectSpace) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_OBJECT_SPACE), MP_ROM_INT(VkindObjectSpace) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_BIND), MP_ROM_INT(ObjOpSpaceBind) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_UNBIND), MP_ROM_INT(ObjOpSpaceUnbind) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_RESOLVE), MP_ROM_INT(ObjOpSpaceResolve) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_ENUMERATE), MP_ROM_INT(ObjOpSpaceEnumerate) },
+    { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_NAMES), MP_ROM_INT(ObjSpaceRelationNames) },
+    { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_CONTAINS), MP_ROM_INT(ObjSpaceRelationContains) },
+    { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_IMPORTS), MP_ROM_INT(ObjSpaceRelationImports) },
+    { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_USES), MP_ROM_INT(ObjSpaceRelationUses) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_OWNER_INFO), MP_ROM_INT(ObjOpOwnerInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
