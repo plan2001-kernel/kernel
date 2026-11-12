@@ -22,6 +22,8 @@ jobs:
           sudo apt-get install -y build-essential gcc-14 binutils clang lld file mtools ovmf qemu-system-x86 python3
       - name: Validate ABI and wiring (static)
         run: python3 tools/host/objectspace/contract-check.py
+      - name: Reject legacy SpaceID and named storage boundaries
+        run: python3 tools/host/objectspace/flat-volume-check.py
       - name: Build AMD64 kernel
         run: CC=gcc-14 tools/build-gcc.sh --kernel -j 4
       - name: Build UEFI loader

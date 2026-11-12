@@ -16,8 +16,8 @@ The Environment's definition ID is the SHA-256 of the source bytes.
 The ``.mpy`` digest in the Environment is the SHA-256 of the bytes the
 formatter stores.  The MicroPython executable is copied byte for byte
 at OID 0x4f45584543000003.  The initial demo code OID is preserved as
-0xffffffff00000000 and the flat catalog ``init -> SpaceID 1`` is made
-by the reamer, not here.
+0xffffffff00000000 and all seeded objects belong directly to the volume-global OID domain.
+The formatter creates no named SpaceID catalog.
 """
 from __future__ import annotations
 

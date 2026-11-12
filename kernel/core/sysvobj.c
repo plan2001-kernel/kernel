@@ -1949,7 +1949,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			 *  - before the handoff DOH exclusively owns the new
 			 *    Ohand and O, when it exists, has priv == nil;
 			 *  - after the handoff O->priv == DOH and DOH == nil, so
-			 *    O is the only owner and vobjput(O) closes the Ospace
+			 *    O is the only owner and vobjput(O) closes the GE/O transaction
 			 *    and drops the origin pin;
 			 *  - H is a local child Vhand owned by this function until
 			 *    it is installed in the child table T.  Once installed,

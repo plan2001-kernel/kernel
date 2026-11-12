@@ -232,7 +232,7 @@ oblockopenpart(char *guid, char *dev, int ndev, vlong *off, vlong *size)
  * its GE instance; a legacy device specifier is rejected rather than
  * falling back to a pathname/Chan open. OBJOPEN gives a Space handle
  * from the flat catalog. Internal Ohand references authorize storage and
- * namespace operations; a process never sees an Ospace pointer.
+ * namespace operations; a process never sees a transaction pointer.
  */
 static Proc *bootowner;
 static ulong bootpid;
@@ -361,7 +361,7 @@ ohandput(Ohand *oh)
 		return;
 #ifdef PLAN2001_LIFECYCLE_DIAG
 	/* Only oscopycapdelegate() creates caps=2 capabilities; their own
-	 * Ospace and origin pin are separate live resources. */
+	 * GE/O transaction and origin pin are separate live resources. */
 	delegate = oh->caps == 2;
 #endif
 	if(oh->tx != nil){
@@ -410,7 +410,7 @@ oauthorize(Ohand *oh, uvlong oid, int rights)
 	 * handle.  Its rights and revocation are still checked; the process
 	 * view-membership check is intentionally not repeated because the
 	 * capability may cross a process boundary.  The copy owns its own
-	 * Ospace handle and pins its object-grant origin for revocation. caps=2
+	 * transaction handle and pins its object-grant origin for revocation. caps=2
   * is an explicitly delegated Space, not inherited bootstrap authority.
 	 */
 	if(oh->caps){
@@ -463,7 +463,7 @@ enum {
  * one Ohand/OID into a fresh kernel buffer and return it with the version.
  * The caller owns OH and its reference for the duration of the call; this
  * helper does not drop it, because the OBJ Space provider keeps its own
- * pinned capability.  No Ospace or disk handle escapes.
+ * pinned capability.  No storage transaction pointer escapes.
  */
 static long
 osgetobjecthandcore(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver,
@@ -589,7 +589,7 @@ oscopycap(Ohand *src, uvlong oid)
  * bootstrap Ohand obtained by osopenspace(), this copy is not tied to the
  * boot owner: oauthorize() accepts a caps=2 Space capability across a
  * process boundary.  The caller passes the already-validated O-rights
- * attenuation; the copy owns its own opened Ospace and gate.
+ * attenuation; the copy owns its own opened GE/O transaction and gate.
  */
 Ohand*
 oscopycapdelegate(Ohand *src, int rights)
@@ -625,7 +625,7 @@ oscopycapdelegate(Ohand *src, int rights)
 		error("O: capability open failed");
 	}
 	/* Pin the grant origin across the process boundary.  The capability
-	 * copy owns its own Ospace, but revocation and its gate continue to
+	 * copy owns its own GE/O transaction, but revocation and its gate continue to
 	 * follow the originating Ohand. */
 	n->origin = src->origin ? src->origin : src;
 	incref(&n->origin->ref);
@@ -656,7 +656,7 @@ oscheckhand(Ohand *h)
  * The persistent object's immutable owner.  Before a Space is upgraded to
  * owner metadata, a missing Kowner record is a seeded object owned by
  * root.  After the upgrade every live object has a record, so a missing
- * one is corruption.  Knowing a SpaceID/OID never selects or changes it.
+ * one is corruption.  Knowing an OID never selects or changes it.
  */
 uvlong
 osownerof(Ohand *oh, uvlong oid)
