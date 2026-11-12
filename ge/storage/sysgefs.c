@@ -586,7 +586,7 @@ oscopycap(Ohand *src, uvlong oid)
 
 /*
  * Explicitly delegated Space capability for a child process.  Unlike the
- * bootstrap Ohand obtained by osopenspace(), this copy is not tied to the
+ * bootstrap Ohand obtained from the volume, this copy is not tied to the
  * boot owner: oauthorize() accepts a caps=2 Space capability across a
  * process boundary.  The caller passes the already-validated O-rights
  * attenuation; the copy owns its own opened GE/O transaction and gate.
