@@ -105,6 +105,11 @@ gethdr(Tree *t, Ohdr *h)
 	h->n = UNPACK64(kv.val.v);
 	h->k = UNPACK64(kv.val.v+8);
 	h->w = UNPACK64(kv.val.v+16);
+	/* All OIDs in this volume share one published version and writer
+	 * epoch. Reject a damaged header before it can publish a new root. */
+	if(h->k == 0 || h->n == 0 || h->k > h->n ||
+	   h->n > h->w || h->w == ~0ULL)
+		error(Ecorrupt);
 	h->nuser = kv.val.nv - 24;
 	memmove(h->user, kv.val.v+24, h->nuser);
 	return 1;

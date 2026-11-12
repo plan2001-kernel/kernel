@@ -1,17 +1,15 @@
 /*
- * Native GE/O volume profile (docs/O-FORMAT.md).  The initial PoC is
- * only the profile, the flat catalog and plain GE records: no object
- * transactions, FS mounts, 9P or path resolution.  O records are Ko
- * keys in the volume's snapshot tree; opening an existing volume only
- * reads it and never formats.
+ * Native GE/O v2 volume profile (docs/OBJECT-STORAGE.md).
+ * The GE snapshot tree holds one volume header and flat Kobj/Kowner OID
+ * records. There is no persistent SpaceID, Ko catalog, FS mount or path.
+ * Opening an existing volume never formats it.
  */
 #include "gefs.h"
+#include "objint.h"
 
-/*
- * Open an existing O volume: GE's blocks/tree/recovery, the O profile
- * and version, and the init Space's catalog entry.  An FS volume is
- * rejected here, before any write.
- */
+/* Reject FS profiles, unknown versions and damaged volume headers before
+ * granting any O handle. The transitional "init" selector belongs only to
+ * the phase-3 API wrapper, not to the GE/O on-disk format. */
 static void*
 oopen0(char *dev, void *oblk, vlong off, vlong size, int rw,
 	long (*oblkrw)(void*, void*, long, uvlong, int),
@@ -26,15 +24,11 @@ oopen0(char *dev, void *oblk, vlong off, vlong size, int rw,
 	v = fs->flag & Ovolvermask;
 	if(v != Ovolvers)
 		error("O: unsupported volume version %llud", v);
-	/* A flat O volume has one header and no name-to-SpaceID catalog. */
+	/* Validate the single volume-global publication epoch as well as
+	 * the key's existence. A malformed header is never writable. */
 	{
-		char b = Kobj, buf[Kvmax];
-		Key key;
-		Kvp kv;
-		key.k = &b;
-		key.nk = 1;
-		if(!btlookup(&fs->snap, &key, &kv, buf, sizeof buf) ||
-		   kv.val.nv < 24)
+		Ohdr h;
+		if(!gethdr(&fs->snap, &h))
 			error("O: missing flat volume header");
 	}
 	return fs;
