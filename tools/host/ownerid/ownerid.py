@@ -1,4 +1,4 @@
-"""Issue #49 acceptance: immutable single OwnerID, registered launch and
+"""OwnerID provenance: immutable single OwnerID, registered launch and
 owner-offered publication on the AMD64 QEMU MicroPython path.
 
 Every check prints T49-PASS immediately after it passes.  Failed child
@@ -60,28 +60,23 @@ try:
     if p.obj_owner(ph)[0] != BOWN or p.obj_read(ph, 16) != b'B-persist':
         fail('b-persist')
     p.obj_close(ph)
-    # A's non-published GEO object: knowing SpaceID/OID is not authority.
+    # A granted B a full O Space capability. Knowing an OID alone is not
+    # authority, but this explicit Space grant authorizes it across owners.
     stage = 'open-a'
-    try:
-        p.obj_open_ge_space(sh, AOID)
-    except OSError:
-        pass
-    else:
-        fail('b-open-a-object')
-    try:
-        p.obj_put_oid(sh, AOID, b'B-was-here')
-    except OSError:
-        pass
-    else:
-        fail('b-modify-a-object')
-    # A different owner cannot rewrite A's persistent object; the existing
-    # owner record must remain the only one.
-    try:
-        p.obj_put_oid(sh, AOBJ, b'B-was-here')
-    except OSError:
-        pass
-    else:
-        fail('b-modify-a-persist')
+    ah = p.obj_open_ge_space(sh, AOID)
+    if p.obj_owner(ah)[0] != AOWN:
+        fail('b-a-executable-provenance')
+    p.obj_close(ah)
+    ah = p.obj_open_ge_space(sh, AOBJ)
+    if p.obj_owner(ah)[0] != AOWN or p.obj_read(ah, 16) != b'A-persist':
+        fail('b-a-read-cap')
+    p.obj_close(ah)
+    p.obj_put_oid(sh, AOBJ, b'A-persist')
+    p.obj_commit(sh)
+    ah = p.obj_open_ge_space(sh, AOBJ)
+    if p.obj_owner(ah)[0] != AOWN:
+        fail('b-a-write-provenance')
+    p.obj_close(ah)
     # B creates and reopens its own object; ownership is immutable.
     stage = 'own-create'
     gh, oid = p.obj_create_ge(sh, b'B-alpha')
@@ -104,8 +99,7 @@ try:
         p.obj_close(gh)
     except OSError:
         fail('b-own-reopen')
-    # A's publication region: RO mapping and data are available, but the
-    # writer role, revocation and the source object are not.
+    # A still occupies the unique writer slot. RO remains shared.
     stage = 'region'
     if p.obj_owner(reg)[0] != AOWN:
         fail('b-region-owner')
@@ -114,7 +108,7 @@ try:
     except OSError:
         pass
     else:
-        fail('b-rw-map')
+        fail('b-exclusive-writer-mapping')
     base = p.region_map(reg, 0x51000000, p.OBJ_REGION_MAP_READONLY)
     if p.region_atomic_load(base + 8) != 1:
         r = p.region_wait(base, 8, 0, 2000)
@@ -134,14 +128,10 @@ try:
         pass
     else:
         fail('b-revoke')
-    # A delegated a process-control handle, but B is not the process owner.
+    # Vcontrol is explicitly delegated. OwnerID is not a termination gate.
     stage = 'terminate'
-    try:
+    if p.process_info(ctl)[3] == p.OBJ_PROC_RUNNING:
         p.process_terminate(ctl)
-    except OSError:
-        pass
-    else:
-        fail('b-terminate-cross-owner')
     # Registration is a trusted boot/installation action.
     stage = 'register'
     try:
@@ -236,18 +226,16 @@ try:
     if p.obj_owner(h)[0] != AOWN or p.obj_read(h, 16) != b'A-persist':
         p.exits('ERR:a-rb-own')
     p.obj_close(h)
-    try:
-        p.obj_open_ge_space(sh, BOBJ)
-    except OSError:
-        pass
-    else:
-        p.exits('ERR:a-rb-cross-open')
-    try:
-        p.obj_put_oid(sh, BOBJ, b'A-rewrite')
-    except OSError:
-        pass
-    else:
-        p.exits('ERR:a-rb-cross-write')
+    h = p.obj_open_ge_space(sh, BOBJ)
+    if p.obj_owner(h)[0] == AOWN or p.obj_read(h, 16) != b'B-persist':
+        p.exits('ERR:a-rb-delegated-read')
+    p.obj_close(h)
+    p.obj_put_oid(sh, BOBJ, b'B-persist')
+    p.obj_commit(sh)
+    h = p.obj_open_ge_space(sh, BOBJ)
+    if p.obj_owner(h)[0] == AOWN:
+        p.exits('ERR:a-rb-changed-provenance')
+    p.obj_close(h)
     p.exits('ARBOK')
 except BaseException as e:
     import plan9 as p
@@ -278,18 +266,16 @@ try:
     if p.obj_owner(h)[0] != BOWN or p.obj_read(h, 16) != b'B-persist':
         p.exits('ERR:b-rb-own')
     p.obj_close(h)
-    try:
-        p.obj_open_ge_space(sh, AOBJ)
-    except OSError:
-        pass
-    else:
-        p.exits('ERR:b-rb-cross-open')
-    try:
-        p.obj_put_oid(sh, AOBJ, b'B-rewrite')
-    except OSError:
-        pass
-    else:
-        p.exits('ERR:b-rb-cross-write')
+    h = p.obj_open_ge_space(sh, AOBJ)
+    if p.obj_owner(h)[0] == BOWN or p.obj_read(h, 16) != b'A-persist':
+        p.exits('ERR:b-rb-delegated-read')
+    p.obj_close(h)
+    p.obj_put_oid(sh, AOBJ, b'A-persist')
+    p.obj_commit(sh)
+    h = p.obj_open_ge_space(sh, AOBJ)
+    if p.obj_owner(h)[0] == BOWN:
+        p.exits('ERR:b-rb-changed-provenance')
+    p.obj_close(h)
     p.exits('BRBOK')
 except BaseException as e:
     import plan9 as p
@@ -359,8 +345,7 @@ try:
     base = p.region_map(reg, 0x41000000)
     p.region_write(base + 64, PUB)
     p.region_atomic_store(base + 8, 0)
-    # A same-owner child is controllable by A; B receives the same
-    # control Handle but must still be denied by ownership.
+    # A delegates Vcontrol explicitly to B; ownership is provenance.
     stage = 'child'
     child = space.spawn(AID, handle=sh,
                         argv=('micropython', '-c', @SLEEP@))
@@ -393,25 +378,20 @@ try:
     if not r1[1].startswith('BOK:') or not r2[1].startswith('BOK:'):
         fail('a-b-status:' + r1[1] + '/' + r2[1])
     boid = int(r1[1][4:])
-    # B's own object is not accessible to A either.
-    try:
-        p.obj_open_ge_space(sh, boid)
-    except OSError:
-        pass
-    else:
-        fail('a-open-b-object')
-    try:
-        p.obj_put_oid(sh, boid, b'A-was-here')
-    except OSError:
-        pass
-    else:
-        fail('a-modify-b-object')
-    # A owns the child; termination by its owner succeeds.
+    # A's full Space grant permits B-owned object access; existing Kowner
+    # remains immutable even when this caller is another owner.
+    bh = p.obj_open_ge_space(sh, boid)
+    if p.obj_owner(bh)[0] != BOWN or p.obj_read(bh, 16) != b'B-beta':
+        fail('a-open-b-object-with-space-grant')
+    p.obj_close(bh)
+    p.obj_put_oid(sh, boid, b'B-beta')
+    p.obj_commit(sh)
+    bh = p.obj_open_ge_space(sh, boid)
+    if p.obj_owner(bh)[0] != BOWN:
+        fail('a-modify-b-immutable-provenance')
+    p.obj_close(bh)
+    # The first B launch exercised the explicit cross-owner Vcontrol grant.
     stage = 'termchild'
-    try:
-        p.process_terminate(child)
-    except OSError:
-        fail('a-terminate-own')
     cr = p.process_wait(child, -1)
     if cr[8] != 0 or cr[2] != p.OBJ_PROC_CAUSE_TERMINATED:
         fail('a-terminate-completion')
@@ -523,12 +503,18 @@ def run():
         sok = p.obj_owner(sth)[0] == root[0]
         p.obj_close(sth)
         ok(sok, 'persisted state object keeps its boot owner across reboot')
-        denied(lambda: p.obj_open_ge_space(sh, AOBJ),
-               'root cannot open the rebooted owner-A object by knowing its OID')
-        denied(lambda: p.obj_open_ge_space(sh, BOBJ),
-               'root cannot open the rebooted owner-B object by knowing its OID')
-        denied(lambda: p.obj_put_oid(sh, AOBJ, b'root-rewrite'),
-               'root cannot rewrite the rebooted owner-A object')
+        a = p.obj_open_ge_space(sh, AOBJ)
+        b = p.obj_open_ge_space(sh, BOBJ)
+        ok(p.obj_owner(a)[0] == aown and p.obj_owner(b)[0] == bown,
+           'bootstrap Space grant resolves both owner domains')
+        p.obj_close(a)
+        p.obj_close(b)
+        p.obj_put_oid(sh, AOBJ, b'A-persist')
+        p.obj_commit(sh)
+        a = p.obj_open_ge_space(sh, AOBJ)
+        ok(p.obj_owner(a)[0] == aown,
+           'bootstrap Space write preserves stored owner A')
+        p.obj_close(a)
         rights = (sh, p.VEXECUTE | p.VREAD | p.VWRITE | p.VCREATE |
                   p.VCOMMIT | p.VMETA | p.VDELEGATE)
         ar = waitok(p.program_launch('A',
@@ -539,8 +525,8 @@ def run():
                     ('micropython', '-c',
                      build(B_RB_CODE, BOWN=bown, AOBJ=AOBJ, BOBJ=BOBJ)),
                     (rights,)), 'B-reboot')
-        ok(ar[1] == 'ARBOK', 'owner A reopens only its rebooted object: ' + ar[1])
-        ok(br[1] == 'BRBOK', 'owner B reopens only its rebooted object: ' + br[1])
+        ok(ar[1] == 'ARBOK', 'owner A Space grant resolves B-owned object: ' + ar[1])
+        ok(br[1] == 'BRBOK', 'owner B Space grant resolves A-owned object: ' + br[1])
         p.obj_close(sh)
         print('T49-REBOOT-FINISH', n[0], 'PASS')
         return 1
