@@ -48,7 +48,7 @@ try:
     if oi[0] != BOWN or oi[1] != 'ownerB':
         fail('b-owner')
     stage = 'handles'
-    sh = findkind(p.VKIND_SPACE, p.VEXECUTE)
+    sh = findkind(p.VKIND_GE_VOLUME, p.VEXECUTE)
     reg = findregion()
     ctl = findproc(p.VCONTROL)
     if not sh or not reg or not ctl:
@@ -56,24 +56,24 @@ try:
     stage = 'persist'
     p.obj_put_oid(sh, BOBJ, b'B-persist')
     p.obj_commit(sh)
-    ph = p.obj_open_ge_space(sh, BOBJ)
+    ph = p.obj_open_ge_oid(sh, BOBJ)
     if p.obj_owner(ph)[0] != BOWN or p.obj_read(ph, 16) != b'B-persist':
         fail('b-persist')
     p.obj_close(ph)
     # A granted B a full O Space capability. Knowing an OID alone is not
     # authority, but this explicit Space grant authorizes it across owners.
     stage = 'open-a'
-    ah = p.obj_open_ge_space(sh, AOID)
+    ah = p.obj_open_ge_oid(sh, AOID)
     if p.obj_owner(ah)[0] != AOWN:
         fail('b-a-executable-provenance')
     p.obj_close(ah)
-    ah = p.obj_open_ge_space(sh, AOBJ)
+    ah = p.obj_open_ge_oid(sh, AOBJ)
     if p.obj_owner(ah)[0] != AOWN or p.obj_read(ah, 16) != b'A-persist':
         fail('b-a-read-cap')
     p.obj_close(ah)
     p.obj_put_oid(sh, AOBJ, b'A-persist')
     p.obj_commit(sh)
-    ah = p.obj_open_ge_space(sh, AOBJ)
+    ah = p.obj_open_ge_oid(sh, AOBJ)
     if p.obj_owner(ah)[0] != AOWN:
         fail('b-a-write-provenance')
     p.obj_close(ah)
@@ -91,7 +91,7 @@ try:
     p.obj_close(gh)
     stage = 'reopen'
     try:
-        gh = p.obj_open_ge_space(sh, oid)
+        gh = p.obj_open_ge_oid(sh, oid)
         own = p.obj_owner(gh)[0]
         data = p.obj_read(gh, 8)
         if own != BOWN or data != b'B-beta':
@@ -213,7 +213,7 @@ def findspace():
             i = p.obj_info(h)
         except OSError:
             continue
-        if i[8] == p.VKIND_SPACE and (i[10] & p.VEXECUTE):
+        if i[8] == p.VKIND_GE_VOLUME and (i[10] & p.VEXECUTE):
             return h
     return 0
 try:
@@ -222,17 +222,17 @@ try:
     sh = findspace()
     if not sh:
         p.exits('ERR:a-rb-space')
-    h = p.obj_open_ge_space(sh, AOBJ)
+    h = p.obj_open_ge_oid(sh, AOBJ)
     if p.obj_owner(h)[0] != AOWN or p.obj_read(h, 16) != b'A-persist':
         p.exits('ERR:a-rb-own')
     p.obj_close(h)
-    h = p.obj_open_ge_space(sh, BOBJ)
+    h = p.obj_open_ge_oid(sh, BOBJ)
     if p.obj_owner(h)[0] == AOWN or p.obj_read(h, 16) != b'B-persist':
         p.exits('ERR:a-rb-delegated-read')
     p.obj_close(h)
     p.obj_put_oid(sh, BOBJ, b'B-persist')
     p.obj_commit(sh)
-    h = p.obj_open_ge_space(sh, BOBJ)
+    h = p.obj_open_ge_oid(sh, BOBJ)
     if p.obj_owner(h)[0] == AOWN:
         p.exits('ERR:a-rb-changed-provenance')
     p.obj_close(h)
@@ -253,7 +253,7 @@ def findspace():
             i = p.obj_info(h)
         except OSError:
             continue
-        if i[8] == p.VKIND_SPACE and (i[10] & p.VEXECUTE):
+        if i[8] == p.VKIND_GE_VOLUME and (i[10] & p.VEXECUTE):
             return h
     return 0
 try:
@@ -262,17 +262,17 @@ try:
     sh = findspace()
     if not sh:
         p.exits('ERR:b-rb-space')
-    h = p.obj_open_ge_space(sh, BOBJ)
+    h = p.obj_open_ge_oid(sh, BOBJ)
     if p.obj_owner(h)[0] != BOWN or p.obj_read(h, 16) != b'B-persist':
         p.exits('ERR:b-rb-own')
     p.obj_close(h)
-    h = p.obj_open_ge_space(sh, AOBJ)
+    h = p.obj_open_ge_oid(sh, AOBJ)
     if p.obj_owner(h)[0] == BOWN or p.obj_read(h, 16) != b'A-persist':
         p.exits('ERR:b-rb-delegated-read')
     p.obj_close(h)
     p.obj_put_oid(sh, AOBJ, b'A-persist')
     p.obj_commit(sh)
-    h = p.obj_open_ge_space(sh, AOBJ)
+    h = p.obj_open_ge_oid(sh, AOBJ)
     if p.obj_owner(h)[0] == BOWN:
         p.exits('ERR:b-rb-changed-provenance')
     p.obj_close(h)
@@ -305,7 +305,7 @@ try:
     stage = 'owner'
     if oi[0] != AOWN or oi[1] != 'ownerA':
         fail('a-owner')
-    sh = findkind(p.VKIND_SPACE, p.VEXECUTE)
+    sh = findkind(p.VKIND_GE_VOLUME, p.VEXECUTE)
     stage = 'space'
     if not sh:
         fail('a-space')
@@ -317,7 +317,7 @@ try:
     for _ in range(3):
         p.obj_put_oid(sh, AOBJ, b'A-persist')
         p.obj_commit(sh)
-    ph = p.obj_open_ge_space(sh, AOBJ)
+    ph = p.obj_open_ge_oid(sh, AOBJ)
     if p.obj_owner(ph)[0] != AOWN or p.obj_read(ph, 16) != b'A-persist':
         fail('a-persist')
     p.obj_close(ph)
@@ -333,7 +333,7 @@ try:
         fail('a-object-rw')
     p.obj_close(gh)
     stage = 'reopen'
-    gh = p.obj_open_ge_space(sh, oid)
+    gh = p.obj_open_ge_oid(sh, oid)
     if p.obj_owner(gh)[0] != AOWN or p.obj_read(gh, 8) != b'beta':
         fail('a-object-reopen')
     p.obj_close(gh)
@@ -380,13 +380,13 @@ try:
     boid = int(r1[1][4:])
     # A's full Space grant permits B-owned object access; existing Kowner
     # remains immutable even when this caller is another owner.
-    bh = p.obj_open_ge_space(sh, boid)
+    bh = p.obj_open_ge_oid(sh, boid)
     if p.obj_owner(bh)[0] != BOWN or p.obj_read(bh, 16) != b'B-beta':
         fail('a-open-b-object-with-space-grant')
     p.obj_close(bh)
     p.obj_put_oid(sh, boid, b'B-beta')
     p.obj_commit(sh)
-    bh = p.obj_open_ge_space(sh, boid)
+    bh = p.obj_open_ge_oid(sh, boid)
     if p.obj_owner(bh)[0] != BOWN:
         fail('a-modify-b-immutable-provenance')
     p.obj_close(bh)
@@ -469,7 +469,7 @@ def run():
             s = s.replace('@' + k + '@', repr(v))
         return s
 
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
     root = p.owner_info()
     ok(root[0] == p.proc_info()[3] and root[1] == 'root',
        'boot process runs under the named ordinary owner root')
@@ -478,7 +478,7 @@ def run():
     def readstate():
         h = 0
         try:
-            h = p.obj_open_ge_space(sh, STATE)
+            h = p.obj_open_ge_oid(sh, STATE)
             d = p.obj_read(h, 64)
         except OSError:
             return None
@@ -495,9 +495,9 @@ def run():
         aown, bown, flat_a, flat_b = saved
         # Two independently opened handles still address one flat GE/O
         # volume after a full reboot, without any per-handle OID space.
-        sh2 = p.obj_open_space('init')
-        ga = p.obj_open_ge_space(sh2, flat_a)
-        gb = p.obj_open_ge_space(sh, flat_b)
+        sh2 = p.obj_open_volume()
+        ga = p.obj_open_ge_oid(sh2, flat_a)
+        gb = p.obj_open_ge_oid(sh, flat_b)
         ok(p.obj_read(ga, 16) == b'flat-a2' and
            p.obj_read(gb, 16) == b'flat-b2',
            'flat OIDs survive reboot and are visible across volume handles')
@@ -514,19 +514,19 @@ def run():
                                    p.OWNER_PROGRAM_LAUNCHABLE)
         ok(ra == aown and rb == bown,
            'reboot re-registration resolves the stored OwnerIDs deterministically')
-        sth = p.obj_open_ge_space(sh, STATE)
+        sth = p.obj_open_ge_oid(sh, STATE)
         sok = p.obj_owner(sth)[0] == root[0]
         p.obj_close(sth)
         ok(sok, 'persisted state object keeps its boot owner across reboot')
-        a = p.obj_open_ge_space(sh, AOBJ)
-        b = p.obj_open_ge_space(sh, BOBJ)
+        a = p.obj_open_ge_oid(sh, AOBJ)
+        b = p.obj_open_ge_oid(sh, BOBJ)
         ok(p.obj_owner(a)[0] == aown and p.obj_owner(b)[0] == bown,
            'bootstrap Space grant resolves both owner domains')
         p.obj_close(a)
         p.obj_close(b)
         p.obj_put_oid(sh, AOBJ, b'A-persist')
         p.obj_commit(sh)
-        a = p.obj_open_ge_space(sh, AOBJ)
+        a = p.obj_open_ge_oid(sh, AOBJ)
         ok(p.obj_owner(a)[0] == aown,
            'bootstrap Space write preserves stored owner A')
         p.obj_close(a)
@@ -549,7 +549,7 @@ def run():
     # Before the first owner-aware creation the seeded objects have no
     # owner record; the documented legacy rule resolves them to root.  The
     # first creation migrates them explicitly, after which they still do.
-    lh = p.obj_open_ge_space(sh, MPY)
+    lh = p.obj_open_ge_oid(sh, MPY)
     ok(p.obj_owner(lh)[0] == root[0],
        'seeded object has no owner record and resolves to legacy root')
     p.obj_close(lh)
@@ -580,15 +580,15 @@ def run():
     p.obj_close(g)
     # A second open is NOT a second store or OID allocator. Both handles
     # see each other's objects and share the one volume writer slot.
-    sh2 = p.obj_open_space('init')
+    sh2 = p.obj_open_volume()
     ga, flat_a = p.obj_create_ge(sh, b'flat-a')
     gb, flat_b = p.obj_create_ge(sh2, b'flat-b')
     ok(flat_b == flat_a + 1,
        'independent handles allocate consecutive OIDs from one volume')
     p.obj_close(ga)
     p.obj_close(gb)
-    ga = p.obj_open_ge_space(sh2, flat_a)
-    gb = p.obj_open_ge_space(sh, flat_b)
+    ga = p.obj_open_ge_oid(sh2, flat_a)
+    gb = p.obj_open_ge_oid(sh, flat_b)
     ok(p.obj_read(ga, 16) == b'flat-a' and
        p.obj_read(gb, 16) == b'flat-b',
        'both handles resolve the same flat OID address space')
@@ -600,8 +600,8 @@ def run():
     p.obj_commit(sh)
     p.obj_put_oid(sh2, flat_b, b'flat-b2')
     p.obj_commit(sh2)
-    ga = p.obj_open_ge_space(sh2, flat_a)
-    gb = p.obj_open_ge_space(sh, flat_b)
+    ga = p.obj_open_ge_oid(sh2, flat_a)
+    gb = p.obj_open_ge_oid(sh, flat_b)
     ok(p.obj_read(ga, 16) == b'flat-a2' and
        p.obj_read(gb, 16) == b'flat-b2',
        'serial transactions publish through the shared volume header')
@@ -610,7 +610,7 @@ def run():
     p.obj_close(sh2)
     denied(lambda: p.program_register('Z', '', sh, MPY),
            'empty owner name cannot select the kernel OwnerID')
-    lh = p.obj_open_ge_space(sh, MPY)
+    lh = p.obj_open_ge_oid(sh, MPY)
     ok(p.obj_owner(lh)[0] == root[0],
        'legacy seeded object still resolves to root after migration')
     p.obj_close(lh)

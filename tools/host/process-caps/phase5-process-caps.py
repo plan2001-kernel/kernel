@@ -86,7 +86,7 @@ p.exits('')
 # A itself launches B, delegates B's observation Handle to an independent C,
 # then exits.  B outlives A.
 A_CHAIN = PRELUDE + r'''
-sp = findkind(p.VKIND_SPACE, p.VEXECUTE)
+sp = findkind(p.VKIND_GE_VOLUME, p.VEXECUTE)
 rw = findregion(True)
 if not sp or not rw:
     fail('a-handles')
@@ -254,7 +254,7 @@ p.exits('no-fault')
 
 # Launcher that deliberately keeps no observer and exits.
 NO_OBSERVER = PRELUDE + r'''
-sp = findkind(p.VKIND_SPACE, p.VEXECUTE)
+sp = findkind(p.VKIND_GE_VOLUME, p.VEXECUTE)
 if not sp:
     fail('noobs-space')
 b = space.spawn(@CID@, handle=sp,
@@ -472,7 +472,7 @@ def run():
     CT = p.VCONTROL | p.VMETA | p.VDELEGATE
     EX = p.VEXECUTE | p.VMETA | p.VDELEGATE
 
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
 
     # --- A launches B, delegates observation to C, then A exits -----------
     chain_code = (A_CHAIN.replace('@CID@', str(CID))

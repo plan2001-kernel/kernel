@@ -33,7 +33,7 @@ def fail(s):
 
 def read_state(sh):
     try:
-        h = p.obj_open_ge_space(sh, STATE)
+        h = p.obj_open_ge_oid(sh, STATE)
     except OSError:
         return None
     try:
@@ -65,7 +65,7 @@ def expected(i):
 
 
 def probe(sh, oid):
-    h = p.obj_open_ge_space(sh, oid)
+    h = p.obj_open_ge_oid(sh, oid)
     try:
         data = p.obj_read(h, 64)
     except OSError:
@@ -77,7 +77,7 @@ def probe(sh, oid):
 
 
 def create_flow(case):
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
     st = read_state(sh)
     if st is not None and st[0] == 'CRASH':
         verify_create(sh, int(st[1]), int(st[2]))
@@ -97,7 +97,7 @@ def verify_create(sh, case, target):
     root = p.owner_info()[0]
     absent = False
     try:
-        h = p.obj_open_ge_space(sh, target)
+        h = p.obj_open_ge_oid(sh, target)
     except OSError as e:
         fail('target-open:' + repr(e))
     try:
@@ -151,7 +151,7 @@ def check_legacy(sp, root, phase):
 
 
 def migrate_flow():
-    sh = p.obj_open_space('init')
+    sh = p.obj_open_volume()
     # The host uses -N for crash and -I for retry, changing only the ESP.
     # No pre-crash write is allowed: it would itself trigger migration.
     if '-N' in sys.argv:
@@ -163,7 +163,7 @@ def migrate_flow():
 
 def verify_migrate():
     root = p.owner_info()[0]
-    sp = p.obj_open_space('init')
+    sp = p.obj_open_volume()
     check_legacy(sp, root, 'pre')
     g, oid = p.obj_create_ge(sp, b'migrate-retry')
     if p.obj_owner(g)[0] != root:
@@ -180,7 +180,7 @@ def verify_migrate():
 
 def abort_migrate_flow():
     root = p.owner_info()[0]
-    sp = p.obj_open_space('init')
+    sp = p.obj_open_volume()
     p.ownerid_fault(4)
     try:
         p.obj_create_ge(sp, b'abort-trigger')
@@ -203,13 +203,13 @@ def abort_migrate_flow():
 
 
 def corrupt_flow():
-    sp = p.obj_open_space('init')
+    sp = p.obj_open_volume()
     labels = ('missing', 'badmagic', 'badlen', 'zeroowner')
     for i in range(4):
         oid = BASE + i
         label = labels[i]
         try:
-            h = p.obj_open_ge_space(sp, oid)
+            h = p.obj_open_ge_oid(sp, oid)
         except OSError as e:
             msg = str(e)
             if 'owner' not in msg and 'corrupt' not in msg:
