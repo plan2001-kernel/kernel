@@ -721,9 +721,10 @@ osownercheckcreate(Ohand *oh, uvlong oid)
 int
 osownerfault(int point)
 {
-	/* 101..104 arm the hard-stop checkpoints used by the crash-recovery
-	 * runner; 1..4 keep the in-kernel error fault points (4: migration). */
-	if(point >= 101 && point <= 104){
+	/* 101..104 exercise owner creation/migration. 105 stops after GE/O
+	 * payload staging and before the published-version header update.
+	 * Points 1..4 remain recoverable error injections. */
+	if(point >= 101 && point <= 105){
 		ownercrash = point;
 		return 0;
 	}
