@@ -486,13 +486,28 @@ def run():
             if h:
                 p.obj_close(h)
         f = d.split()
-        if len(f) != 3 or f[0] != b'OWNERID-RB1':
+        if len(f) != 5 or f[0] != b'OWNERID-RB1':
             return None
-        return int(f[1]), int(f[2])
+        return tuple(int(x) for x in f[1:])
 
     saved = readstate()
     if saved is not None:
-        aown, bown = saved
+        aown, bown, flat_a, flat_b = saved
+        # Two independently opened handles still address one flat GE/O
+        # volume after a full reboot, without any per-handle OID space.
+        sh2 = p.obj_open_space('init')
+        ga = p.obj_open_ge_space(sh2, flat_a)
+        gb = p.obj_open_ge_space(sh, flat_b)
+        ok(p.obj_read(ga, 16) == b'flat-a2' and
+           p.obj_read(gb, 16) == b'flat-b2',
+           'flat OIDs survive reboot and are visible across volume handles')
+        p.obj_close(ga)
+        p.obj_close(gb)
+        gc, new_oid = p.obj_create_ge(sh2, b'flat-reboot')
+        ok(new_oid > flat_b and p.obj_owner(gc)[0] == root[0],
+           'single volume OID high-water mark survives reboot')
+        p.obj_close(gc)
+        p.obj_close(sh2)
         ra, _ = p.program_register('A', 'ownerA', sh, MPY,
                                    p.OWNER_PROGRAM_LAUNCHABLE)
         rb, _ = p.program_register('B', 'ownerB', sh, MPY,
@@ -563,6 +578,36 @@ def run():
     ok(f3 == f2 + 2 and p.obj_owner(g)[0] == root[0],
        'post-publication fault leaves a fully owner-assigned object')
     p.obj_close(g)
+    # A second open is NOT a second store or OID allocator. Both handles
+    # see each other's objects and share the one volume writer slot.
+    sh2 = p.obj_open_space('init')
+    ga, flat_a = p.obj_create_ge(sh, b'flat-a')
+    gb, flat_b = p.obj_create_ge(sh2, b'flat-b')
+    ok(flat_b == flat_a + 1,
+       'independent handles allocate consecutive OIDs from one volume')
+    p.obj_close(ga)
+    p.obj_close(gb)
+    ga = p.obj_open_ge_space(sh2, flat_a)
+    gb = p.obj_open_ge_space(sh, flat_b)
+    ok(p.obj_read(ga, 16) == b'flat-a' and
+       p.obj_read(gb, 16) == b'flat-b',
+       'both handles resolve the same flat OID address space')
+    p.obj_close(ga)
+    p.obj_close(gb)
+    p.obj_put_oid(sh, flat_a, b'flat-a2')
+    denied(lambda: p.obj_put_oid(sh2, flat_b, b'bad'),
+           'second handle cannot start a parallel volume transaction')
+    p.obj_commit(sh)
+    p.obj_put_oid(sh2, flat_b, b'flat-b2')
+    p.obj_commit(sh2)
+    ga = p.obj_open_ge_space(sh2, flat_a)
+    gb = p.obj_open_ge_space(sh, flat_b)
+    ok(p.obj_read(ga, 16) == b'flat-a2' and
+       p.obj_read(gb, 16) == b'flat-b2',
+       'serial transactions publish through the shared volume header')
+    p.obj_close(ga)
+    p.obj_close(gb)
+    p.obj_close(sh2)
     denied(lambda: p.program_register('Z', '', sh, MPY),
            'empty owner name cannot select the kernel OwnerID')
     lh = p.obj_open_ge_space(sh, MPY)
@@ -650,7 +695,8 @@ def run():
     denied(lambda: p.program_launch('evil-root', ('micropython', '-c', ''), ()),
            'unregistered launch cannot create a process')
 
-    state = ('OWNERID-RB1 %d %d' % (aown, bown)).encode()
+    state = ('OWNERID-RB1 %d %d %d %d' %
+             (aown, bown, flat_a, flat_b)).encode()
     p.obj_put_oid(sh, STATE, state)
     p.obj_commit(sh)
     p.obj_close(sh)
