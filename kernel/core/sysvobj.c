@@ -2528,7 +2528,7 @@ uartmodebits(int mode)
 /* The catalog has already validated authority, selector, mode and rights.
  * Acquire the port only after those checks so a refused open has no effect. */
 static int
-vobjuartdevice(int port, int mode, uvlong rights, VobjId *id)
+vobjuartdevice(int port, int mode, uvlong rights, VobjId *id, Vcap *authority)
 {
 	Vobj *o;
 	Vuart *vu;
@@ -2566,7 +2566,7 @@ vobjuartdevice(int port, int mode, uvlong rights, VobjId *id)
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, hrights);
+	h = vobjinstallchild(o, hrights, authority);
 	poperror();
 	if(id != nil){
 		id->incarnation = o->incarnation;
@@ -2644,7 +2644,7 @@ vobjuartstatus(int handle, void *buf, long n)
 /* The catalog has already validated the exclusive-claim option.  The rights
  * mask is the validated attenuation of Vread|Vmeta|Vcontrol|Vdelegate. */
 static int
-vobjkbddevice(uvlong rights, VobjId *id)
+vobjkbddevice(uvlong rights, VobjId *id, Vcap *authority)
 {
 	Vobj *o;
 	Vkbd *vk;
@@ -2671,7 +2671,9 @@ vobjkbddevice(uvlong rights, VobjId *id)
 		vobjput(o);
 		error(Enomem);
 	}
-	nh = vhandalloc(o, (int)rights);
+	if(waserror()){vobjput(o);nexterror();}
+	nh = vhandallocchild(o, (int)rights, authority);
+	poperror();
 	if((r = kbdscancodeacquire()) != 0){
 		vhandput(nh);
 		vobjput(o);		/* frees vk; held is still 0 */
@@ -2767,7 +2769,7 @@ usbeprights(int kind, int mode)
 /* DATA owns the usbcore data-open; CTL only references the endpoint for
  * provider administration, matching the former endpoint-open semantics. */
 static int
-vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id)
+vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id, Vcap *authority)
 {
 	Vobj *o;
 	Vusbep *ve;
@@ -2827,7 +2829,7 @@ vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id)
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, (int)rights);
+	h = vobjinstallchild(o, (int)rights, authority);
 	poperror();
 	if(id != nil){
 		id->incarnation = o->incarnation;
@@ -3057,7 +3059,7 @@ vobjetheropen(int controller)
 }
 
 static int
-vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id)
+vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id, Vcap *authority)
 {
 	int h;
 
@@ -3065,7 +3067,7 @@ vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id)
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, (int)rights);
+	h = vobjinstallchild(o, (int)rights, authority);
 	poperror();
 	if(id != nil){
 		id->incarnation = o->incarnation;
@@ -3083,8 +3085,9 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	ObjDeviceOpenOptions opt;
 	Vhand *catalog;
 	Vobj *o;
+	Vcap *authority;
 	uvlong max, cr;
-	int mode, kind;
+	int mode, kind, result;
 
 	if(req == nil || len != sizeof r)
 		error(Ebadarg);
@@ -3150,7 +3153,10 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 		error(Ebadarg);
 	}
 	cr = (uvlong)catalog->rights;
+	authority = catalog->cap;
+	incref(&authority->ref);
 	vhandput(catalog);
+	if(waserror()){vcapput(authority);nexterror();}
 	if(r.family == ObjDeviceUsbEndpoint && kind == USBCTL
 	&& (cr & Vcontrol) == 0)
 		error(Eperm);
@@ -3158,22 +3164,30 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	case ObjDeviceUart:
 		if(vobjhandlesbykind(up, VkindUart) >= Vuartslotmax)
 			error("too many UART handles");
-		return vobjuartdevice(r.selector0, mode, rights, id);
+		result = vobjuartdevice(r.selector0, mode, rights, id, authority);
+		break;
 	case ObjDeviceKbd:
 		if(vobjhandlesbykind(up, VkindKbd) >= Vkbdslotmax)
 			error("too many keyboard handles");
-		return vobjkbddevice(rights, id);
+		result = vobjkbddevice(rights, id, authority);
+		break;
 	case ObjDeviceUsbEndpoint:
-		return vobjusbepref(r.selector0, r.selector1, kind, mode,
-			rights, id);
+		result = vobjusbepref(r.selector0, r.selector1, kind, mode,
+			rights, id, authority);
+		break;
+	default:
+		if(vobjhandlesbykind(up, VkindDevice) >= Vusbepslotmax)
+			error("too many device handles");
+		if(r.family == ObjDeviceUsbControl)
+			o = vobjusbctrlopen(r.selector0, r.selector1);
+		else
+			o = vobjetheropen(r.selector0);
+		result = vobjdeviceinstall(o, rights, id, authority);
+		break;
 	}
-	if(vobjhandlesbykind(up, VkindDevice) >= Vusbepslotmax)
-		error("too many device handles");
-	if(r.family == ObjDeviceUsbControl)
-		o = vobjusbctrlopen(r.selector0, r.selector1);
-	else
-		o = vobjetheropen(r.selector0);
-	return vobjdeviceinstall(o, rights, id);
+	poperror();
+	vcapput(authority);
+	return result;
 }
 
 /* Caller holds a Vhand for the entire operation, pinning the session and
@@ -3336,7 +3350,7 @@ vobjdevicerx(int handle)
 		error(Eperm);
 	rights = Vread|Vmeta;
 	rights |= h->rights & Vdelegate;
-	result = vobjinstallobj(vetherrxregion(d->ether), rights);
+	result = vobjinstallchild(vetherrxregion(d->ether), rights, h->cap);
 	poperror();
 	vhandput(h);
 	return result;
@@ -3362,7 +3376,7 @@ vobjdevicetx(int handle)
 		error(Ebadarg);
 	rights = Vread|Vwrite|Vmeta;
 	rights |= h->rights & Vdelegate;
-	result = vobjinstallobj(vethertxregion(d->ether), rights);
+	result = vobjinstallchild(vethertxregion(d->ether), rights, h->cap);
 	poperror();
 	vhandput(h);
 	return result;
@@ -3398,7 +3412,7 @@ vobjdevicerecv(int handle, void *out)
 	r.family = ObjDeviceUsbControl;
 	r.length = d->reply->size;
 	/* Failure (e.g. Handle exhaustion) leaves the completion pending. */
-	result = vobjinstallobj(d->reply, Vread|Vmeta|Vdelegate);
+	result = vobjinstallchild(d->reply, Vread|Vmeta|Vdelegate, h->cap);
 	memmove(out, &r, sizeof r);
 	vobjput(d->reply);
 	d->reply = nil;
