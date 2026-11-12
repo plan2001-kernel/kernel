@@ -508,7 +508,7 @@ osgetobjecthandk(Ohand *oh, uvlong oid, uchar **bp, long max, uvlong *ver)
 	return osgetobjecthandcore(oh, oid, bp, max, ver, 0);
 }
 
-/* Space Handle form used by OEXECUTE. It resolves the unified process-local
+/* GE/O volume Handle form used by OEXECUTE. It resolves the unified process-local
  * Vhand to an internal Ohand, then shares
  * the one read/authorization core above. */
 long
@@ -517,7 +517,7 @@ osgetobject(int h, uvlong oid, uchar **bp, long max, uvlong *ver)
 	Ohand *oh;
 	long n;
 
-	oh = ogetspace(h, VkindSpace, Vexecute);
+	oh = ogetspace(h, VkindGeVolume, Vexecute);
 	if(waserror()){
 		ohandput(oh);
 		nexterror();

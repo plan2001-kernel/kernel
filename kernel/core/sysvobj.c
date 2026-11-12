@@ -2349,7 +2349,7 @@ vobjinfo(int handle, VobjInfo *out)
 	out->rights = h->rights;
 	out->holds = o->ref.ref;
 	if((o->kind == VkindGe || o->kind == VkindGeVolume) && o->priv != nil){
-		out->space = 0o->priv);
+		out->space = 0;
 		out->oid = o->oid;
 		osvolumeid((Ohand*)o->priv, out->volume);
 	}
