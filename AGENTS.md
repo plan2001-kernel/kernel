@@ -6,10 +6,13 @@ Read [the authoritative target architecture](docs/ARCHITECTURE.md) first.
 **Target:** [docs/OBJECTSPACE.md](docs/OBJECTSPACE.md). ObjectSpace is an
 independent named capability graph with explicit attenuation, local labels,
 BindingIDs, multiple roots and arbitrary object targets. There is no native
-directory or process parent tree. OwnerID is immutable provenance, not
-the eventual general direct-access rule. Existing OwnerID gates are
-transitional; a complete provider-by-provider security migration is
-required. No historical disk or syscall compatibility is required.
+directory or process parent tree. OwnerID is immutable provenance, NEVER
+ambient access authority. GE/O, region/device and process providers use
+revocable attenuated Handle rights; owner equality checks were removed in
+the capability-authority phase. Bootstrap permission, GE/O scope and
+Kowner integrity, device exclusivity and page protections remain explicit
+security conditions. Never reintroduce owner-equality authorization.
+No historical disk or syscall compatibility is required.
 
 **Do not redesign IPC.** The current memory-publication regions, one RW
 publisher, RO observers and WAIT/WAKE are retained. Data received through
@@ -17,8 +20,8 @@ that mechanism belongs to the recipient as a data value; the original
 publisher-owned object is unchanged. Do not introduce generic kernel
 message queues, send/receive system calls, FIFO, Pipe, copy transport
 or new user programs as part of this ownership-documentation change.
-Capability ABI details in current-implementation sections remain factual
-until a separately authorized implementation migration.
+Current capability ABI, generic revocation and cross-owner delegation are
+implemented. Do not treat the historical OwnerID-only phase as a constraint.
 
 Whenever a phase replaces a mechanism, **remove** its obsolete code, public
 ABI, wrappers/adapters, dormant providers, fixtures, tests and docs. List
@@ -29,8 +32,8 @@ NOT RUN and Remaining obsolete code. Physical deletion includes dead code;
 compatibility retention is not the default.
 
 The previous arch-reset/ownerid phases are historical and merged to main.
-New ObjectSpace experiments branch from main. Keep bounded reviewable PRs
-and do not merge without explicit approval.
+Keep bounded reviewable PRs, including stacked PRs during dependent phases;
+do not merge without explicit approval.
 
 This is an experimental AMD64/ARM64 operating-system kernel. AMD64 currently
 has the functional full-system path; ARM64 has a verified early-boot foundation,
@@ -47,8 +50,9 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 - GE SpaceID is a private storage bucket, NOT the ObjectSpace graph identity.
   Persistent ObjectSpace metadata needs atomic GE/O transactions and trusted
   capability reconstruction; these are not yet implemented.
-- Existing Pgrp/OContext and owner equality checks are legacy to delete in
-  later focused architecture phases; do not introduce compatibility wrappers.
+- Pgrp/OContext are legacy to delete after explicit ObjectSpace roots replace
+  them. OwnerID equality access gates have already been removed. Do not
+  reintroduce them or add compatibility wrappers.
 - Never implement or restore kernel hashtag/tag semantics: no `#`-tag
   validation, tag-name objects, tag-specific indexes or tag query parsers.
   Application-specific tags and query languages belong in userspace. An OID
