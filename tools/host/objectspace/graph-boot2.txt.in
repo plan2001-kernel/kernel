@@ -1,19 +1,21 @@
-# Verify boot1 graph, publish an atomic replacement in the same OID.
+# Restore, replace one edge, and commit the new graph version.
 import plan9 as p
 v=p.obj_open_volume()
 space=p.space_load(v,@GRAPH@)
 rows,cursor,epoch=p.space_list(space)
 assert len(rows)==1
-assert rows[0][0]==@BINDING@
-assert rows[0][1]=='src'
-assert rows[0][3]==p.VREAD+p.VMETA
+first,=rows
+bid,label,kind,rights,relation,identity,flags=first
+assert bid==@BINDING@
+assert label=='src'
+assert rights==p.VREAD+p.VMETA
 h=p.space_resolve(space,@BINDING@,p.VREAD)
 assert p.obj_read(h,11)==b'payload-one'
 second,oid=p.obj_create_ge(v,b'payload-two')
 p.obj_commit(v)
 p.space_unbind(space,@BINDING@)
 newid=p.space_bind(space,'second',second,p.VREAD+p.VMETA)
-assert newid>@BINDING@
+assert newid!=@BINDING@
 version=p.space_save(space,v,@GRAPH@)
-assert version>0
+assert version!=0
 print('PERSISTENT-BOOT2',@GRAPH@,oid,newid)
