@@ -25,7 +25,6 @@
 #include	"../../runtime/abi/sys.h"
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
-#include	"../../runtime/abi/namespace.h"
 #include	"../../runtime/abi/objectspace.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
@@ -132,10 +131,6 @@ sysobjopen(sysva_list list)
 		if(hr.reserved != 0)
 			error(Ebadarg);
 		return vobjopenhandle(hr.handle, rights, (VobjId*)id);
-	case ObjOpenBinding:
-		if(req == nil || len <= 0 || len >= 32)
-			error(Ebadarg);
-		return vobjopenbinding((char*)req, (int)len, rights, (VobjId*)id);
 	case ObjOpenSpace:
 		if(req == nil || len <= 0)
 			error(Ebadarg);
@@ -157,10 +152,6 @@ sysobjopen(sysva_list list)
         return vobjdevicesopen(rights, (VobjId*)id);
     case ObjOpenDevice:
         return vobjdeviceopen(req, len, rights, (VobjId*)id);
-	case ObjOpenNamespaceCurrent:
-		if(req != nil || len != 0)
-			error(Ebadarg);
-		return vobjnamespaceopen(rights, (VobjId*)id);
 	default:
 		error("obj: provider not supported");
 	}
@@ -171,23 +162,6 @@ uintptr
 sysobjclose(sysva_list list)
 {
 	return vobjclosehandle(sysva_arg(list, int));
-}
-
-uintptr
-sysobjbind(sysva_list list)
-{
-	int handle;
-	char *role;
-	long rolelen;
-	uvlong rights, mode;
-
-	handle = sysva_arg(list, int);
-	role = sysva_arg(list, char*);
-	rolelen = sysva_arg(list, long);
-	rights = sysva_arg(list, uvlong);
-	mode = sysva_arg(list, uvlong);
-	if(rolelen <= 0 || rolelen >= 32 || mode > 0x1ff) error(Ebadarg);
-	return vobjbind(handle, role, (int)rolelen, rights, (uint)mode);
 }
 
 /* IOCTL(145): device configuration, control and device-specific status.
@@ -290,34 +264,6 @@ sysobjinvoke(sysva_list list)
 		c.aux = epoch;
 		break;
 	}
-	case ObjOpNamespaceCreate:
-		if(c.in == nil || c.inlen == 0 || c.inlen > 32*32 ||
-		   c.inlen % 32 != 0 || c.out != nil || c.outlen != 0 ||
-		   c.arg0 != 0 || c.arg1 != 0)
-			error(Ebadarg);
-		c.result = vobjnamespacecreate(handle, c.in, (int)(c.inlen/32));
-		break;
-	case ObjOpNamespaceAttach:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
-		   c.arg0 > 0x7fffffffULL || c.arg1 > 2)
-			error(Ebadarg);
-		c.result = vobjnamespaceattach(handle, (int)c.arg0, (int)c.arg1);
-		break;
-	case ObjOpNamespaceDetach:
-		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||
-		   c.arg1 != 0)
-			error(Ebadarg);
-		vobjnamespacedetach(handle, c.arg0);
-		c.result = 0;
-		break;
-	case ObjOpNamespaceVisible:
-		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
-		   (c.out == nil && c.outlen != 0) ||
-		   c.outlen > 32*sizeof(NsVisible) ||
-		   c.outlen % sizeof(NsVisible) != 0)
-			error(Ebadarg);
-		c.result = vobjnamespacevisible(handle, c.out, (long)c.outlen);
-		break;
 	case ObjOpDeviceList:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0
         || (c.out == nil && c.outlen != 0)

@@ -28,12 +28,11 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/objectspace.h"
-#include	"../../runtime/abi/namespace.h"
 #include	"owner.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 #include	"lifediag.h"
-#include	"ocontext.h"
+#include	"ohand.h"
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 #include	"env/envapi.h"
 #endif
@@ -466,10 +465,7 @@ vobjput(Vobj *o)
 
 		o->priv = nil;
 		procstatput(st);
-	}else if(o->kind == VkindNamespaceControl && o->priv != nil){
-		lifecontrol(o->priv, -1);
-		closepgrp(o->priv);
-	}else if(o->kind == VkindGe || o->kind == VkindSpace || o->kind == VkindNamespaceView){
+	}else if(o->kind == VkindGe || o->kind == VkindSpace){
 		if(o->priv != nil)
 			oshandput(o->priv);
 	}
@@ -3714,9 +3710,6 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	o = vspacehandle(handle, Vcontrol);
 	if(waserror()){vcapput(grant);vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
-	if(target->obj->kind == VkindNamespaceControl ||
-	   target->obj->kind == VkindNamespaceView)
-		error(Eperm); /* obsolete process-group namespace is not portable */
 	rights = req->rights == 0 ? target->rights : req->rights;
 	if(rights == 0 || (rights & ~target->rights) != 0 ||
 	   (rights & ~Vall) != 0)
@@ -3885,205 +3878,6 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 	memmove(out, records, n*sizeof records[0]);
 	vobjput(o);
 	return n;
-}
-
-int
-vobjnamespaceopen(uvlong rights, VobjId *id)
-{
-	Vobj *o;
-	int h;
-
-	if(id != nil)
-		validaddr((uintptr)id, sizeof *id, 1);
-	if(up->pgrp == nil)
-		error(Eperm);
-	if(rights == 0)
-		rights = Vcontrol|Vmeta|Vdelegate;
-	if((rights & Vcontrol) == 0 ||
-	   (rights & ~(uvlong)(Vcontrol|Vmeta|Vdelegate)) != 0)
-		error(Eperm);
-	o = vobjnewkind(VkindNamespaceControl, 0);
-	if(o == nil)
-		error(Enomem);
-	o->provider = ObjOpenNamespaceCurrent;
-	o->priv = up->pgrp;
-	incref(&up->pgrp->ref);
-	lifecontrol(o->priv, 1);
-	if(waserror()){
-		vobjput(o);
-		nexterror();
-	}
-	h = vobjinstallobj(o, (int)rights);
-	poperror();
-	if(id != nil){
-		id->incarnation = o->incarnation;
-		id->space = o->space;
-		id->oid = o->oid;
-	}
-	vobjput(o);
-	return h;
-}
-
-static void
-vobjnamespacecheck(int handle)
-{
-	Vobj *o = vobjholdobj(handle, Vcontrol);
-	int ok = o->kind == VkindNamespaceControl && o->priv == up->pgrp;
-	vobjput(o);
-	if(!ok)
-		error(Eperm);
-}
-
-/* NamespaceControl is tied to the caller's current process group.  A copied
- * Handle cannot operate on a child or another namespace. */
-int
-vobjnamespacecreate(int control, char (*roles)[32], int nr)
-{
-	char names[Obindmax][Onamemax];
-	Ohand *view = nil;
-	uvlong epoch;
-	int i, j, handle;
-
-	vobjnamespacecheck(control);
-	if(roles == nil || nr <= 0 || nr > Obindmax)
-		error(Ebadarg);
-	validaddr((uintptr)roles, nr*Onamemax, 0);
-	memmove(names, roles, nr*Onamemax);
-	view = smalloc(sizeof *view);
-	view->ref.ref = 1;
-	if(waserror()){
-		ohandput(view);
-		nexterror();
-	}
-	view->provider = octxnew();
-	if(view->provider == nil)
-		error(Enomem);
-	epoch = octxepoch(up->pgrp->ocontext);
-	for(i=0; i<nr; i++){
-		if(memchr(names[i], 0, Onamemax) == nil || names[i][0] == 0)
-			error(Ebadarg);
-		for(j=0; names[i][j]; j++)
-			if(!((names[i][j]>='a' && names[i][j]<='z') ||
-			     (names[i][j]>='A' && names[i][j]<='Z') ||
-			     (names[i][j]>='0' && names[i][j]<='9') ||
-			      names[i][j]=='_' || names[i][j]=='-'))
-				error(Ebadarg);
-		for(j=0; j<i; j++)
-			if(strcmp(names[i], names[j]) == 0)
-				error(Ebadarg);
-		oscheckrole(up->pgrp->ocontext, names[i], 1);
-	}
-	/* The view's authority is acquired under the same gate as binding and
-	 * attachment, so RFNOMNT cannot interleave with creation. */
-	if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
-	if(waserror()){
-		pgrpnamespaceextendend(up->pgrp);
-		nexterror();
-	}
-	for(i=0; i<nr; i++)
-		octxcopybinding(view->provider, up->pgrp->ocontext, names[i]);
-	if(epoch != octxepoch(up->pgrp->ocontext))
-		error("O: namespace changed; retry");
-	poperror();
-	pgrpnamespaceextendend(up->pgrp);
-	handle = vobjinstallohand(view, VkindNamespaceView);
-	view = nil;
-	poperror();
-	return handle;
-}
-
-uvlong
-vobjnamespaceattach(int control, int handle, int mode)
-{
-	Ohand *view, *grants[Obindmax];
-	uvlong token;
-	int n=0, i;
-
-	vobjnamespacecheck(control);
-	if(mode < 0 || mode > 2)
-		error(Ebadarg);
-	view = vobjholdohand(handle, VkindNamespaceView, Vcontrol);
-	if(waserror()){
-		for(i=0; i<n; i++) ohandput(grants[i]);
-		ohandput(view);
-		nexterror();
-	}
-	if(view->provider == nil)
-		error(Ebadarg);
-	n = octxsnapshot(view->provider, grants, 1);
-	for(i=0; i<n; i++)
-		osviewgrantvalid(grants[i]);
-	token = voidget();
-	/* Admission and composition are one step against RFNOMNT. */
-	if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
-	if(waserror()){
-		pgrpnamespaceextendend(up->pgrp);
-		nexterror();
-	}
-	octxcompose(up->pgrp->ocontext, view->provider, mode, token);
-	poperror();
-	pgrpnamespaceextendend(up->pgrp);
-	poperror();
-	for(i=0; i<n; i++) ohandput(grants[i]);
-	ohandput(view);
-	return token;
-}
-
-void
-vobjnamespacedetach(int control, uvlong token)
-{
-	vobjnamespacecheck(control);
-	if(token == 0 || up->pgrp == nil)
-		error(Ebadarg);
-	octxunmount(up->pgrp->ocontext, token);
-}
-
-int
-vobjnamespacevisible(int control, void *out, long bytes)
-{
-	Ohand *grants[Obindmax];
-	NsVisible records[Obindmax];
-	NsIdentity id;
-	int allowed[Obindmax], n, i, j, count=0;
-	uvlong epoch;
-
-	vobjnamespacecheck(control);
-	if(bytes < 0 || bytes > sizeof records || bytes % sizeof records[0] ||
-	   (out == nil && bytes != 0))
-		error(Ebadarg);
-	epoch = octxepoch(up->pgrp->ocontext);
-	n = octxsnapshot(up->pgrp->ocontext, grants, 0);
-	if(waserror()){
-		for(i=0; i<n; i++) ohandput(grants[i]);
-		nexterror();
-	}
-	if(!osvisibility(grants, n, allowed) ||
-	   epoch != octxepoch(up->pgrp->ocontext))
-		error("O: namespace changed; retry");
-	for(i=0; i<n; i++) if(allowed[i]){
-		osvolumeid(grants[i], id.volume);
-		id.space = grants[i]->sid;
-		id.oid = grants[i]->oid;
-		for(j=0; j<count; j++)
-			if(memcmp(&records[j].object, &id, sizeof id) == 0)
-				break;
-		if(j == count){
-			records[count].object = id;
-			records[count].rights = 0;
-			records[count].reserved = 0;
-			count++;
-		}
-		records[j].rights |= grants[i]->rights;
-	}
-	if(count*sizeof records[0] > bytes)
-		error(Eshort);
-	if(count){
-		validaddr((uintptr)out, count*sizeof records[0], 1);
-		memmove(out, records, count*sizeof records[0]);
-	}
-	poperror();
-	for(i=0; i<n; i++) ohandput(grants[i]);
-	return count;
 }
 
 static long
@@ -4392,104 +4186,3 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 	return handle;
 }
 
-/* A role is a bounded ASCII label, never a path or a directory component. */
-static void
-vrolename(char *dst, char *src, int n)
-{
-	int i;
-
-	if(src == nil || n <= 0 || n >= Vnamemax)
-		error(Ebadarg);
-	validaddr((uintptr)src, n, 0);
-	memmove(dst, src, n);
-	dst[n] = 0;
-	for(i = 0; i < n; i++)
-		if(!((dst[i] >= 'a' && dst[i] <= 'z')
-		|| (dst[i] >= 'A' && dst[i] <= 'Z')
-		|| (dst[i] >= '0' && dst[i] <= '9')
-		|| dst[i] == '_' || dst[i] == '-'))
-			error(Ebadarg);
-}
-
-Ohand *vobjbindingcap(void *v) {
- Vhand *h=v;
- if(h==nil || h->obj==nil ||
-    (h->obj->kind!=VkindGe && h->obj->kind!=VkindSpace)) return nil;
- return h->obj->priv;
-}
-Ohand *vobjbindinggecap(void *v) {
- Vhand *h=v;
- return h!=nil && h->obj!=nil && h->obj->kind==VkindGe ? h->obj->priv : nil;
-}
-int vobjbindingdelegable(void *v) {
- Vhand *h=v;
- return h!=nil && (h->rights & Vdelegate)!=0 && vcapvalid(h->cap);
-}
-void vobjbindinghold(void *v) {if(v) incref(&((Vhand*)v)->ref);}
-void vobjbindingput(void *v) {vhandput(v);}
-
-int
-vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
-{
- Vhand *h=nil,*nh=nil;
- Vobj *bound=nil;
- Ohand *cap=nil;
- char name[Vnamemax];
- int m=mode & ObjBindModeMask;
- if(mode & ~(ObjBindModeMask|ObjBindRemove)) error(Ebadarg);
- vrolename(name,role,rolelen);
- if(up->pgrp==nil) error(Eperm);
- if(mode & ObjBindRemove){
-  if(mode!=ObjBindRemove || handle!=0 || rights!=0) error(Ebadarg);
-  octxunbind(up->pgrp->ocontext,name);
-  return 0;
- }
- if(m>ObjBindShare) error(Ebadarg);
- h=vlookup(handle,Vdelegate);
- if(waserror()){oshandput(cap);vobjput(bound);vhandput(nh);vhandput(h);nexterror();}
- if(h->obj->kind==VkindNamespaceControl) error(Eperm);
- if(rights==0) rights=h->rights;
- if(rights & ~(uvlong)h->rights) error(Eperm);
- if(h->obj->kind==VkindGe){
-  cap=oscopycap(h->obj->priv,h->obj->oid);
-  vgecaplimit(cap,(int)rights);
-  bound=vobjnewkind(VkindGe,0);
-  if(bound==nil) error(Enomem);
-  bound->provider=VopenGe;
-  bound->oid=h->obj->oid;
-  bound->space=ossid(cap);
-  bound->priv=cap;cap=nil;
-  nh=vhandallocchild(bound, (int)rights, h->cap);
-  vobjput(bound);bound=nil;
- }else
-  nh=vhandderive(h, (int)rights);
- /* RFNOMNT forbids namespace extension, not removal of an existing role.
-  * Admission and the bind are one step against pgrpsealnamespace(). */
- if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
- if(waserror()){pgrpnamespaceextendend(up->pgrp);nexterror();}
- octxbindobject(up->pgrp->ocontext,name,nh,m);
- poperror();
- pgrpnamespaceextendend(up->pgrp);
- poperror();vhandput(nh);vhandput(h);return 0;
-}
-
-int
-vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id)
-{
- Vhand *bh,*nh;int handle;char name[Vnamemax];
- if(id) validaddr((uintptr)id,sizeof *id,1);
- vrolename(name,role,rolelen);
- if(up->pgrp==nil) error(Eperm);
- bh=octxobject(up->pgrp->ocontext,name);
- if(waserror()){vhandput(bh);nexterror();}
- if(!vcapvalid(bh->cap)) error(Eperm);
- if(bh->obj->kind==VkindGe || bh->obj->kind==VkindSpace) oscheckhand(bh->obj->priv);
- if(rights==0) rights=bh->rights;
- if(rights & ~(uvlong)bh->rights) error(Eperm);
- nh=vhandderive(bh, (int)rights);
- if(vgettab(1)==nil){vhandput(nh);error(Enomem);}
- handle=vinstall(vgettab(1),nh);
- if(handle<0){vhandput(nh);error("vobj: too many handles");}
- if(id){id->incarnation=bh->obj->incarnation;id->space=bh->obj->space;id->oid=bh->obj->oid;}
- poperror();vhandput(bh);return handle;
-}

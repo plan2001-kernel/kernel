@@ -171,7 +171,6 @@ KERNEL_SOURCES = {
     "sysctl": "kernel/core/sysctl.c",
     "sysfile": "kernel/core/sysfile.c",
     "sysgefs": "ge/storage/sysgefs.c",
-    "ocontext": "ge/storage/ocontext.c",
     "sysinfo": "kernel/core/sysinfo.c",
     "syskbd": "kernel/core/syskbd.c",
     "sysn3": "kernel/core/sysn3.c",
@@ -630,7 +629,7 @@ def base_command(cc: str, src: Path, obj: Path, extra: list[str] | None = None) 
     cmd += ["-DPLAN2001_GCC", "-include", str(ROOT / "kernel/compat/plan2001-gcc.h")]
     cmd += CFLAGS
     cmd += extra or []
-    if src.name in ("ocontext.c", "sysgefs.c"):
+    if src.name == "sysgefs.c":
         # Kernel entry stacks retain Plan 9 alignment; namespace C must not
         # introduce aligned SSE stack stores or borrow the up/Mach registers.
         cmd += ["-mgeneral-regs-only", "-ffixed-r14", "-ffixed-r15"]

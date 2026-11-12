@@ -13,7 +13,7 @@
 #include "../../kernel/core/error.h"
 #include "../../kernel/core/sd.h"
 #include "../../kernel/core/lifediag.h"
-#include "ocontext.h"
+#include "ohand.h"
 #include "../../kernel/core/vobjint.h"
 
 /*
@@ -367,7 +367,6 @@ ohandput(Ohand *oh)
 	 * Ospace and origin pin are separate live resources. */
 	delegate = oh->caps == 2;
 #endif
-	if(oh->provider != nil) octxput(oh->provider);
 	if(oh->sp != nil){
 		onativeclose(oh->sp);
 #ifdef PLAN2001_LIFECYCLE_DIAG
@@ -407,7 +406,7 @@ ohgate(Ohand *h)
 static void
 oauthorize(Ohand *oh, uvlong oid, int rights)
 {
-	if(oh->provider != nil || oh->revoked || (oh->origin && oh->origin->revoked) || (oh->rights & rights) != rights)
+	if(oh->revoked || (oh->origin && oh->origin->revoked) || (oh->rights & rights) != rights)
 		error(Eperm);
 	/*
 	 * A capability copy is an explicitly delegated reference to one Space
@@ -424,7 +423,7 @@ oauthorize(Ohand *oh, uvlong oid, int rights)
 	}
 	if(oh->bootstrap){
 		if(!oboot()) error(Eperm);
-	}else if(up->pgrp == nil || !octxmember(up->pgrp->ocontext, oh) || oid != oh->oid)
+	}else
 		error(Eperm);
 }
 
@@ -464,7 +463,6 @@ osopenspacecore(char *p, int n, int user)
 	oh->ref.ref = 1;
 	if(waserror()){ ohandput(oh); nexterror(); }
 	oh->sp = onativeopen(ovol, name);
-	oh->sid = onativesid(oh->sp);
 	strcpy(oh->space, name);
 	oh->rights = Oall;
 	oh->bootstrap = 1;
@@ -575,7 +573,8 @@ oshandrights(Ohand *oh)
 uvlong
 ossid(Ohand *oh)
 {
-	return oh == nil ? 0 : oh->sid;
+	USED(oh);
+	return 0; /* flat volume; no SpaceID */
 }
 
 void
@@ -601,7 +600,6 @@ oscopycap(Ohand *src, uvlong oid)
 	n = smalloc(sizeof *n);
 	n->ref.ref = 1;
 	n->rights = src->rights;
-	n->sid = src->sid;
 	n->oid = oid;
 	n->bootstrap = 0;
 	n->caps = 1;
@@ -617,9 +615,6 @@ oscopycap(Ohand *src, uvlong oid)
 		free(n);
 		error("O: capability open failed");
 	}
- if(onativesid(n->sp) != src->sid){
-  onativeclose(n->sp);free(n);error(Eperm);
- }
  if(!src->bootstrap && src->caps != 2){
   n->origin = src->origin ? src->origin : src;
   incref(&n->origin->ref);
@@ -655,7 +650,6 @@ oscopycapdelegate(Ohand *src, int rights)
 	n = smalloc(sizeof *n);
 	n->ref.ref = 1;
 	n->rights = rights;
-	n->sid = src->sid;
 	n->oid = 0;
 	n->bootstrap = 0;
 	n->caps = 2;
@@ -670,11 +664,6 @@ oscopycapdelegate(Ohand *src, int rights)
 	if(n->sp == nil){
 		free(n);
 		error("O: capability open failed");
-	}
-	if(onativesid(n->sp) != src->sid){
-		onativeclose(n->sp);
-		free(n);
-		error(Eperm);
 	}
 	/* Pin the grant origin across the process boundary.  The capability
 	 * copy owns its own Ospace, but revocation and its gate continue to
@@ -926,36 +915,6 @@ obootstrap(Proc *p)
 	return p != nil && p == bootowner && p->pid == bootpid;
 }
 
-void
-oscheckrole(void *context, char *name, int geonly)
-{
- Ohand *h;void *binding;
- if(context==nil) error(Eperm);
- binding=octxobject(context,name);
- if(waserror()){vobjbindingput(binding);nexterror();}
- if(!vobjbindingdelegable(binding) || (geonly && vobjbindinggecap(binding)==nil)) error(Eperm);
- h=vobjbindingcap(binding);
- if(h==nil){poperror();vobjbindingput(binding);return;}
- qlock(ohgate(h));
- if(waserror()){
-  qunlock(ohgate(h));nexterror();
- }
- oauthorize(h,h->oid,Odelegate);
- poperror();qunlock(ohgate(h));
- poperror();vobjbindingput(binding);
-}
-
-void
-osviewgrantvalid(Ohand *h)
-{
- if(h==nil) error(Ebadarg);
- qlock(ohgate(h));
- if(h->revoked || (h->origin && h->origin->revoked)){
-  qunlock(ohgate(h));error(Eperm);
- }
- qunlock(ohgate(h));
-}
-
 /* GE/O authority revocation is distinct from Handle close and role removal.
  * Descendants sharing an origin are revoked; independently opened grants are not. */
 void
@@ -972,84 +931,3 @@ osrevokehand(Ohand *h)
  poperror();qunlock(ohgate(h));
 }
 
-/* Snapshot selected bindings before the child can run. Grants stay live:
- * an unbind after selection affects the source map only (COPY), whereas
- * SHARE deliberately observes later edits to the same view. Revocation
- * always affects both. Kernel grant pointers never cross the ABI. */
-void
-ocontextspawn(Proc *child, int mode, char (*roles)[32], int nr)
-{
-	void *snapshot;
-	int i, j;
-	if(mode == 0) return;
-	if(up->pgrp == nil) error(Eperm);
-	snapshot = octxcopy(up->pgrp->ocontext);
-	if(waserror()){ octxput(snapshot); nexterror(); }
-	for(i = 0; i < nr; i++){
-		if(memchr(roles[i], 0, 32) == nil || roles[i][0] == 0) error(Ebadarg);
-		for(j = 0; j < i; j++)
-			if(strcmp(roles[j], roles[i]) == 0) error(Ebadarg);
-		oscheckrole(snapshot, roles[i], 0);
-		octxcopybinding(child->pgrp->ocontext, snapshot, roles[i]);
-	}
-	if(mode == 2){
-  if(!oboot() && !octxshareable(snapshot)) error(Eperm);
-  Ohand *layers[Obindmax]; int count=octxsnapshot(snapshot,layers,1),k;
-  for(k=0;k<count;k++){
-   int ok;
-   qlock(ohgate(layers[k]));
-   ok=!layers[k]->revoked && !(layers[k]->origin && layers[k]->origin->revoked) && (oboot() || (layers[k]->rights&Odelegate));
-   qunlock(ohgate(layers[k]));
-   if(!ok){for(int t=0;t<count;t++) ohandput(layers[t]);error(Eperm);}
-  }
-  for(k=0;k<count;k++) ohandput(layers[k]);
-		/* SHARE opts into the whole mutable view, with every role listed. */
-		if(!octxsame(snapshot, child->pgrp->ocontext) ||
-					!octxmatches(up->pgrp->ocontext, snapshot)) error("O: selected view changed");
-		/*
-		 * Acquire the parent's reference before dropping the child's
-		 * fresh group.  The child stays unpublished, but ordering the
-		 * transfer this way never leaves it with a released Pgrp and
-		 * makes a later spawn-failure rollback unambiguous.
-		 */
-		{
-			Pgrp *parent = up->pgrp;
-			Pgrp *old;
-
-			incref(&parent->ref);
-			old = child->pgrp;
-			child->pgrp = parent;
-			closepgrp(old);
-		}
-	}
-	poperror();
-	octxput(snapshot);
-}
-
-/* Current object-ABI namespace visibility. */
-static int nsreadable(Ohand *h,int rights) {
- return !h->provider && !h->bootstrap && !h->revoked && !(h->origin && h->origin->revoked) && (h->rights&rights)==rights &&
-  up->pgrp && octxmember(up->pgrp->ocontext,h);
-}
-/* Lock grants in address order, with duplicates removed, then verify an
- * unchanged map epoch. Never hold the context spinlock during I/O or sleep.
- * This provides a linearizable visibility snapshot without granting handles. */
-int
-osvisibility(Ohand **source,int n,int *allowed)
-{
- Ohand *ordered[Obindmax],*tmp;int i,j,k=0,stable;uvlong epoch;
- for(i=0;i<n;i++){
-  Ohand *root=source[i]->origin?source[i]->origin:source[i];
-  for(j=0;j<k;j++) if(ordered[j]==root) break;
-  if(j==k) ordered[k++]=root;
- }
- for(i=1;i<k;i++) for(j=i;j>0 && (uintptr)ordered[j]<(uintptr)ordered[j-1];j--){
-  tmp=ordered[j];ordered[j]=ordered[j-1];ordered[j-1]=tmp;
- }
- for(i=0;i<k;i++) qlock(&ordered[i]->gate);
- epoch=up->pgrp?octxepoch(up->pgrp->ocontext):0;
- for(i=0;i<n;i++) allowed[i]=nsreadable(source[i],Oread);
- stable=epoch==(up->pgrp?octxepoch(up->pgrp->ocontext):0);
- for(i=k;i>0;i--) qunlock(&ordered[i-1]->gate);
- return stable;
-}

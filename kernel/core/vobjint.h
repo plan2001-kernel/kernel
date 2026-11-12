@@ -59,7 +59,6 @@ int	vobjidentity(int handle, VobjId *id);
 int	vobjcommit(int handle, uvlong *ver);
 int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
-int	vobjnamespaceopen(uvlong rights, VobjId *id);
 /* ObjectSpace graph is independent of Pgrp, GE SpaceID, and process ancestry. */
 int	vobjspacecreate(VobjId *id);
 uvlong	vobjspacebind(int spacehandle, ObjSpaceBindReq *req);
@@ -67,14 +66,7 @@ void	vobjspaceunbind(int spacehandle, uvlong bindingid);
 int	vobjspaceresolve(int spacehandle, uvlong bindingid, uvlong rights);
 int	vobjspaceenumerate(int spacehandle, uvlong cursor, uvlong generation,
 	ObjSpaceEntry *out, int max, uvlong *epoch);
-int	vobjnamespacecreate(int control, char (*roles)[32], int nr);
-uvlong	vobjnamespaceattach(int control, int view, int mode);
-void	vobjnamespacedetach(int control, uvlong token);
-int	vobjnamespacevisible(int control, void *out, long bytes);
-void	oscheckrole(void *context, char *name, int geonly);
 void	osrevokehand(Ohand*);
-void	osviewgrantvalid(Ohand*);
-int	osvisibility(Ohand **grants, int count, int *allowed);
 
 /*
  * One explicit process-local Handle delegation request.  Both RFORKEX and
@@ -126,8 +118,6 @@ int	vobjprocterminate(int);
 int	vobjopenstream(uvlong provider, void *req, long len, uvlong rights,
 		VobjId *id);
 int	vobjopenhandle(int src, uvlong rights, VobjId *id);
-int	vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id);
-int	vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode);
 int	vobjinfo(int handle, VobjInfo *out);
 int	vobjownerinfo(int handle, ObjOwnerInfo *out);
 int	vobjrevoke(int handle);
