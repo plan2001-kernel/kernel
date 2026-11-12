@@ -3702,13 +3702,14 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	Vhand *target = nil;
 	Vspace *s;
 	VspaceBinding *b;
+	Vcap *grant = nil;
 	int rights;
 	uvlong id;
 	if(req == nil || req->flags != 0 || req->target <= 0)
 		error(Ebadarg);
 	vspacelabelcheck(req->label);
 	o = vspacehandle(handle, Vcontrol);
-	if(waserror()){vhandput(target);vobjput(o);nexterror();}
+	if(waserror()){vcapput(grant);vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
 	if(target->obj->kind == VkindNamespaceControl ||
 	   target->obj->kind == VkindNamespaceView)
@@ -3717,6 +3718,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	if(rights == 0 || (rights & ~target->rights) != 0 ||
 	   (rights & ~Vall) != 0)
 		error(Eperm);
+	grant = vcapnew(target->cap);
 	s = o->priv;
 	lock(&s->lk);
 	if(s->revoked || s->nbindings == ObjSpaceBindingMax ||
@@ -3728,6 +3730,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	memset(b, 0, sizeof *b);
 	memmove(b->label, req->label, sizeof b->label);
 	b->id = id = ++s->nextid;
+	b->cap = grant; grant = nil;
 	b->rights = rights;
 	b->relation = req->relation;
 	b->kind = target->obj->kind;
@@ -3752,6 +3755,7 @@ vobjspaceunbind(int handle, uvlong id)
 	Vobj *o;
 	Vspace *s;
 	Vobj *target;
+	Vcap *grant;
 	int i, j;
 	if(id == 0) error(Ebadarg);
 	o = vspacehandle(handle, Vcontrol);
@@ -3770,11 +3774,13 @@ vobjspaceunbind(int handle, uvlong id)
 		error("objectspace: no binding");
 	}
 	target = s->entries[i].target;
+	grant = s->entries[i].cap;
 	for(j = i+1; j < s->nbindings; j++)
 		s->entries[j-1] = s->entries[j];
 	memset(&s->entries[--s->nbindings], 0, sizeof s->entries[0]);
 	s->epoch++;
 	unlock(&s->lk);
+	vcapput(grant);
 	if(target != nil) vobjput(target);
 	vobjput(o);
 }
@@ -3783,13 +3789,14 @@ int
 vobjspaceresolve(int handle, uvlong id, uvlong rights)
 {
 	Vobj *o, *target = nil;
+	Vcap *grant = nil;
 	Vspace *s;
 	VspaceBinding *b;
 	uvlong incarnation = 0, oid = 0;
 	int i, allowed, result;
 	if(id == 0 || rights > Vall) error(Ebadarg);
 	o = vspacehandle(handle, Vread);
-	if(waserror()){vobjput(target);vobjput(o);nexterror();}
+	if(waserror()){vcapput(grant);vobjput(target);vobjput(o);nexterror();}
 	s = o->priv;
 	lock(&s->lk);
 	if(s->revoked){
@@ -3808,6 +3815,8 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 		unlock(&s->lk);
 		error(Eperm);
 	}
+	grant = b->cap;
+	incref(&grant->ref);
 	if(b->target != nil){
 		target = b->target;
 		incref(&target->ref);
@@ -3818,8 +3827,9 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 	unlock(&s->lk);
 	if(target == nil) target = vspaceweakref(incarnation, oid);
 	if(target == nil) error("objectspace: stale target");
-	result = vobjinstallobj(target, allowed);
+	result = vobjinstallchild(target, allowed, grant);
 	poperror();
+	vcapput(grant);
 	vobjput(target);
 	vobjput(o);
 	return result;
@@ -3858,6 +3868,8 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 		r->kind = b->kind;
 		r->rights = b->rights;
 		r->relation = b->relation;
+		if(!vcapvalid(b->cap))
+			r->flags |= ObjSpaceFlagRevoked;
 		memmove(r->label, b->label, sizeof r->label);
 	}
 	unlock(&s->lk);
@@ -4353,7 +4365,7 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 		vhandput(s);
 		error(Enomem);
 	}
-	nh = vhandalloc(s->obj, (int)rights);
+	nh = vhandderive(s, (int)rights);
 	handle = vinstall(t, nh);
 	if(handle < 0){
 		vhandput(nh);
@@ -4400,7 +4412,7 @@ Ohand *vobjbindinggecap(void *v) {
 }
 int vobjbindingdelegable(void *v) {
  Vhand *h=v;
- return h!=nil && (h->rights & Vdelegate)!=0;
+ return h!=nil && (h->rights & Vdelegate)!=0 && vcapvalid(h->cap);
 }
 void vobjbindinghold(void *v) {if(v) incref(&((Vhand*)v)->ref);}
 void vobjbindingput(void *v) {vhandput(v);}
@@ -4436,10 +4448,10 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
   bound->oid=h->obj->oid;
   bound->space=ossid(cap);
   bound->priv=cap;cap=nil;
-  nh=vhandalloc(bound, (int)rights);
+  nh=vhandallocchild(bound, (int)rights, h->cap);
   vobjput(bound);bound=nil;
  }else
-  nh=vhandalloc(h->obj, (int)rights);
+  nh=vhandderive(h, (int)rights);
  /* RFNOMNT forbids namespace extension, not removal of an existing role.
   * Admission and the bind are one step against pgrpsealnamespace(). */
  if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
@@ -4459,10 +4471,11 @@ vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id)
  if(up->pgrp==nil) error(Eperm);
  bh=octxobject(up->pgrp->ocontext,name);
  if(waserror()){vhandput(bh);nexterror();}
+ if(!vcapvalid(bh->cap)) error(Eperm);
  if(bh->obj->kind==VkindGe || bh->obj->kind==VkindSpace) oscheckhand(bh->obj->priv);
  if(rights==0) rights=bh->rights;
  if(rights & ~(uvlong)bh->rights) error(Eperm);
- nh=vhandalloc(bh->obj, (int)rights);
+ nh=vhandderive(bh, (int)rights);
  if(vgettab(1)==nil){vhandput(nh);error(Enomem);}
  handle=vinstall(vgettab(1),nh);
  if(handle<0){vhandput(nh);error("vobj: too many handles");}
