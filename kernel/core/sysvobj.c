@@ -27,6 +27,7 @@
 #include	"../../runtime/abi/sys.h"
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
+#include	"../../runtime/abi/objectspace.h"
 #include	"../../runtime/abi/namespace.h"
 #include	"owner.h"
 #include	"../../runtime/abi/ioctl.h"
@@ -175,6 +176,64 @@ struct Vstats {
 	uvlong	nbytes;
 };
 
+/*
+ * A live ObjectSpace is an independent capability graph node.
+ *
+ * Ordinary target edges pin their providers; edges to other ObjectSpaces
+ * carry weak boot-incarnation identities.  In particular a cyclic set of
+ * spaces cannot keep itself alive after its last external capability closes.
+ * Registry lookup pins the live target under the same lock as destruction:
+ * no stale-pointer dereference or object-number ABA is possible.
+ *
+ * A binding is NOT object ownership.  An unreachable target is reported as
+ * stale; it is never silently replaced by a reused identity.
+ */
+typedef struct VspaceBinding VspaceBinding;
+typedef struct Vspace Vspace;
+struct VspaceBinding {
+	uvlong id, incarnation, space, oid;
+	char label[ObjSpaceLabelMax];
+	uint rights, relation, kind;
+	Vobj *target;                  /* nil for weak ObjectSpace edges */
+};
+struct Vspace {
+	Lock lk;
+	Vobj *object;                   /* weak: registry owner removes on final put */
+	Vspace *next;
+	uvlong epoch, nextid;
+	int nbindings, revoked;
+	VspaceBinding entries[ObjSpaceBindingMax];
+};
+static Lock vspaceregistrylock;
+static Vspace *vspaceregistry;
+
+/* Called with registry lock held, after final Vobj reference has dropped. */
+static void
+vspaceregistryremove(Vspace *s)
+{
+	Vspace **p;
+	if(s == nil) return;
+	for(p = &vspaceregistry; *p != nil; p = &(*p)->next)
+		if(*p == s){*p = s->next; return;}
+}
+
+/* Pins a weak ObjectSpace reference atomically against final release. */
+static Vobj*
+vspaceweakref(uvlong incarnation, uvlong oid)
+{
+	Vspace *s;
+	Vobj *result = nil;
+	lock(&vspaceregistrylock);
+	for(s = vspaceregistry; s != nil; s = s->next)
+		if(s->object->incarnation == incarnation && s->object->oid == oid){
+			result = s->object;
+			incref(&result->ref);
+			break;
+		}
+	unlock(&vspaceregistrylock);
+	return result;
+}
+
 static Vstats vstats;
 static Lock vidlock;
 static uvlong vincarnation;
@@ -297,7 +356,19 @@ vgecaplimit(Ohand*, int);
 void
 vobjput(Vobj *o)
 {
-	if(o == nil || decref(&o->ref) != 0)
+	if(o == nil) return;
+	if(o->kind == VkindObjectSpace){
+		Vspace *s;
+		/* The registry and the final decrement must be atomic. */
+		lock(&vspaceregistrylock);
+		if(decref(&o->ref) != 0){
+			unlock(&vspaceregistrylock);
+			return;
+		}
+		s = o->priv;
+		vspaceregistryremove(s);
+		unlock(&vspaceregistrylock);
+	}else if(decref(&o->ref) != 0)
 		return;
 	if(o->kind == VkindUart && o->priv != nil){	}else if(o->kind == VkindUart && o->priv != nil){
 		Vuart *vu = o->priv;
@@ -366,6 +437,15 @@ vobjput(Vobj *o)
 			procmemdecommit(up, r->chargepages);
 		free(r->pages);
 		free(r);
+	}else if(o->kind == VkindObjectSpace && o->priv != nil){
+		Vspace *s = o->priv;
+		int i;
+		o->priv = nil;
+		/* ObjectSpace edges are weak: no recursive space destruction. */
+		for(i = 0; i < s->nbindings; i++)
+			if(s->entries[i].target != nil)
+				vobjput(s->entries[i].target);
+		free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
 
@@ -3401,6 +3481,245 @@ vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id)
 	}
 	vobjput(o);
 	return h;
+}
+
+
+/*
+ * ObjectSpace v1.  This is a real first-class Vobj rather than a Pgrp
+ * nickname.  No path parsing, mount list or process ancestry is involved.
+ * Target references keep their native identity and Handle rights are only
+ * attenuated.  Binding IDs, not labels, identify multigraph edges.
+ */
+int
+vobjspacecreate(VobjId *id)
+{
+	Vobj *o;
+	Vspace *s;
+	int h;
+	/* Internal output supplied by sysobjcreate; user address validated there. */
+	o = vobjnewkind(VkindObjectSpace, 0);
+	if(o == nil) error(Enomem);
+	s = mallocz(sizeof *s, 1);
+	if(s == nil){vobjput(o);error(Enomem);}
+	o->priv = s;
+	o->flags = 0;
+	s->object = o;
+	s->epoch = 1;
+	lock(&vspaceregistrylock);
+	s->next = vspaceregistry;
+	vspaceregistry = s;
+	unlock(&vspaceregistrylock);
+	if(waserror()){vobjput(o);nexterror();}
+	h = vobjinstallobj(o, Vread|Vmeta|Vcontrol|Vdelegate);
+	if(id != nil){
+		id->incarnation = o->incarnation;
+		id->space = o->space;
+		id->oid = o->oid;
+	}
+	poperror();
+	vobjput(o);
+	return h;
+}
+
+static Vobj*
+vspacehandle(int handle, int need)
+{
+	Vobj *o = vobjholdobj(handle, need);
+	if(o->kind != VkindObjectSpace || o->priv == nil){
+		vobjput(o);
+		error(Ebadarg);
+	}
+	return o;
+}
+
+static void
+vspacelabelcheck(char *label)
+{
+	int i;
+	if(label[0] == 0) error(Ebadarg);
+	for(i = 0; i < ObjSpaceLabelMax; i++){
+		uchar c = (uchar)label[i];
+		if(c == 0) return;
+		if(c < 32 || c == 127) error(Ebadarg);
+	}
+	error(Ebadarg); /* unterminated label */
+}
+
+uvlong
+vobjspacebind(int handle, ObjSpaceBindReq *req)
+{
+	Vobj *o = nil;
+	Vhand *target = nil;
+	Vspace *s;
+	VspaceBinding *b;
+	int rights;
+	uvlong id;
+	if(req == nil || req->flags != 0 || req->target <= 0)
+		error(Ebadarg);
+	vspacelabelcheck(req->label);
+	o = vspacehandle(handle, Vcontrol);
+	if(waserror()){vhandput(target);vobjput(o);nexterror();}
+	target = vlookup(req->target, Vdelegate);
+	if(target->obj->kind == VkindNamespaceControl ||
+	   target->obj->kind == VkindNamespaceView)
+		error(Eperm); /* obsolete process-group namespace is not portable */
+	rights = req->rights == 0 ? target->rights : req->rights;
+	if(rights == 0 || (rights & ~target->rights) != 0 ||
+	   (rights & ~Vall) != 0)
+		error(Eperm);
+	s = o->priv;
+	lock(&s->lk);
+	if(s->revoked || s->nbindings == ObjSpaceBindingMax ||
+	   s->nextid == ~(uvlong)0){
+		unlock(&s->lk);
+		error(s->revoked ? Eperm : "objectspace: binding limit");
+	}
+	b = &s->entries[s->nbindings++];
+	memset(b, 0, sizeof *b);
+	memmove(b->label, req->label, sizeof b->label);
+	b->id = id = ++s->nextid;
+	b->rights = rights;
+	b->relation = req->relation;
+	b->kind = target->obj->kind;
+	b->incarnation = target->obj->incarnation;
+	b->space = target->obj->space;
+	b->oid = target->obj->oid;
+	if(b->kind != VkindObjectSpace){
+		b->target = target->obj;
+		incref(&b->target->ref);
+	}
+	s->epoch++;
+	unlock(&s->lk);
+	poperror();
+	vhandput(target);
+	vobjput(o);
+	return id;
+}
+
+void
+vobjspaceunbind(int handle, uvlong id)
+{
+	Vobj *o;
+	Vspace *s;
+	Vobj *target;
+	int i, j;
+	if(id == 0) error(Ebadarg);
+	o = vspacehandle(handle, Vcontrol);
+	s = o->priv;
+	lock(&s->lk);
+	if(s->revoked){
+		unlock(&s->lk);
+		vobjput(o);
+		error(Eperm);
+	}
+	for(i = 0; i < s->nbindings; i++)
+		if(s->entries[i].id == id) break;
+	if(i == s->nbindings){
+		unlock(&s->lk);
+		vobjput(o);
+		error("objectspace: no binding");
+	}
+	target = s->entries[i].target;
+	for(j = i+1; j < s->nbindings; j++)
+		s->entries[j-1] = s->entries[j];
+	memset(&s->entries[--s->nbindings], 0, sizeof s->entries[0]);
+	s->epoch++;
+	unlock(&s->lk);
+	if(target != nil) vobjput(target);
+	vobjput(o);
+}
+
+int
+vobjspaceresolve(int handle, uvlong id, uvlong rights)
+{
+	Vobj *o, *target = nil;
+	Vspace *s;
+	VspaceBinding *b;
+	uvlong incarnation = 0, oid = 0;
+	int i, allowed, result;
+	if(id == 0 || rights > Vall) error(Ebadarg);
+	o = vspacehandle(handle, Vread);
+	if(waserror()){vobjput(target);vobjput(o);nexterror();}
+	s = o->priv;
+	lock(&s->lk);
+	if(s->revoked){
+		unlock(&s->lk);
+		error(Eperm);
+	}
+	for(i = 0; i < s->nbindings; i++)
+		if(s->entries[i].id == id) break;
+	if(i == s->nbindings){
+		unlock(&s->lk);
+		error("objectspace: no binding");
+	}
+	b = &s->entries[i];
+	allowed = rights == 0 ? b->rights : rights;
+	if((allowed & ~b->rights) != 0){
+		unlock(&s->lk);
+		error(Eperm);
+	}
+	if(b->target != nil){
+		target = b->target;
+		incref(&target->ref);
+	}else{
+		incarnation = b->incarnation;
+		oid = b->oid;
+	}
+	unlock(&s->lk);
+	if(target == nil) target = vspaceweakref(incarnation, oid);
+	if(target == nil) error("objectspace: stale target");
+	result = vobjinstallobj(target, allowed);
+	poperror();
+	vobjput(target);
+	vobjput(o);
+	return result;
+}
+
+int
+vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
+	ObjSpaceEntry *out, int max, uvlong *epoch)
+{
+	Vobj *o;
+	Vspace *s;
+	ObjSpaceEntry records[ObjSpacePageMax];
+	VspaceBinding *b;
+	Vobj *target;
+	int i, n = 0;
+	if(out == nil || epoch == nil || max < 1 || max > ObjSpacePageMax)
+		error(Ebadarg);
+	if(cursor > ObjSpaceBindingMax) error(Ebadarg);
+	o = vspacehandle(handle, Vmeta);
+	s = o->priv;
+	lock(&s->lk);
+	if(s->revoked || (generation != 0 && generation != s->epoch)){
+		unlock(&s->lk);
+		vobjput(o);
+		error(s->revoked ? Eperm : "objectspace: generation changed");
+	}
+	*epoch = s->epoch;
+	for(i = (int)cursor; i < s->nbindings && n < max; i++){
+		ObjSpaceEntry *r = &records[n++];
+		b = &s->entries[i];
+		memset(r, 0, sizeof *r);
+		r->binding_id = b->id;
+		r->incarnation = b->incarnation;
+		r->space = b->space;
+		r->oid = b->oid;
+		r->kind = b->kind;
+		r->rights = b->rights;
+		r->relation = b->relation;
+		memmove(r->label, b->label, sizeof r->label);
+	}
+	unlock(&s->lk);
+	/* Existence and authority are separate. No resolution in enumeration. */
+	for(i = 0; i < n; i++) if(records[i].kind == VkindObjectSpace){
+		target = vspaceweakref(records[i].incarnation, records[i].oid);
+		if(target == nil) records[i].flags |= ObjSpaceFlagStale;
+		else vobjput(target);
+	}
+	memmove(out, records, n*sizeof records[0]);
+	vobjput(o);
+	return n;
 }
 
 int

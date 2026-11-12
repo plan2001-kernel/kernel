@@ -57,7 +57,7 @@ if ! "$objdump" -p "$out/bootx64.efi" | grep -q "Subsystem.*0000000a.*EFI applic
 	echo "build-efi-gcc: PE check FAIL (not an EFI application)" >&2
 	exit 1
 fi
-if ! file "$out/bootx64.efi" | grep -q "PE32+ executable for EFI"; then
+if ! file "$out/bootx64.efi" | grep -Eq "PE32\\+ executable.*(EFI application|for EFI)"; then
 	echo "build-efi-gcc: PE check FAIL (file type)" >&2
 	exit 1
 fi

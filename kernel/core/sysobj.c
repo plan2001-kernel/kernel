@@ -26,6 +26,7 @@
 #include	"../../runtime/abi/vobj.h"
 #include	"../../runtime/abi/obj.h"
 #include	"../../runtime/abi/namespace.h"
+#include	"../../runtime/abi/objectspace.h"
 #include	"../../runtime/abi/ioctl.h"
 #include	"../core/vobjint.h"
 
@@ -69,6 +70,20 @@ sysobjcreate(sysva_list list)
 			((ObjId*)id)->incarnation = vid.incarnation;
 			((ObjId*)id)->space = vid.space;
 			((ObjId*)id)->oid = vid.oid;
+		}
+		return h;
+	}
+	if(kind == ObjKindObjectSpace){
+		VobjId vid;
+		int h;
+
+		if(space != 0 || buf != nil || n != 0)
+			error(Ebadarg);
+		h = vobjspacecreate(&vid);
+		if(id != nil){
+			id->incarnation = vid.incarnation;
+			id->space = vid.space;
+			id->oid = vid.oid;
 		}
 		return h;
 	}
@@ -230,6 +245,44 @@ sysobjinvoke(sysva_list list)
 	objoptrace(c.op);
 #endif
 	switch(c.op){
+	case ObjOpSpaceBind:
+	{
+		ObjSpaceBindReq b;
+		if(c.in == nil || c.inlen != sizeof b || c.out != nil ||
+		   c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
+			error(Ebadarg);
+		validaddr((uintptr)c.in, sizeof b, 0);
+		memmove(&b, c.in, sizeof b);
+		c.result = vobjspacebind(handle, &b);
+		break;
+	}
+	case ObjOpSpaceUnbind:
+		if(c.in != nil || c.inlen != 0 || c.out != nil ||
+		   c.outlen != 0 || c.arg0 == 0 || c.arg1 != 0)
+			error(Ebadarg);
+		vobjspaceunbind(handle, c.arg0);
+		c.result = 0;
+		break;
+	case ObjOpSpaceResolve:
+		if(c.in != nil || c.inlen != 0 || c.out != nil ||
+		   c.outlen != 0 || c.arg0 == 0 || c.arg1 > Vall)
+			error(Ebadarg);
+		c.result = vobjspaceresolve(handle, c.arg0, c.arg1);
+		break;
+	case ObjOpSpaceEnumerate:
+	{
+		uvlong epoch = 0;
+		if(c.in != nil || c.inlen != 0 ||
+		   c.out == nil || c.outlen < sizeof(ObjSpaceEntry) ||
+		   c.outlen > ObjSpacePageMax*sizeof(ObjSpaceEntry) ||
+		   c.outlen % sizeof(ObjSpaceEntry) != 0)
+			error(Ebadarg);
+		validaddr((uintptr)c.out, (long)c.outlen, 1);
+		c.result = vobjspaceenumerate(handle, c.arg0, c.arg1,
+			(ObjSpaceEntry*)c.out, c.outlen/sizeof(ObjSpaceEntry), &epoch);
+		c.aux = epoch;
+		break;
+	}
 	case ObjOpNamespaceCreate:
 		if(c.in == nil || c.inlen == 0 || c.inlen > 32*32 ||
 		   c.inlen % 32 != 0 || c.out != nil || c.outlen != 0 ||

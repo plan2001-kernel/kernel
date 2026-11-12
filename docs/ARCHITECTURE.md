@@ -6,80 +6,43 @@ POSIX, Plan 9 or historical ABI compatibility obligation and no fixed syscall
 count. See [kernel interface](KERNEL-INTERFACE.md) for proposed mechanisms and
 current ABI status.
 
-## Identity and authority
+## ObjectSpace and authority (target)
 
-Each kernel object has exactly **one** named owner (`OwnerID`), set at creation
-and unchanged until destruction. Names such as `root`, `user`, `editor` and
-`network` designate identities, not Unix accounts or directories. A trusted
-boot/installation mechanism registers stable owner identities. Processes
-cannot forge or self-select their owner; multiple processes can run under
-the same owner and form one trust domain.
+The [ObjectSpace architecture](OBJECTSPACE.md) supersedes the
+OwnerID-equality-only permission model from 11 November 2026.
+An ObjectSpace is a **first-class kernel object** containing labeled,
+typed, rights-bearing bindings to any object, including other ObjectSpaces.
+It is an independent directed multigraph, not a directory, storage
+partition, Pgrp group or process tree. Multiple labels, aliases and cycles
+are valid. A user-space interface may project the graph as a directory,
+project, container, module or room. There is no mandatory root/CWD/path/parent.
 
-The only general direct-object-access rule is
-`process.owner == object.owner`. The owner may perform all operations
-supported by that object. The target has **no** UID/GID, owner/group/others,
-rwx, ACL, chmod/chown, setuid, capability rights or attenuation, loans,
-shared ownership or ownership transfers. `root` is a named owner, not
-a universal override. Kernel-internal boot, memory and hardware management
-remain privileged implementation mechanisms.
+Object identity is separate from authority. A Handle is a process-local
+generation-checked capability; a BindingID identifies one relation; its
+rights cannot exceed the source capability. A label or raw OID cannot mint
+rights. OwnerID remains immutable provenance/lifecycle responsibility and
+a trusted policy input for issuing initial capabilities, NOT a general
+bypass for a process with the same name. The current owner equality gates
+are transitional and must be replaced provider by provider.
 
-GE/O identity `(SpaceID, OID)`, volatile process identities and runtime
-memory/device identities are distinct. A known ID, name, pointer, process
-identity or object-set membership does not grant ownership. Names and
-relations are data, not a native directory tree or a source of authority.
+The first implemented ObjectSpace is volatile and uses the existing
+five-call object ABI; persistent graph transactions and capability roots
+in execution contexts are unfinished. GE storage SpaceID remains an
+internal version/allocator bucket and must not be confused with
+ObjectSpace. No prior ABI, on-disk-format or Unix/Plan 9 compatibility
+is required. All phases and limitations are defined in
+[ObjectSpace](OBJECTSPACE.md).
 
-### Program ownership, registration and launch (target)
+## Independent processes and object roots
 
-A program has its own named owner. Its executable object, configuration
-and persistent objects belong to that owner, not the user/process that
-starts it. Trusted installation/boot metadata records
-`{program name, OwnerID, executable object reference, startup policy}`.
-This registry is part of existing kernel boot/process management, **not
-a new userspace service**.
-
-At boot the kernel starts registered autostart programs. Later, a process
-may request the launch of a registered program by name. The kernel validates
-the registry and startup policy, loads the executable as a privileged kernel
-operation and starts a new independent process **as the program's owner**.
-The requester does not gain access to the executable or program objects,
-does not become the process owner or obtain process-control authority,
-and does not create a parent/child relationship. The initial launch policy
-may allow any registered program to be requested; resource limits and
-forced termination are separate kernel lifecycle policy.
-
-Input, output, modification requests and voluntary shutdown requests are
-data offered through the **existing IPC**. A program decides whether to
-act on requests about its own objects. Forced process termination remains
-a kernel lifecycle operation controlled by its owner and defined kernel
-policy, never automatically by the launcher.
-
-### Owner-offered data (target)
-
-An owner may offer data to another owner using the existing IPC transport.
-The **received data value belongs entirely to the receiver**; data stored
-as a new object is receiver-owned. The original object remains owned by
-the sender and cannot be directly changed by the receiver. A receiver may
-request a change, which only the sender's program may perform. No kernel
-borrow, transfer, grant, new send/receive ABI, message pipe or provider
-is implied. Read-only publication views are an IPC transport detail,
-not access to manage the publisher's original objects.
-
-## Independent processes and resource graph (target)
-
-Processes are independently scheduled contexts identified by a trusted
-program owner. No privileged ancestry or process tree exists; a launcher
-does not control, own or inherit its launched process. A process may outlive
-its launcher. Processes with the same OwnerID can access their own owner's
-objects. Other owners interact only through offered data.
-
-Creation, voluntary exit, forced termination and completion observation are
-separate process lifecycle concerns. Forced termination is limited to the
-process owner or explicit kernel lifecycle policy, not the launcher. Boot
-process designation is explicit, not derived from `parentpid == 0`.
-
-Namespace views, if retained, are lookup/data constructs and not authority.
-Stored namespace definitions and GE/O object-set membership are data only.
-No native hierarchy, graph database or kernel tag language is required.
+A process is an independently schedulable execution context. It has
+explicit capabilities to one or more ObjectSpaces, regions, devices,
+services and other resources. Neither its launcher nor a parent directory
+automatically confers authority. Trusted program registration may set a
+program OwnerID and give its process explicit initial capabilities.
+Process-control and completion observation are independently delegated.
+Current Pgrp/OContext namespace handling is a legacy implementation
+to remove after ObjectSpace-root support replaces it.
 
 ## Memory-publication IPC (target)
 
@@ -92,22 +55,21 @@ The publisher owns the source objects and underlying publication region.
 Readers receive only the offered data values. RO mappings are delivery
 views, not ownership or direct modification of publisher-owned objects.
 Data independently stored by the receiver belongs solely to the receiver.
-Page-table RW/RO protection and mapping checks remain necessary for memory
-safety, not general per-object permissions or persistent capability rights.
+Page-table RW/RO protection is mandatory for memory safety independently
+of ObjectSpace capability admission.
 
 Retain existing region-relative references, release/acquire publication,
 immutable visible snapshots, blocking race-free WAIT/WAKE, spurious-wakeup
 rechecks, mapping lifetime, writer-death behavior and reclamation rules.
 WAIT/WAKE do not transmit payload bytes. Userspace defines any higher-level
-format. The capability handles, grants and revocation described under
-CURRENT IMPLEMENTATION in KERNEL-INTERFACE.md are facts of today's ABI,
-not requirements of the single-owner target.
+format. Current capability handles, grants and revocation are incomplete foundations
+for the new ObjectSpace authorization design.
 
 ## Devices and console (target)
 
 Keep low-level drivers, scheduler, early-boot/panic diagnostics and device
-isolation. A device-facing object has one owner; other owners receive only
-data that owner offers over the existing publication IPC. Exclusive hardware
+isolation. A device has one immutable owner but can explicitly delegate attenuated
+device capabilities across owners; publication remains another option. Exclusive hardware
 claims and memory protections are safety constraints, not Unix-style
 object-right classes. No new transport or userspace service is required.
 
@@ -140,9 +102,8 @@ boot/installation program registration, owner-checked direct object access,
 registered-program launch under the program's owner, and owner-offered data
 through the existing region publication IPC. Stored owners survive restart;
 the name/program registry is volatile and is reconstructed by trusted boot
-before access. Existing Handle rights remain an addressing/attenuation
-mechanism in the current ABI; they cannot authorize management of another
-owner's object. ARM64 has an early UEFI/QEMU boot
+before access. Existing Handle rights are attenuated references, but old OwnerID gates
+still prevent many cross-owner operations; these must be migrated. ARM64 has an early UEFI/QEMU boot
 foundation with BootInfo handoff, mappings, console, timer interrupts and
 physical-page allocation, not a full-system scheduler, GE/O, syscalls,
 userspace or device parity. MicroPython is the proof-of-concept userspace.
@@ -150,9 +111,8 @@ Source and tests govern exact current behavior.
 
 ## Completed six-stage implementation roadmap (historical)
 
-The phases below document the prior capability-era implementation. They
-are **not** requirements to reintroduce capability rights or redesign IPC
-for the single-owner ownership target above. Code migration requires a
+The phases below record the historical implementation; the current
+ObjectSpace migration roadmap is in OBJECTSPACE.md. Code migration requires a
 separate, explicitly scoped implementation task.
 
 
