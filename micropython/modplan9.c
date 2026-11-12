@@ -654,6 +654,33 @@ p9_spacenew(void)
     return check(obj_create(0, ObjKindObjectSpace, NULL, 0, NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_spacenew_obj, p9_spacenew);
+/* GE/O graph snapshots: explicit volume capability, never an ambient OID. */
+static mp_obj_t
+p9_spacesave(mp_obj_t space, mp_obj_t volume, mp_obj_t oid)
+{
+    ObjSpaceDiskReq r;
+    ObjCall c = p9_spacecall(ObjOpSpaceSave);
+    memset(&r, 0, sizeof r);
+    r.volume = mp_obj_get_int(volume);
+    r.oid = (unsigned long long)mp_obj_get_uint(oid);
+    c.in = &r;
+    c.inlen = sizeof r;
+    check(obj_invoke(mp_obj_get_int(space), &c, sizeof c));
+    return mp_obj_new_int_from_ull(c.aux);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(p9_spacesave_obj, p9_spacesave);
+
+static mp_obj_t
+p9_spaceload(mp_obj_t volume, mp_obj_t oid)
+{
+    ObjSpaceDiskReq r;
+    memset(&r, 0, sizeof r);
+    r.volume = mp_obj_get_int(volume);
+    r.oid = (unsigned long long)mp_obj_get_uint(oid);
+    return check(obj_open(ObjOpenSpaceGraph, &r, sizeof r, 0, NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_spaceload_obj, p9_spaceload);
+
 
 static mp_obj_t
 p9_spacebind(size_t n, const mp_obj_t *a)
@@ -1268,6 +1295,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_cap_revoke), MP_ROM_PTR(&p9_caprevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_roots), MP_ROM_PTR(&p9_spaceroots_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_new), MP_ROM_PTR(&p9_spacenew_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_save), MP_ROM_PTR(&p9_spacesave_obj) },
+    { MP_ROM_QSTR(MP_QSTR_space_load), MP_ROM_PTR(&p9_spaceload_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_bind), MP_ROM_PTR(&p9_spacebind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_unbind), MP_ROM_PTR(&p9_spaceunbind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_resolve), MP_ROM_PTR(&p9_spaceresolve_obj) },
