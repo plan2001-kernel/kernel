@@ -3496,7 +3496,7 @@ vobjspacecreate(VobjId *id)
 	Vobj *o;
 	Vspace *s;
 	int h;
-	if(id != nil) validaddr((uintptr)id, sizeof *id, 1);
+	/* Internal output supplied by sysobjcreate; user address validated there. */
 	o = vobjnewkind(VkindObjectSpace, 0);
 	if(o == nil) error(Enomem);
 	s = mallocz(sizeof *s, 1);
@@ -3560,8 +3560,9 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	o = vspacehandle(handle, Vcontrol);
 	if(waserror()){vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
-	if(target->obj->kind == VkindNamespaceControl)
-		error(Eperm); /* obsolete process-group control is not portable */
+	if(target->obj->kind == VkindNamespaceControl ||
+	   target->obj->kind == VkindNamespaceView)
+		error(Eperm); /* obsolete process-group namespace is not portable */
 	rights = req->rights == 0 ? target->rights : req->rights;
 	if(rights == 0 || (rights & ~target->rights) != 0 ||
 	   (rights & ~Vall) != 0)
