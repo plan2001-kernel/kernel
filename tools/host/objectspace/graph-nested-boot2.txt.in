@@ -1,0 +1,19 @@
+# Restore an entire nested graph after reboot. All weak space edges must
+# resolve because the returned root anchors the materialized child nodes.
+import plan9 as p
+v=p.obj_open_volume()
+root=p.space_load(v,@NESTED_GRAPH@)
+rows,_,_=p.space_list(root)
+assert len(rows)==1 and rows[0][0]==@CHILD_BINDING@
+assert rows[0][1]=='child' and rows[0][2]==p.VKIND_OBJECT_SPACE
+child=p.space_resolve(root,@CHILD_BINDING@,p.VREAD+p.VMETA)
+rows,_,_=p.space_list(child)
+assert len(rows)==1 and rows[0][0]==@GRAND_BINDING@
+assert rows[0][1]=='grand' and rows[0][2]==p.VKIND_OBJECT_SPACE
+grand=p.space_resolve(child,@GRAND_BINDING@,p.VREAD+p.VMETA)
+rows,_,_=p.space_list(grand)
+assert len(rows)==1 and rows[0][0]==@LEAF_BINDING@
+assert rows[0][1]=='payload'
+leaf=p.space_resolve(grand,@LEAF_BINDING@,p.VREAD)
+assert p.obj_read(leaf,15)==b'nested-leaf-one'
+print('NESTED-GRAPH-REBOOT-PASS')
