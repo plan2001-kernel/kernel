@@ -87,9 +87,29 @@ typedef struct Vuart	Vuart;
 typedef struct Vkbd	Vkbd;
 typedef struct Vusbep	Vusbep;
 
+/*
+ * A capability's provenance is an acyclic derivation chain, not a process
+ * ancestry. Each node snapshots its parent's revoke epoch. Revoking one
+ * node invalidates all of its *existing descendants*, but not that node or
+ * its ancestors/siblings. The revoker can derive fresh children afterwards.
+ * Nodes hold only other capability nodes, never Vobj pointers, so graph
+ * edges between ObjectSpaces cannot create an ownership cycle here.
+ */
+typedef struct Vcap Vcap;
+struct Vcap {
+	Ref ref;
+	Vcap *parent;
+	uvlong parentepoch;
+	uvlong epoch;
+	uint depth;
+};
+static Lock vcaplock;
+enum { VcapDepthMax = 128 };
+
 struct Vhand {
 	Ref	ref;
 	Vobj	*obj;
+	Vcap	*cap;	/* shared lineage node for this installed grant */
 	int	rights;
 };
 
@@ -194,6 +214,7 @@ struct VspaceBinding {
 	uvlong id, incarnation, space, oid;
 	char label[ObjSpaceLabelMax];
 	uint rights, relation, kind;
+	Vcap *cap;			/* pinned derived lineage from source grant */
 	Vobj *target;                  /* nil for weak ObjectSpace edges */
 };
 struct Vspace {
@@ -441,10 +462,12 @@ vobjput(Vobj *o)
 		Vspace *s = o->priv;
 		int i;
 		o->priv = nil;
-		/* ObjectSpace edges are weak: no recursive space destruction. */
-		for(i = 0; i < s->nbindings; i++)
+		/* Space-to-space edges are weak; capability lineages are acyclic. */
+		for(i = 0; i < s->nbindings; i++){
+			vcapput(s->entries[i].cap);
 			if(s->entries[i].target != nil)
 				vobjput(s->entries[i].target);
+		}
 		free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
@@ -466,32 +489,125 @@ vobjput(Vobj *o)
 	}
 }
 
-static void
-vhandinit(Vhand *h, Vobj *o, int rights)
+/* vcapvalidlocked never sleeps; the chain is finite by construction. */
+static int
+vcapvalidlocked(Vcap *c)
 {
+	int depth = 0;
+	for(; c != nil && c->parent != nil; c = c->parent){
+		if(++depth > VcapDepthMax ||
+		   c->parent->epoch != c->parentepoch)
+			return 0;
+	}
+	return c != nil;
+}
+
+static int
+vcapvalid(Vcap *c)
+{
+	int ok;
+	lock(&vcaplock);
+	ok = vcapvalidlocked(c);
+	unlock(&vcaplock);
+	return ok;
+}
+
+static Vcap*
+vcapnew(Vcap *parent)
+{
+	Vcap *c;
+	c = smalloc(sizeof *c);
+	c->ref.ref = 1;
+	c->epoch = 1;
+	if(parent != nil){
+		lock(&vcaplock);
+		if(!vcapvalidlocked(parent) || parent->depth >= VcapDepthMax){
+			unlock(&vcaplock);
+			free(c);
+			error(Eperm);
+		}
+		c->parent = parent;
+		c->parentepoch = parent->epoch;
+		c->depth = parent->depth + 1;
+		incref(&parent->ref);
+		unlock(&vcaplock);
+	}
+	return c;
+}
+
+static void
+vcapput(Vcap *c)
+{
+	Vcap *parent;
+	while(c != nil && decref(&c->ref) == 0){
+		parent = c->parent;
+		free(c);
+		c = parent;
+	}
+}
+
+static void
+vcaprevokechildren(Vcap *c)
+{
+	lock(&vcaplock);
+	if(!vcapvalidlocked(c) || c->epoch == ~(uvlong)0){
+		unlock(&vcaplock);
+		error(Eperm);
+	}
+	c->epoch++;
+	unlock(&vcaplock);
+}
+
+/* Every new provider Handle begins a distinct root grant. */
+static Vhand*
+vhandalloc(Vobj *o, int rights)
+{
+	Vcap *c;
+	Vhand *h;
+	c = vcapnew(nil);
+	if(waserror()){vcapput(c);nexterror();}
+	h = smalloc(sizeof *h);
 	h->ref.ref = 1;
 	h->obj = o;
 	incref(&o->ref);
 	h->rights = rights;
+	h->cap = c;
+	poperror();
+	return h;
+}
+
+/* OPEN, inheritance and graph resolution must derive, not mint roots. */
+static Vhand*
+vhandallocchild(Vobj *o, int rights, Vcap *parent)
+{
+	Vcap *c;
+	Vhand *h;
+	c = vcapnew(parent);
+	if(waserror()){vcapput(c);nexterror();}
+	h = smalloc(sizeof *h);
+	h->ref.ref = 1;
+	h->obj = o;
+	incref(&o->ref);
+	h->rights = rights;
+	h->cap = c;
+	poperror();
+	return h;
 }
 
 static Vhand*
-vhandalloc(Vobj *o, int rights)
+vhandderive(Vhand *source, int rights)
 {
-	Vhand *h;
-
-	h = smalloc(sizeof *h);
-	vhandinit(h, o, rights);
-	return h;
+	if((rights & ~source->rights) != 0)
+		error(Eperm);
+	return vhandallocchild(source->obj, rights, source->cap);
 }
 
 static void
 vhandput(Vhand *h)
 {
-	if(h == nil)
+	if(h == nil || decref(&h->ref) != 0)
 		return;
-	if(decref(&h->ref) != 0)
-		return;
+	vcapput(h->cap);
 	vobjput(h->obj);
 	free(h);
 }
@@ -565,6 +681,34 @@ vobjinstallobj(Vobj *o, int rights)
  * record is reference-counted independently of the Proc, so the Handle is
  * valid before the process is published and remains valid after it exits.
  */
+/* Installs a child grant with the parent lineage, never a new root. */
+static int
+vobjinstallchild(Vobj *o, int rights, Vcap *parent)
+{
+	Vhand *h;
+	int handle;
+	Vhtab *t = vgettab(1);
+	if(t == nil) error(Enomem);
+	h = vhandallocchild(o, rights, parent);
+	handle = vinstall(t, h);
+	if(handle < 0){
+		vhandput(h);
+		error("vobj: too many handles");
+	}
+	return handle;
+}
+
+int
+vobjcaprevoke(int handle)
+{
+	Vhand *h = vlookup(handle, Vdelegate);
+	if(waserror()){vhandput(h);nexterror();}
+	vcaprevokechildren(h->cap);
+	poperror();
+	vhandput(h);
+	return 0;
+}
+
 int
 vobjprocinstall(Procstat *st)
 {
@@ -1668,6 +1812,12 @@ vlookupin(Proc *p, int handle, int need)
 		error(Eperm);
 	if(bad)
 		error(Ebadarg);
+	/* An already-open Handle remains closeable but cannot be used after
+	 * revocation of any ancestor grant, including after process inheritance. */
+	if(!vcapvalid(h->cap)){
+		vhandput(h);
+		error(Eperm);
+	}
   if(h->obj->kind==VkindGe || h->obj->kind==VkindSpace){
    if(waserror()){vhandput(h);nexterror();}
    oscheckhand(h->obj->priv);
@@ -1863,7 +2013,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			}
 #endif
 			/* Keep cleanup armed until the new Vhand is installed. */
-			h = vhandalloc(o, vi->e[i].rights);
+			h = vhandallocchild(o, vi->e[i].rights, vi->e[i].src->cap);
 			vi->e[i].gen = gen;
 			t->s[vi->e[i].slot].h = h;
 			t->s[vi->e[i].slot].gen = gen;
@@ -1871,7 +2021,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			poperror();
 			vobjput(o);		/* the installed Vhand owns O */
 		}else{
-			h = vhandalloc(src, vi->e[i].rights);
+			h = vhandderive(vi->e[i].src, vi->e[i].rights);
 			vi->e[i].gen = gen;
 			t->s[vi->e[i].slot].h = h;
 			t->s[vi->e[i].slot].gen = gen;
@@ -2519,16 +2669,16 @@ vobjkbddevice(uvlong rights, VobjId *id)
 		vobjput(o);
 		error(Enomem);
 	}
-	nh = smalloc(sizeof *nh);
+	nh = vhandalloc(o, (int)rights);
 	if((r = kbdscancodeacquire()) != 0){
-		free(nh);
+		vhandput(nh);
 		vobjput(o);		/* frees vk; held is still 0 */
 		if(r == -2)
 			error("PS/2 keyboard unavailable");
 		error(Einuse);
 	}
 	vk->held = 1;
-	vhandinit(nh, o, (int)rights);
+	/* Handle and lineage were fully allocated before exclusive acquisition. */
 	h = vinstall(t, nh);
 	if(h < 0){
 		vhandput(nh);
