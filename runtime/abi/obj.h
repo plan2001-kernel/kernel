@@ -525,7 +525,7 @@ long obj_ospawn(int space, unsigned long long oid, char **argv, int argc,
 
 /*
  * libc/libo-style wrappers over the five kernel entry points.  The raw
- * syscall stubs are objcreate/objopen/objclose/objbind/objinvoke; these
+ * syscall stubs are objcreate/objopen/objclose/objinvoke; these
  * underscored names add argument packing and typed adapters.
  */
 long obj_create(unsigned long long space, unsigned int kind,
@@ -533,7 +533,6 @@ long obj_create(unsigned long long space, unsigned int kind,
 long obj_open(unsigned long long provider, void *req, long reqlen,
 		unsigned long long rights, ObjId *out);
 long obj_close(int handle);
-		unsigned long long rights, unsigned int mode);
 long obj_invoke(int handle, ObjCall *call, long calllen);
 
 long obj_create_persist(int space, void *data, unsigned long long len,
