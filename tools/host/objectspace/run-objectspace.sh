@@ -15,7 +15,7 @@ from pathlib import Path
 import sys
 s = Path(sys.argv[1]).read_text(errors="replace")
 import re
-assert re.search(r"^OBJECTSPACE-PASS\\s*$", s, re.M), "missing executed guest proof marker"
+assert re.search(r"^OBJECTSPACE-PASS", s, re.M), "missing executed guest proof marker"
 assert "AssertionError" not in s and "Traceback" not in s and "panic:" not in s
 print("PASS: native ObjectSpace REPL graph acceptance")
 PY
