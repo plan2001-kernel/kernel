@@ -577,11 +577,10 @@ static mp_obj_t p9_objopenhandle(size_t n,const mp_obj_t *a){
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenhandle_obj,1,2,p9_objopenhandle);
 
 /* Persistent GE/O through the five-operation ABI only. */
-static mp_obj_t p9_objopenspace(mp_obj_t name){
- const char *n=mp_obj_str_get_str(name);
- return check(obj_open(ObjOpenSpace,(void*)n,strlen(n),0,NULL));
+static mp_obj_t p9_objopenvolume(void){
+ return check(obj_open(ObjOpenVolume,NULL,0,0,NULL));
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(p9_objopenspace_obj,p9_objopenspace);
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_objopenvolume_obj,p9_objopenvolume);
 
 static mp_obj_t p9_objcreatege(size_t n,const mp_obj_t *a){
  mp_buffer_info_t b;ObjId id;long h;
@@ -595,14 +594,14 @@ static mp_obj_t p9_objcreatege(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objcreatege_obj,1,2,p9_objcreatege);
 
-static mp_obj_t p9_objopengeospace(mp_obj_t sh,mp_obj_t oid){
- ObjOpenGeSpaceReq req;
+static mp_obj_t p9_objopengeoid(mp_obj_t sh,mp_obj_t oid){
+ ObjOpenGeOidReq req;
  memset(&req,0,sizeof req);
- req.space=mp_obj_get_int(sh);
+ req.volume=mp_obj_get_int(sh);
  req.oid=(unsigned long long)mp_obj_get_uint(oid);
- return check(obj_open(ObjOpenGeSpace,&req,sizeof req,0,NULL));
+ return check(obj_open(ObjOpenGeOid,&req,sizeof req,0,NULL));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_objopengeospace_obj,p9_objopengeospace);
+static MP_DEFINE_CONST_FUN_OBJ_2(p9_objopengeoid_obj,p9_objopengeoid);
 
 /* obj_put_oid(space, oid, data): named persistent replace, then commit is
  * a separate explicit operation.  Used by the ownership negative tests. */
@@ -1260,9 +1259,9 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_open_space), MP_ROM_PTR(&p9_objopenspace_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_open_volume), MP_ROM_PTR(&p9_objopenvolume_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
-    { MP_ROM_QSTR(MP_QSTR_obj_open_ge_space), MP_ROM_PTR(&p9_objopengeospace_obj) },
+    { MP_ROM_QSTR(MP_QSTR_obj_open_ge_oid), MP_ROM_PTR(&p9_objopengeoid_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_put_oid), MP_ROM_PTR(&p9_objputoid_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit), MP_ROM_PTR(&p9_objcommit_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_commit_version), MP_ROM_PTR(&p9_objcommitversion_obj) },
@@ -1313,8 +1312,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_OWNER_INFO), MP_ROM_INT(ObjOpOwnerInfo) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_ABI_VERSION), MP_ROM_INT(OBJ_ABI_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_HANDLE), MP_ROM_INT(ObjOpenHandle) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE), MP_ROM_INT(ObjOpenSpace) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_SPACE), MP_ROM_INT(ObjOpenGeSpace) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_VOLUME), MP_ROM_INT(ObjOpenVolume) },
+    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_GE_OID), MP_ROM_INT(ObjOpenGeOid) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_USB_CONTROL), MP_ROM_INT(ObjDeviceUsbControl) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_ETHERNET), MP_ROM_INT(ObjDeviceEthernet) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_DEVICE_UART), MP_ROM_INT(ObjDeviceUart) },
@@ -1380,13 +1379,13 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_VEXECUTE), MP_ROM_INT(Vexecute) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_BYTES), MP_ROM_INT(VkindBytes) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_GE), MP_ROM_INT(VkindGe) },
-    { MP_ROM_QSTR(MP_QSTR_VKIND_SPACE), MP_ROM_INT(VkindSpace) },    { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
+    { MP_ROM_QSTR(MP_QSTR_VKIND_GE_VOLUME), MP_ROM_INT(VkindGeVolume) },    { MP_ROM_QSTR(MP_QSTR_VKIND_UART), MP_ROM_INT(VkindUart) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_KBD), MP_ROM_INT(VkindKbd) },
     { MP_ROM_QSTR(MP_QSTR_VKIND_USB_EP), MP_ROM_INT(VkindUsbEp) },
     { MP_ROM_QSTR(MP_QSTR_VIO_READ), MP_ROM_INT(VioRead) },
     { MP_ROM_QSTR(MP_QSTR_VIO_WRITE), MP_ROM_INT(VioWrite) },
-    { MP_ROM_QSTR(MP_QSTR_VOPEN_SPACE), MP_ROM_INT(VopenSpace) },
-    { MP_ROM_QSTR(MP_QSTR_VOPEN_GE_SPACE), MP_ROM_INT(VopenGeSpace) },
+    { MP_ROM_QSTR(MP_QSTR_VOPEN_GE_VOLUME), MP_ROM_INT(VopenGeVolume) },
+    { MP_ROM_QSTR(MP_QSTR_VOPEN_GE_OID), MP_ROM_INT(VopenGeOid) },
     { MP_ROM_QSTR(MP_QSTR_RFNAMEG), MP_ROM_INT(RFNAMEG) },
     { MP_ROM_QSTR(MP_QSTR_RFENVG), MP_ROM_INT(RFENVG) },
     { MP_ROM_QSTR(MP_QSTR_RFFDG), MP_ROM_INT(RFFDG) },

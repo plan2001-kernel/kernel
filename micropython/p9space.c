@@ -153,16 +153,16 @@ enum {
 };
 
 /* The canonical OBJ path: an authorized VkindSpace Handle from OBJOPEN
- * (ObjOpenSpace) and one OBJOPEN (ObjOpenGeSpace) capability per OID for
+ * (ObjOpenVolume) and one OBJOPEN (ObjOpenGeOid) capability per OID for
  * reads.  T2 stages writes to named OIDs through OBJINVOKE(ObjOpPutOid) and
  * commits them through OBJINVOKE(ObjOpCommit) on the same Space handle. */
 static long objgeopen_space(int sh, unsigned long long oid) {
-    ObjOpenGeSpaceReq req;
+    ObjOpenGeOidReq req;
 
     memset(&req, 0, sizeof req);
-    req.space = sh;
+    req.volume = sh;
     req.oid = oid;
-    return obj_open(ObjOpenGeSpace, &req, sizeof req, 0, NULL);
+    return obj_open(ObjOpenGeOid, &req, sizeof req, 0, NULL);
 }
 
 /* A whole persistent object through an already-open GE Handle: 0 ok,
@@ -592,13 +592,6 @@ mp_obj_t p9_import(size_t n, const mp_obj_t *a) {
     return MP_OBJ_FROM_PTR(ctx);
 }
 
-static void checkname(const char *name) {
-    if (*name == 0 || strlen(name) >= sizeof sp.name || strchr(name, '/') != NULL
-        || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("not a space name: '%s'"), name);
-    }
-}
-
 static void put64(byte *p, uint64_t u) {
     int i;
 
@@ -694,8 +687,8 @@ static void ouseenv(const char *name, const char *expect) {
 
 // Stage 4: a Space on the native O volume: its Environment from the
 // manifest, its graph from OID_GRAPH, restored by the V7 machinery
-static mp_obj_t ospace_open(size_t n_args, const mp_obj_t *args) {
-    const char *name = mp_obj_str_get_str(args[0]);
+static mp_obj_t ovolume_restore(void) {
+    const char *name = "init"; /* Python Environment label, never a GE/O SpaceID */
     const char *why;
     char user[256];
     shdr_t h;
@@ -705,10 +698,7 @@ static mp_obj_t ospace_open(size_t n_args, const mp_obj_t *args) {
     vstr_t st;
     nlr_buf_t nlr;
 
-    if (n_args > 1 && args[1] != mp_const_none) {
-        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("space: O: versions are not supported"));
-    }
-    if ((spread = obj_open(ObjOpenSpace, (void *)name, strlen(name), 0, NULL)) < 0)
+    if ((spread = obj_open(ObjOpenVolume, NULL, 0, 0, NULL)) < 0)
         raise_err();
     osp = spread;
     if (nlr_push(&nlr) != 0) {
@@ -841,22 +831,18 @@ int p9_space_report(void) {
     return -1;
 }
 
-// open(name[, version]): open the native O Space NAME.  Versions are
-// not supported by the O path; no pathname/file Space is opened.
-static mp_obj_t space_open(size_t n_args, const mp_obj_t *args) {
-    const char *name = mp_obj_str_get_str(args[0]);
-
+// open(): restore the one Python graph from the selected GE/O volume.
+// This does not select a storage namespace or grant access by a name.
+static mp_obj_t space_open(void) {
     if (sp.isopen) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a Space is open"));
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a Python graph is open"));
     }
-    checkname(name);
     if (ovol < 0) {
-        mp_raise_msg(&mp_type_OSError,
-            MP_ERROR_TEXT("space: no native O volume is selected"));
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("space: no native O volume is selected"));
     }
-    return ospace_open(n_args, args);
+    return ovolume_restore();
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_open_obj, 1, 2, space_open);
+static MP_DEFINE_CONST_FUN_OBJ_0(space_open_obj, space_open);
 
 // oid(o) -> o's OID in the open Space (kept over versions and boots),
 // or None: not committed yet, or no object of the heap
@@ -1483,7 +1469,7 @@ static mp_obj_t space_hget(mp_obj_t h, mp_obj_t oid) {
     long r, size, gh;
 
     /* The explicit legacy Space Handle is converted through OBJOPEN
-     * (ObjOpenGeSpace), which applies the same Ohand authority. */
+     * (ObjOpenGeOid), which applies the same Ohand authority. */
     gh = objgeopen_space(mp_obj_get_int(h), obyteoid(oid));
     hcheck(gh);
     size = obj_read_version(gh, nil, 0, 0, &ver);
@@ -1544,27 +1530,27 @@ static mp_obj_t space_hexecute(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(space_hexecute_obj, 2, 3,
                                            space_hexecute);
 
-static mp_obj_t space_open_handle(mp_obj_t name) {
- const char *s=mp_obj_str_get_str(name);long h=obj_open(ObjOpenSpace,(void*)s,strlen(s),0,NULL);
+static mp_obj_t space_open_handle(void) {
+ long h=obj_open(ObjOpenVolume,NULL,0,0,NULL);
  hcheck(h);return mp_obj_new_int(h);
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(space_open_handle_obj,space_open_handle);
+static MP_DEFINE_CONST_FUN_OBJ_0(space_open_handle_obj,space_open_handle);
 
 /* Open a persistent GE/O object as a generic capability object through the
  * canonical OBJOPEN/OBJINVOKE/OBJCLOSE boundary.  Reads/writes resolve
  * through the existing O Space handle and GE/O provider.  Identity is the
  * persistent OID, not a new volatile OID. */
 static mp_obj_t space_openobj(mp_obj_t oid_obj) {
-    ObjOpenGeSpaceReq req;
+    ObjOpenGeOidReq req;
     long h;
     if (!mp_obj_is_int(oid_obj))
         mp_raise_TypeError(MP_ERROR_TEXT("space.openobj: oid must be an int"));
     if (osp < 0)
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("space.openobj: no O Space"));
     memset(&req, 0, sizeof req);
-    req.space = osp;
+    req.volume = osp;
     req.oid = (unsigned long long)mp_obj_get_uint(oid_obj);
-    h = obj_open(ObjOpenGeSpace, &req, sizeof req, 0, NULL);
+    h = obj_open(ObjOpenGeOid, &req, sizeof req, 0, NULL);
     if (h < 0) raise_err();
     return mp_obj_new_int(h);
 }
