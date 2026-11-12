@@ -245,6 +245,13 @@ sysobjinvoke(sysva_list list)
 	objoptrace(c.op);
 #endif
 	switch(c.op){
+	case ObjOpCapRevoke:
+		/* Revoke issued descendants, never the source grant or provider. */
+		if(c.in != nil || c.inlen != 0 || c.out != nil ||
+		   c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
+			error(Ebadarg);
+		c.result = vobjcaprevoke(handle);
+		break;
 	case ObjOpSpaceBind:
 	{
 		ObjSpaceBindReq b;

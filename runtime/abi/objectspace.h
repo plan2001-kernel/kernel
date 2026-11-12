@@ -17,6 +17,7 @@ enum {
     ObjSpaceRelationImports = 2,
     ObjSpaceRelationUses = 3,
     ObjSpaceFlagStale = 1,
+    ObjSpaceFlagRevoked = 2, /* revoked binding derivation */
 };
 typedef struct ObjSpaceBindReq {
     int target;                       /* process-local capability */

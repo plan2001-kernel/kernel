@@ -51,9 +51,31 @@ not removed blindly. OwnerID stays immutable for trusted program identity,
 boot policy and lifecycle. Only an explicit delegator may attenuate and
 transfer capabilities; no OID, label or persisted metadata mints power.
 
-`cap_derive` reduces rights without creating new access. `cap_revoke`
-must have explicit lineage semantics separate from removing a binding;
-a full generic revocation mechanism is **NOT IMPLEMENTED**.
+Handle copies now create explicit, bounded derivation lineages. A source Handle
+with Vdelegate can call `cap_revoke(source)` to revoke **all previously
+derived descendants** of that exact capability while preserving the source
+and its siblings. The caller can derive new descendants afterwards.
+Revocation differs from unbind, object deletion and the existing provider-
+specific `obj_revoke` (e.g. permanently disabling new region mappings).
+A child checks all ancestor generations on each Handle admission, so closing
+the source Handle does not erase its revocation authority while it has
+descendants; pinned lineage nodes outlive the original Handle.
+
+Implemented as `ObjOpCapRevoke=57` and MicroPython `plan9.cap_revoke(h)`.
+The derivation chain has a bounded depth of 128. This is an **initial generic
+Handle-lineage revocation mechanism**; provider-specific OS authorizers still
+need migration. In-flight calls admitted before revocation may complete;
+future Handle admissions are rejected. Existing MMU mappings survive until
+explicit unmap/exit and are not silently torn down.
+
+ObjectSpace bindings derive their own capability node from the bound source.
+Resolving the binding derives from that node, not directly from an object
+pointer. Revoking the bound source therefore makes the binding and every
+resolved Handle unusable, while unrelated source grants remain valid.
+Enumeration sets the `ObjSpaceFlagRevoked` bit when a binding's lineage has
+been revoked. Unbinding releases the graph edge but does **not** revoke
+already resolved Handles. ObjectSpace-to-ObjectSpace edges remain weak for
+object lifetime, but their *capability lineage* is pinned.
 
 ## Implemented runtime v1
 
@@ -139,10 +161,14 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
    aliases, multiple labels, nested spaces, cycles, rights, stale handling,
    concurrent enumeration and AMD64 QEMU boot. This branch implements a
    foundation; full test execution is still required.
-2. **Capability security:** define generic derivation/revocation lineage,
-   replace OwnerID-equality gates across GE/O, region, device and process
-   providers; retain OwnerID as provenance. Negative cross-owner tests
-   must prove only delegated rights work.
+2. **Capability security:** the generic volatile Handle-derivation and
+   selective subtree-revocation mechanism is now implemented, including
+   ObjectSpace bindings, handle duplication and inherited child handles.
+   The next security subphase must eliminate unintended new roots at
+   provider-open boundaries, migrate OwnerID-equality gates across GE/O,
+   region, devices and process control, and test explicit cross-owner
+   delegation. Neither persistent grants nor a global object-destruction
+   revoke operation are implemented.
 3. **Execution roots:** replace Pgrp/OContext/NamespaceView role lookups
    and old process namespace lifecycle with explicit ObjectSpace roots;
    remove obsolete providers, public ABI, wrappers and tests. No shims.
@@ -156,3 +182,21 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
 A phase is not PASS merely because code was committed. Report actual
 build, QEMU, recovery and hardware evidence; mark anything not executed
 **NOT RUN**. No stale phase can declare the complete ObjectSpace target.
+
+## Capability lineage phase: current status
+
+The new `Vcap` records form a tree of *grant derivations*, NOT a hierarchy
+of objects or ObjectSpaces. One object can have many independent cap roots.
+Every installed derived Handle retains its ancestors' lineage nodes; none of
+those nodes grants access merely by being an object identifier. Revocation
+increments the source node's epoch, invalidating prior descendants without
+scanning other processes or graph spaces. Descendants can be closed after
+revocation. Later derivation from the same source is allowed.
+
+Full-system acceptance is in `tools/host/capability/` with its own
+GitHub Actions workflow. The earlier ObjectSpace-v1 acceptance remains
+required. Success of these tests does not prove that every GE/O OID open,
+device-catalog open or provider-internal acquisition derives from its
+authorizing Handle. Removing the OwnerID gate before auditing every such
+entry point would create an authority bypass, so it remains a separate
+security migration task.

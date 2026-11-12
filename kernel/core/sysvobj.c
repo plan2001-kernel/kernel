@@ -87,9 +87,30 @@ typedef struct Vuart	Vuart;
 typedef struct Vkbd	Vkbd;
 typedef struct Vusbep	Vusbep;
 
+/*
+ * A capability's provenance is an acyclic derivation chain, not a process
+ * ancestry. Each node snapshots its parent's revoke epoch. Revoking one
+ * node invalidates all of its *existing descendants*, but not that node or
+ * its ancestors/siblings. The revoker can derive fresh children afterwards.
+ * Nodes hold only other capability nodes, never Vobj pointers, so graph
+ * edges between ObjectSpaces cannot create an ownership cycle here.
+ */
+typedef struct Vcap Vcap;
+struct Vcap {
+	Ref ref;
+	Vcap *parent;
+	uvlong parentepoch;
+	uvlong epoch;
+	uint depth;
+};
+static Lock vcaplock;
+enum { VcapDepthMax = 128 };
+static void vcapput(Vcap*);
+
 struct Vhand {
 	Ref	ref;
 	Vobj	*obj;
+	Vcap	*cap;	/* shared lineage node for this installed grant */
 	int	rights;
 };
 
@@ -194,6 +215,7 @@ struct VspaceBinding {
 	uvlong id, incarnation, space, oid;
 	char label[ObjSpaceLabelMax];
 	uint rights, relation, kind;
+	Vcap *cap;			/* pinned derived lineage from source grant */
 	Vobj *target;                  /* nil for weak ObjectSpace edges */
 };
 struct Vspace {
@@ -441,10 +463,12 @@ vobjput(Vobj *o)
 		Vspace *s = o->priv;
 		int i;
 		o->priv = nil;
-		/* ObjectSpace edges are weak: no recursive space destruction. */
-		for(i = 0; i < s->nbindings; i++)
+		/* Space-to-space edges are weak; capability lineages are acyclic. */
+		for(i = 0; i < s->nbindings; i++){
+			vcapput(s->entries[i].cap);
 			if(s->entries[i].target != nil)
 				vobjput(s->entries[i].target);
+		}
 		free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
@@ -466,32 +490,125 @@ vobjput(Vobj *o)
 	}
 }
 
-static void
-vhandinit(Vhand *h, Vobj *o, int rights)
+/* vcapvalidlocked never sleeps; the chain is finite by construction. */
+static int
+vcapvalidlocked(Vcap *c)
 {
+	int depth = 0;
+	for(; c != nil && c->parent != nil; c = c->parent){
+		if(++depth > VcapDepthMax ||
+		   c->parent->epoch != c->parentepoch)
+			return 0;
+	}
+	return c != nil;
+}
+
+static int
+vcapvalid(Vcap *c)
+{
+	int ok;
+	lock(&vcaplock);
+	ok = vcapvalidlocked(c);
+	unlock(&vcaplock);
+	return ok;
+}
+
+static Vcap*
+vcapnew(Vcap *parent)
+{
+	Vcap *c;
+	c = smalloc(sizeof *c);
+	c->ref.ref = 1;
+	c->epoch = 1;
+	if(parent != nil){
+		lock(&vcaplock);
+		if(!vcapvalidlocked(parent) || parent->depth >= VcapDepthMax){
+			unlock(&vcaplock);
+			free(c);
+			error(Eperm);
+		}
+		c->parent = parent;
+		c->parentepoch = parent->epoch;
+		c->depth = parent->depth + 1;
+		incref(&parent->ref);
+		unlock(&vcaplock);
+	}
+	return c;
+}
+
+static void
+vcapput(Vcap *c)
+{
+	Vcap *parent;
+	while(c != nil && decref(&c->ref) == 0){
+		parent = c->parent;
+		free(c);
+		c = parent;
+	}
+}
+
+static void
+vcaprevokechildren(Vcap *c)
+{
+	lock(&vcaplock);
+	if(!vcapvalidlocked(c) || c->epoch == ~(uvlong)0){
+		unlock(&vcaplock);
+		error(Eperm);
+	}
+	c->epoch++;
+	unlock(&vcaplock);
+}
+
+/* Every new provider Handle begins a distinct root grant. */
+static Vhand*
+vhandalloc(Vobj *o, int rights)
+{
+	Vcap *c;
+	Vhand *h;
+	c = vcapnew(nil);
+	if(waserror()){vcapput(c);nexterror();}
+	h = smalloc(sizeof *h);
 	h->ref.ref = 1;
 	h->obj = o;
 	incref(&o->ref);
 	h->rights = rights;
+	h->cap = c;
+	poperror();
+	return h;
+}
+
+/* OPEN, inheritance and graph resolution must derive, not mint roots. */
+static Vhand*
+vhandallocchild(Vobj *o, int rights, Vcap *parent)
+{
+	Vcap *c;
+	Vhand *h;
+	c = vcapnew(parent);
+	if(waserror()){vcapput(c);nexterror();}
+	h = smalloc(sizeof *h);
+	h->ref.ref = 1;
+	h->obj = o;
+	incref(&o->ref);
+	h->rights = rights;
+	h->cap = c;
+	poperror();
+	return h;
 }
 
 static Vhand*
-vhandalloc(Vobj *o, int rights)
+vhandderive(Vhand *source, int rights)
 {
-	Vhand *h;
-
-	h = smalloc(sizeof *h);
-	vhandinit(h, o, rights);
-	return h;
+	if((rights & ~source->rights) != 0)
+		error(Eperm);
+	return vhandallocchild(source->obj, rights, source->cap);
 }
 
 static void
 vhandput(Vhand *h)
 {
-	if(h == nil)
+	if(h == nil || decref(&h->ref) != 0)
 		return;
-	if(decref(&h->ref) != 0)
-		return;
+	vcapput(h->cap);
 	vobjput(h->obj);
 	free(h);
 }
@@ -565,6 +682,34 @@ vobjinstallobj(Vobj *o, int rights)
  * record is reference-counted independently of the Proc, so the Handle is
  * valid before the process is published and remains valid after it exits.
  */
+/* Installs a child grant with the parent lineage, never a new root. */
+static int
+vobjinstallchild(Vobj *o, int rights, Vcap *parent)
+{
+	Vhand *h;
+	int handle;
+	Vhtab *t = vgettab(1);
+	if(t == nil) error(Enomem);
+	h = vhandallocchild(o, rights, parent);
+	handle = vinstall(t, h);
+	if(handle < 0){
+		vhandput(h);
+		error("vobj: too many handles");
+	}
+	return handle;
+}
+
+int
+vobjcaprevoke(int handle)
+{
+	Vhand *h = vlookup(handle, Vdelegate);
+	if(waserror()){vhandput(h);nexterror();}
+	vcaprevokechildren(h->cap);
+	poperror();
+	vhandput(h);
+	return 0;
+}
+
 int
 vobjprocinstall(Procstat *st)
 {
@@ -1668,6 +1813,12 @@ vlookupin(Proc *p, int handle, int need)
 		error(Eperm);
 	if(bad)
 		error(Ebadarg);
+	/* An already-open Handle remains closeable but cannot be used after
+	 * revocation of any ancestor grant, including after process inheritance. */
+	if(!vcapvalid(h->cap)){
+		vhandput(h);
+		error(Eperm);
+	}
   if(h->obj->kind==VkindGe || h->obj->kind==VkindSpace){
    if(waserror()){vhandput(h);nexterror();}
    oscheckhand(h->obj->priv);
@@ -1863,7 +2014,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			}
 #endif
 			/* Keep cleanup armed until the new Vhand is installed. */
-			h = vhandalloc(o, vi->e[i].rights);
+			h = vhandallocchild(o, vi->e[i].rights, vi->e[i].src->cap);
 			vi->e[i].gen = gen;
 			t->s[vi->e[i].slot].h = h;
 			t->s[vi->e[i].slot].gen = gen;
@@ -1871,7 +2022,7 @@ vobjinheritcommit(Proc *child, Vinherit *vi)
 			poperror();
 			vobjput(o);		/* the installed Vhand owns O */
 		}else{
-			h = vhandalloc(src, vi->e[i].rights);
+			h = vhandderive(vi->e[i].src, vi->e[i].rights);
 			vi->e[i].gen = gen;
 			t->s[vi->e[i].slot].h = h;
 			t->s[vi->e[i].slot].gen = gen;
@@ -2063,7 +2214,8 @@ vobjcreatege(int spacehandle, void *buf, long n, uvlong *oidp, uvlong *spaceid)
  o=vobjalloc(VkindGe,ossid(cap),0);
  if(o==nil) error(Enomem);
  o->provider=VopenGe;o->priv=cap;cap=nil;
- h=vhandalloc(o, rights);
+ /* A newly published GE Handle descends from its authorized O Space. */
+ h=vhandallocchild(o, rights, sh->cap);
  if(vgettab(1)==nil){vhandput(h);error(Enomem);}
  handle=vinstall(vgettab(1),h);
  if(handle<0){vhandput(h);error("vobj: too many handles");}
@@ -2376,7 +2528,7 @@ uartmodebits(int mode)
 /* The catalog has already validated authority, selector, mode and rights.
  * Acquire the port only after those checks so a refused open has no effect. */
 static int
-vobjuartdevice(int port, int mode, uvlong rights, VobjId *id)
+vobjuartdevice(int port, int mode, uvlong rights, VobjId *id, Vcap *authority)
 {
 	Vobj *o;
 	Vuart *vu;
@@ -2414,7 +2566,7 @@ vobjuartdevice(int port, int mode, uvlong rights, VobjId *id)
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, hrights);
+	h = vobjinstallchild(o, hrights, authority);
 	poperror();
 	if(id != nil){
 		id->incarnation = o->incarnation;
@@ -2492,7 +2644,7 @@ vobjuartstatus(int handle, void *buf, long n)
 /* The catalog has already validated the exclusive-claim option.  The rights
  * mask is the validated attenuation of Vread|Vmeta|Vcontrol|Vdelegate. */
 static int
-vobjkbddevice(uvlong rights, VobjId *id)
+vobjkbddevice(uvlong rights, VobjId *id, Vcap *authority)
 {
 	Vobj *o;
 	Vkbd *vk;
@@ -2519,16 +2671,18 @@ vobjkbddevice(uvlong rights, VobjId *id)
 		vobjput(o);
 		error(Enomem);
 	}
-	nh = smalloc(sizeof *nh);
+	if(waserror()){vobjput(o);nexterror();}
+	nh = vhandallocchild(o, (int)rights, authority);
+	poperror();
 	if((r = kbdscancodeacquire()) != 0){
-		free(nh);
+		vhandput(nh);
 		vobjput(o);		/* frees vk; held is still 0 */
 		if(r == -2)
 			error("PS/2 keyboard unavailable");
 		error(Einuse);
 	}
 	vk->held = 1;
-	vhandinit(nh, o, (int)rights);
+	/* Handle and lineage were fully allocated before exclusive acquisition. */
 	h = vinstall(t, nh);
 	if(h < 0){
 		vhandput(nh);
@@ -2615,7 +2769,7 @@ usbeprights(int kind, int mode)
 /* DATA owns the usbcore data-open; CTL only references the endpoint for
  * provider administration, matching the former endpoint-open semantics. */
 static int
-vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id)
+vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id, Vcap *authority)
 {
 	Vobj *o;
 	Vusbep *ve;
@@ -2675,7 +2829,7 @@ vobjusbepref(int devno, int epno, int kind, int mode, uvlong rights, VobjId *id)
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, (int)rights);
+	h = vobjinstallchild(o, (int)rights, authority);
 	poperror();
 	if(id != nil){
 		id->incarnation = o->incarnation;
@@ -2905,7 +3059,7 @@ vobjetheropen(int controller)
 }
 
 static int
-vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id)
+vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id, Vcap *authority)
 {
 	int h;
 
@@ -2913,7 +3067,7 @@ vobjdeviceinstall(Vobj *o, uvlong rights, VobjId *id)
 		vobjput(o);
 		nexterror();
 	}
-	h = vobjinstallobj(o, (int)rights);
+	h = vobjinstallchild(o, (int)rights, authority);
 	poperror();
 	if(id != nil){
 		id->incarnation = o->incarnation;
@@ -2931,8 +3085,9 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	ObjDeviceOpenOptions opt;
 	Vhand *catalog;
 	Vobj *o;
+	Vcap *authority;
 	uvlong max, cr;
-	int mode, kind;
+	int mode, kind, result;
 
 	if(req == nil || len != sizeof r)
 		error(Ebadarg);
@@ -2998,7 +3153,10 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 		error(Ebadarg);
 	}
 	cr = (uvlong)catalog->rights;
+	authority = catalog->cap;
+	incref(&authority->ref);
 	vhandput(catalog);
+	if(waserror()){vcapput(authority);nexterror();}
 	if(r.family == ObjDeviceUsbEndpoint && kind == USBCTL
 	&& (cr & Vcontrol) == 0)
 		error(Eperm);
@@ -3006,22 +3164,30 @@ vobjdeviceopen(void *req, long len, uvlong rights, VobjId *id)
 	case ObjDeviceUart:
 		if(vobjhandlesbykind(up, VkindUart) >= Vuartslotmax)
 			error("too many UART handles");
-		return vobjuartdevice(r.selector0, mode, rights, id);
+		result = vobjuartdevice(r.selector0, mode, rights, id, authority);
+		break;
 	case ObjDeviceKbd:
 		if(vobjhandlesbykind(up, VkindKbd) >= Vkbdslotmax)
 			error("too many keyboard handles");
-		return vobjkbddevice(rights, id);
+		result = vobjkbddevice(rights, id, authority);
+		break;
 	case ObjDeviceUsbEndpoint:
-		return vobjusbepref(r.selector0, r.selector1, kind, mode,
-			rights, id);
+		result = vobjusbepref(r.selector0, r.selector1, kind, mode,
+			rights, id, authority);
+		break;
+	default:
+		if(vobjhandlesbykind(up, VkindDevice) >= Vusbepslotmax)
+			error("too many device handles");
+		if(r.family == ObjDeviceUsbControl)
+			o = vobjusbctrlopen(r.selector0, r.selector1);
+		else
+			o = vobjetheropen(r.selector0);
+		result = vobjdeviceinstall(o, rights, id, authority);
+		break;
 	}
-	if(vobjhandlesbykind(up, VkindDevice) >= Vusbepslotmax)
-		error("too many device handles");
-	if(r.family == ObjDeviceUsbControl)
-		o = vobjusbctrlopen(r.selector0, r.selector1);
-	else
-		o = vobjetheropen(r.selector0);
-	return vobjdeviceinstall(o, rights, id);
+	poperror();
+	vcapput(authority);
+	return result;
 }
 
 /* Caller holds a Vhand for the entire operation, pinning the session and
@@ -3184,7 +3350,7 @@ vobjdevicerx(int handle)
 		error(Eperm);
 	rights = Vread|Vmeta;
 	rights |= h->rights & Vdelegate;
-	result = vobjinstallobj(vetherrxregion(d->ether), rights);
+	result = vobjinstallchild(vetherrxregion(d->ether), rights, h->cap);
 	poperror();
 	vhandput(h);
 	return result;
@@ -3210,7 +3376,7 @@ vobjdevicetx(int handle)
 		error(Ebadarg);
 	rights = Vread|Vwrite|Vmeta;
 	rights |= h->rights & Vdelegate;
-	result = vobjinstallobj(vethertxregion(d->ether), rights);
+	result = vobjinstallchild(vethertxregion(d->ether), rights, h->cap);
 	poperror();
 	vhandput(h);
 	return result;
@@ -3246,7 +3412,7 @@ vobjdevicerecv(int handle, void *out)
 	r.family = ObjDeviceUsbControl;
 	r.length = d->reply->size;
 	/* Failure (e.g. Handle exhaustion) leaves the completion pending. */
-	result = vobjinstallobj(d->reply, Vread|Vmeta|Vdelegate);
+	result = vobjinstallchild(d->reply, Vread|Vmeta|Vdelegate, h->cap);
 	memmove(out, &r, sizeof r);
 	vobjput(d->reply);
 	d->reply = nil;
@@ -3552,13 +3718,14 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	Vhand *target = nil;
 	Vspace *s;
 	VspaceBinding *b;
+	Vcap *grant = nil;
 	int rights;
 	uvlong id;
 	if(req == nil || req->flags != 0 || req->target <= 0)
 		error(Ebadarg);
 	vspacelabelcheck(req->label);
 	o = vspacehandle(handle, Vcontrol);
-	if(waserror()){vhandput(target);vobjput(o);nexterror();}
+	if(waserror()){vcapput(grant);vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
 	if(target->obj->kind == VkindNamespaceControl ||
 	   target->obj->kind == VkindNamespaceView)
@@ -3567,6 +3734,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	if(rights == 0 || (rights & ~target->rights) != 0 ||
 	   (rights & ~Vall) != 0)
 		error(Eperm);
+	grant = vcapnew(target->cap);
 	s = o->priv;
 	lock(&s->lk);
 	if(s->revoked || s->nbindings == ObjSpaceBindingMax ||
@@ -3578,6 +3746,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	memset(b, 0, sizeof *b);
 	memmove(b->label, req->label, sizeof b->label);
 	b->id = id = ++s->nextid;
+	b->cap = grant; grant = nil;
 	b->rights = rights;
 	b->relation = req->relation;
 	b->kind = target->obj->kind;
@@ -3602,6 +3771,7 @@ vobjspaceunbind(int handle, uvlong id)
 	Vobj *o;
 	Vspace *s;
 	Vobj *target;
+	Vcap *grant;
 	int i, j;
 	if(id == 0) error(Ebadarg);
 	o = vspacehandle(handle, Vcontrol);
@@ -3620,11 +3790,13 @@ vobjspaceunbind(int handle, uvlong id)
 		error("objectspace: no binding");
 	}
 	target = s->entries[i].target;
+	grant = s->entries[i].cap;
 	for(j = i+1; j < s->nbindings; j++)
 		s->entries[j-1] = s->entries[j];
 	memset(&s->entries[--s->nbindings], 0, sizeof s->entries[0]);
 	s->epoch++;
 	unlock(&s->lk);
+	vcapput(grant);
 	if(target != nil) vobjput(target);
 	vobjput(o);
 }
@@ -3633,13 +3805,14 @@ int
 vobjspaceresolve(int handle, uvlong id, uvlong rights)
 {
 	Vobj *o, *target = nil;
+	Vcap *grant = nil;
 	Vspace *s;
 	VspaceBinding *b;
 	uvlong incarnation = 0, oid = 0;
 	int i, allowed, result;
 	if(id == 0 || rights > Vall) error(Ebadarg);
 	o = vspacehandle(handle, Vread);
-	if(waserror()){vobjput(target);vobjput(o);nexterror();}
+	if(waserror()){vcapput(grant);vobjput(target);vobjput(o);nexterror();}
 	s = o->priv;
 	lock(&s->lk);
 	if(s->revoked){
@@ -3658,6 +3831,8 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 		unlock(&s->lk);
 		error(Eperm);
 	}
+	grant = b->cap;
+	incref(&grant->ref);
 	if(b->target != nil){
 		target = b->target;
 		incref(&target->ref);
@@ -3668,8 +3843,9 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 	unlock(&s->lk);
 	if(target == nil) target = vspaceweakref(incarnation, oid);
 	if(target == nil) error("objectspace: stale target");
-	result = vobjinstallobj(target, allowed);
+	result = vobjinstallchild(target, allowed, grant);
 	poperror();
+	vcapput(grant);
 	vobjput(target);
 	vobjput(o);
 	return result;
@@ -3708,6 +3884,8 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 		r->kind = b->kind;
 		r->rights = b->rights;
 		r->relation = b->relation;
+		if(!vcapvalid(b->cap))
+			r->flags |= ObjSpaceFlagRevoked;
 		memmove(r->label, b->label, sizeof r->label);
 	}
 	unlock(&s->lk);
@@ -4085,6 +4263,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 	Vobj *o;
 	VobjGeReq gr;
 	Ohand *oh;
+	Vcap *sourcecap = nil;
 	int handle, defrights, ceiling;
 
 	if(id != nil)
@@ -4110,6 +4289,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 		o = vobjalloc(VkindSpace, 0, 0);
 		if(o == nil){
 			oshandput(oh);
+			vcapput(sourcecap);
 			error(Enomem);
 		}
 		vgecaplimit(oh,(int)rights);
@@ -4135,11 +4315,15 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 			error(Ebadarg);
 		}
 		if(waserror()){
+			vcapput(sourcecap);
 			vhandput(sh);
 			nexterror();
 		}
 		ceiling = sh->rights;
 		cap = oscopycap((Ohand*)sp->priv, gr.oid);
+		/* Pin the authorizing grant before releasing its Handle. */
+		sourcecap = sh->cap;
+		incref(&sourcecap->ref);
 		poperror();
 		vhandput(sh);
 		oh = cap;
@@ -4148,6 +4332,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 			rights = defrights;
 		if((rights & ~(uvlong)defrights) != 0){
 			oshandput(oh);
+			vcapput(sourcecap);
 			error(Eperm);
 		}
 		o = vobjnewkind(VkindGe, 0);
@@ -4164,11 +4349,15 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 	}else
 		error("vobj: provider not supported");
 	if(waserror()){
+		vcapput(sourcecap);
 		vobjput(o);
 		nexterror();
 	}
-	handle = vobjinstallobj(o, (int)rights);
+	handle = sourcecap == nil ?
+		vobjinstallobj(o, (int)rights) :
+		vobjinstallchild(o, (int)rights, sourcecap);
 	poperror();
+	vcapput(sourcecap);
 	if(id != nil){
 		id->incarnation = o->incarnation;
 		id->space = o->space;
@@ -4203,7 +4392,7 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 		vhandput(s);
 		error(Enomem);
 	}
-	nh = vhandalloc(s->obj, (int)rights);
+	nh = vhandderive(s, (int)rights);
 	handle = vinstall(t, nh);
 	if(handle < 0){
 		vhandput(nh);
@@ -4250,7 +4439,7 @@ Ohand *vobjbindinggecap(void *v) {
 }
 int vobjbindingdelegable(void *v) {
  Vhand *h=v;
- return h!=nil && (h->rights & Vdelegate)!=0;
+ return h!=nil && (h->rights & Vdelegate)!=0 && vcapvalid(h->cap);
 }
 void vobjbindinghold(void *v) {if(v) incref(&((Vhand*)v)->ref);}
 void vobjbindingput(void *v) {vhandput(v);}
@@ -4286,10 +4475,10 @@ vobjbind(int handle, char *role, int rolelen, uvlong rights, uint mode)
   bound->oid=h->obj->oid;
   bound->space=ossid(cap);
   bound->priv=cap;cap=nil;
-  nh=vhandalloc(bound, (int)rights);
+  nh=vhandallocchild(bound, (int)rights, h->cap);
   vobjput(bound);bound=nil;
  }else
-  nh=vhandalloc(h->obj, (int)rights);
+  nh=vhandderive(h, (int)rights);
  /* RFNOMNT forbids namespace extension, not removal of an existing role.
   * Admission and the bind are one step against pgrpsealnamespace(). */
  if(!pgrpnamespaceextendbegin(up->pgrp)) error(Eperm);
@@ -4309,10 +4498,11 @@ vobjopenbinding(char *role, int rolelen, uvlong rights, VobjId *id)
  if(up->pgrp==nil) error(Eperm);
  bh=octxobject(up->pgrp->ocontext,name);
  if(waserror()){vhandput(bh);nexterror();}
+ if(!vcapvalid(bh->cap)) error(Eperm);
  if(bh->obj->kind==VkindGe || bh->obj->kind==VkindSpace) oscheckhand(bh->obj->priv);
  if(rights==0) rights=bh->rights;
  if(rights & ~(uvlong)bh->rights) error(Eperm);
- nh=vhandalloc(bh->obj, (int)rights);
+ nh=vhandderive(bh, (int)rights);
  if(vgettab(1)==nil){vhandput(nh);error(Enomem);}
  handle=vinstall(vgettab(1),nh);
  if(handle<0){vhandput(nh);error("vobj: too many handles");}

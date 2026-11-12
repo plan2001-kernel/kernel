@@ -20,12 +20,24 @@ BindingIDs. Duplicate names and nested spaces are supported, without
 path parsing. Object ABI version 2 is intentionally incompatible with
 the earlier value. The ABI records are in `runtime/abi/objectspace.h`.
 
+The capability-lineage layer derives attenuated Handles with at most 128
+ancestor grants. `ObjOpCapRevoke` requires Vdelegate on the exact source
+Handle and invalidates prior descendants, not the source, unrelated
+siblings, provider object or already installed region mappings. A stored
+ObjectSpace binding preserves its own derived grant lineage; revoked
+bindings report `ObjSpaceFlagRevoked` and cannot mint fresh Handles.
+Generic subtree revocation is independent of provider `ObjOpRevoke`
+and binding removal. The implemented OwnerID gates and provider-origin
+capability reopening need a separate authority audit before cross-owner
+access can be enabled generally.
+
 The v1 limit is 64 bindings per space, 47 label bytes plus NUL, and eight
 records per enumeration page. An epoch rejects mixed snapshots. Space-to-space
 references are weak in this first implementation to avoid retaining cycles;
 independently owned target Handles keep them live. Unbind does not revoke an
-already resolved Handle. No generic revocation derivation tree, durable
-ObjectSpace/GE binding store, or process context root exists yet. Existing
+already resolved Handle. A generic volatile Handle derivation tree and descendant revocation are
+now implemented by `ObjOpCapRevoke=57`; GE/O persisted grant storage and
+explicit process ObjectSpace roots are not implemented. Existing
 Pgrp namespaces and OwnerID object gates remain **legacy current behavior**,
 not architectural target invariants.
 
