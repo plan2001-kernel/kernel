@@ -2,6 +2,7 @@
 
 /* Boot-only GE publication fault injection. */
 extern int ownercrash;
+static Lock tornfaultlk;
 
 static vlong	blkalloc_lk(Arena*, int);
 static vlong	blkalloc(Gefs *fs, int, uint, int);
@@ -46,16 +47,23 @@ syncblk(Blk *b)
 	 * checksum is left unchanged, exercising mirror/fail-closed recovery.
 	 * It is a synthetic, test-only torn-block fault, not a proof about
 	 * physical sector atomicity. */
-	if(b->type == Tsuper && ownercrash == 106){
-		ownercrash = 0;
-		n = fs->oblkrw(fs->oblk, b->buf, 40, b->bp.addr, 1);
-		if(n != 40)
-			broke(fs, "%B %s: %r", b->bp, Eio);
-		gflushdev(fs);
-		print("OWNERID-CRASH graph-superblock-torn bytes=40\n");
-		splhi();
-		for(;;)
-			;
+	if(b->type == Tsuper){
+		/* Superblocks may be written by distinct sync workers. Claim
+		 * the injection under a lock so only one mirror is torn. */
+		lock(&tornfaultlk);
+		if(ownercrash == 106){
+			ownercrash = 0;
+			unlock(&tornfaultlk);
+			n = fs->oblkrw(fs->oblk, b->buf, 40, b->bp.addr, 1);
+			if(n != 40)
+				broke(fs, "%B %s: %r", b->bp, Eio);
+			gflushdev(fs);
+			print("OWNERID-CRASH graph-superblock-torn bytes=40\n");
+			splhi();
+			for(;;)
+				;
+		}
+		unlock(&tornfaultlk);
 	}
 	n = fs->oblkrw(fs->oblk, b->buf, Blksz, b->bp.addr, 1);
 	if(n != Blksz)

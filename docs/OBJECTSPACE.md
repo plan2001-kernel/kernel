@@ -168,11 +168,11 @@ Persistent process-root selection, garbage collection, full cross-volume
 references and physical hardware remain outstanding. Phase 4 is not complete until those
 requirements are addressed and verified.
 
-Native tests in `tools/host/objectspace/run-persistent.sh` use one fresh,
-disposable GE/O disk over four QEMU boots: initial snapshot, restore
-and replacement, abrupt QEMU SIGKILL after an unpublished replacement,
-and recovery of the last published graph with negative corruption and
-capability tests. The extended QEMU harness now also injects boot-only fault point 105
+Native tests in `tools/host/objectspace/run-persistent.sh` use one
+disposable GE/O disk across repeated real QEMU boots: snapshot creation,
+replacement, nested and cyclic graph reification, crash injection,
+concurrent multi-node mutation and reboot verification. No test writes
+to a physical block device. The extended QEMU harness now also injects boot-only fault point 105
 inside `objtxcommit`, immediately after staging flush and before the
 published-version header update. It kills QEMU at the deterministic marker,
 boots the same disk again, and checks that the previous graph remains intact.
