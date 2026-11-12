@@ -1,20 +1,17 @@
 /*
  * MicroPython: native GE/O boot and the in-memory source path.
- * In O-only boot, -O PARTUUID=... -S init -I restores the persistent
- * init Space, calls run() and hands the console to the native REPL;
- * -N is the same boot without the REPL.  There is no pathname file
- * argument, no built-in boot.py and no fd console fallback.
+ * Native boot opens the flat GE/O volume, restores the Python graph
+ * through space.open(), calls run(), and optionally starts the REPL.
+ * There is no named storage selector, pathname file argument,
+ * built-in boot.py, or fd console fallback.
  *	micropython -c source		run source
- *	micropython -O ... -S init -N	the native noninteractive server boot
- *	micropython -O ... -S init -I	the same, then the native REPL
- *	micropython -O volume ...	use the native O volume (a PARTUUID or
- *					a device) for the Space, its Environment
- *					and its code: no filesystem
- *	micropython -E env ...		import from the Environment env alone
- *	micropython -S space ...	in the Space space: its image restored,
- *					committed per statement and at the
- *					program's end
- *					(see p9space.c; O mode: docs/O-FORMAT.md)
+ *	micropython -O volume -N	native noninteractive server boot
+ *	micropython -O volume -I	native boot followed by the REPL
+ *	micropython -O volume -c source	run source with the GE/O graph
+ *	micropython -E env -c source	use a standalone Environment
+ * The O volume is specified by PARTUUID or device; objects are
+ * addressed by OID and exposed through the ObjectSpace graph.
+ * (see p9space.c; O mode: docs/O-FORMAT.md)
  * A failure exits with status micropython (usage: usage); sys.exit(n)
  * with n.
  */
@@ -127,7 +124,7 @@ int main(int argc, char **argv) {
     const char *booterror = "initialization or run() failed (see error above)";
     char useenv[128];
 
-    // -O VOLUME: the native O volume; then -E or -S as before
+    // -O VOLUME: select the native flat GE/O volume before mode options
     if (argc >= 3 && strcmp(argv[1], "-O") == 0) {
         ovol = argv[2];
         argv[2] = argv[0];
