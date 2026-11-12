@@ -45,6 +45,8 @@ if p.owner_info()[1]!='ownerA':
     fail('nogrant-identity')
 if findkind(p.VKIND_SPACE,0) or findkind(p.VKIND_GE,0):
     fail('inherited-ambient-space')
+if p.space_roots():
+    fail('inherited-ambient-objectspace')
 try:
     p.obj_open_space('init')
 except OSError:
@@ -64,6 +66,35 @@ except OSError:
 else:
     fail('untrusted-program-register')
 p.exits('NO-GRANT')
+"""
+
+GRAPH_ROOT=COMMON+r"""
+if p.owner_info()[1]!='ownerB':
+    fail('graph-root-owner')
+roots=p.space_roots()
+if len(roots)!=1:
+    fail('graph-root-count')
+rh=roots[0]
+records,cursor,epoch=p.space_list(rh)
+if len(records)!=1 or records[0][1]!='payload':
+    fail('graph-root-edges')
+h=p.space_resolve(rh,records[0][0],p.VREAD)
+if p.obj_read(h,8)!=b'B-UPDATE':
+    fail('graph-root-resolve')
+try:
+    p.obj_write(h,b'ESCALATE')
+except OSError:
+    pass
+else:
+    fail('graph-root-escalation')
+p.obj_close(h)
+try:
+    p.obj_open_space('init')
+except OSError:
+    pass
+else:
+    fail('graph-root-ambient-space')
+p.exits('GRAPH-ROOT')
 """
 
 READ_ONLY=COMMON+r"""
@@ -271,6 +302,13 @@ def run():
     gh=p.obj_open_ge_space(sh,AOBJ)
     ok(p.obj_owner(gh)[0]==aown and p.obj_read(gh,8)==b'B-UPDATE',
        'GE/O Kowner remains owner A after authorized owner B write')
+    # ObjectSpace roots are just explicitly delegated Handles. No
+    # process-global implicit root is installed at spawn time.
+    root_space=p.space_new()
+    p.space_bind(root_space,'payload',gh,p.VREAD|p.VMETA)
+    waited(launched('B',GRAPH_ROOT,((root_space,p.VREAD|p.VMETA|p.VDELEGATE),)),
+           'GRAPH-ROOT','B receives exactly one ObjectSpace root with attenuated edge')
+    p.obj_close(root_space)
     p.obj_close(gh)
 
     # A source revokes an already inherited grandchild in owner B. Separate
