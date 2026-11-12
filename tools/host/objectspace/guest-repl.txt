@@ -21,7 +21,7 @@ assert back > 0
 walked = p.space_resolve(root, second, p.VREAD | p.VMETA)
 backrec, nextcursor, backgen = p.space_list(walked)
 assert len(backrec) == 1 and backrec[0][0] == back
-rootalias = p.space_resolve(walked, back, p.VREAD)
+rootalias = p.space_resolve(walked, back, p.VREAD | p.VMETA)
 assert p.obj_info(rootalias)[8] == p.VKIND_OBJECT_SPACE
 p.obj_close(rootalias)
 p.obj_close(walked)

@@ -29,5 +29,5 @@ assert "ObjKindObjectSpace = 5" in abi
 assert "ObjSpaceBindingMax = 64" in records
 assert "ObjSpaceFlagStale" in records
 assert "vspaceweakref" in provider and "vspaceregistryremove" in provider
-assert "return vobjspacecreate(" in dispatch
+assert "vobjspacecreate(&vid)" in dispatch
 print("PASS: static ObjectSpace ABI and kernel/userspace closure")
