@@ -166,6 +166,44 @@ p.region_unmap(b)
 p.exits('REGION-WRITE')
 """
 
+REVOKE_OTHER_OWNER=COMMON+r"""
+if p.owner_info()[1]!='ownerB':
+    fail('revoke-other-owner')
+ge=findkind(p.VKIND_GE,p.VREAD|p.VMETA)
+ready=findkind(p.VKIND_REGION,p.VWRITE)
+go=0
+for h in p.obj_list():
+    i=p.obj_info(h)
+    if i[8]==p.VKIND_REGION and (i[10]&p.VREAD) and not (i[10]&p.VWRITE):
+        go=h
+        break
+if not ge or not ready or not go:
+    fail('revoke-inherited-handles')
+if p.obj_read(ge,8)!=b'B-UPDATE':
+    fail('revoke-before-read')
+bready=p.region_map(ready,0x56000000)
+bgo=p.region_map(go,0x57000000)
+p.region_atomic_store(bready,1)
+p.region_wake(bready,0,0x7fffffff)
+while p.region_atomic_load(bgo)==0:
+    p.region_wait(bgo,0,0,200)
+try:
+    p.obj_read(ge,8)
+except OSError:
+    pass
+else:
+    fail('revoked-grant-still-works')
+try:
+    p.obj_owner(ge)
+except OSError:
+    pass
+else:
+    fail('revoked-metadata-still-works')
+p.region_unmap(bready)
+p.region_unmap(bgo)
+p.exits('CROSS-REVOKED')
+"""
+
 SLEEP=COMMON+r"""
 p.sleep(60000)
 p.exits('SLEEP-UNEXPECTED')
@@ -231,6 +269,36 @@ def run():
     ok(p.obj_owner(gh)[0]==aown and p.obj_read(gh,8)==b'B-UPDATE',
        'GE/O Kowner remains owner A after authorized owner B write')
     p.obj_close(gh)
+
+    # A source revokes an already inherited grandchild in owner B. Separate
+    # region channels provide an explicit READY/GO barrier (no sleep race).
+    gh=p.obj_open_ge_space(sh,AOBJ)
+    share=p.obj_open_handle(gh,p.VREAD|p.VMETA|p.VDELEGATE)
+    ready=p.region_create(8192)
+    go=p.region_create(8192)
+    ready_ro=p.obj_open_handle(ready,p.VREAD|p.VMETA)
+    ready_base=p.region_map(ready_ro,0x54000000)
+    go_base=p.region_map(go,0x55000000)
+    delegated=((share,p.VREAD|p.VMETA),
+               (ready,p.VREAD|p.VWRITE|p.VMETA),
+               (go,p.VREAD|p.VMETA))
+    bh=launched('B',REVOKE_OTHER_OWNER,delegated)
+    deadline=p.time_ns()+20000000000
+    while p.region_atomic_load(ready_base)==0:
+        p.region_wait(ready_base,0,0,200)
+        if p.time_ns()>deadline:
+            raise AssertionError('cross-owner revoke handshake timed out')
+    p.cap_revoke(share)
+    p.region_atomic_store(go_base,1)
+    p.region_wake(go_base,0,0x7fffffff)
+    waited(bh,'CROSS-REVOKED',
+           'cross-owner revoked descendants cannot read or inspect object')
+    ok(p.obj_read(share,8)==b'B-UPDATE' and p.obj_read(gh,8)==b'B-UPDATE',
+       'source and its ancestor remain authorized after descendant revoke')
+    p.region_unmap(ready_base)
+    p.region_unmap(go_base)
+    for h in (ready_ro,ready,go,share,gh):
+        p.obj_close(h)
 
     # Root-owned independent target; process handles are the only control.
     target=space.spawn(MPY,handle=sh,
