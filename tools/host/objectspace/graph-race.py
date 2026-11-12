@@ -12,8 +12,10 @@ progress=p.region_create(8192)
 cbase=p.region_map(ctl,0x4f700000)
 rbase=p.region_map(progress,0x4f710000,p.OBJ_REGION_MAP_READONLY)
 p.region_atomic_store(cbase,0)
-pid,_=p.rforkex(p.RFPROC,((child,0,child),(ctl,0,ctl),(progress,0,progress)))
+# Destinations are 1..3, NOT the parent's generation-encoded Handles.
+pid,_=p.rforkex(p.RFPROC,((child,0,1),(ctl,0,2),(progress,0,3)))
 if pid==0:
+    child,ctl,progress=p.obj_list()
     cb=p.region_map(ctl,0x4f720000,p.OBJ_REGION_MAP_READONLY)
     rb=p.region_map(progress,0x4f730000)
     binding=0
