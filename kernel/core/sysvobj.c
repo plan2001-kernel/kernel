@@ -4144,6 +4144,9 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 	return handle;
 }
 
+/* The persistent ObjectSpace engine lives next to the Vhand/Vcap internals. */
+#include "vspacepersist.inc"
+
 /*
  * OPEN(Handle): duplicate an existing authorized capability with an equal or
  * attenuated rights subset.  The numeric source Handle is process-local, so
