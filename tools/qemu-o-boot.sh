@@ -897,6 +897,13 @@ qob_boot_once()
 		if [ "$success_seen" = 1 ]; then
 			if [ -n "$expect" ]; then
 				if qob_has_ere "$expect" "$serial"; then
+					if [ "${QOB_CRASH_AFTER_EXPECT:-0}" = 1 ]; then
+						qob_say "injected power-loss: SIGKILL after marker $expect"
+						kill -9 "$pid" 2>/dev/null || true
+						wait "$pid" 2>/dev/null || true
+						QOB_CURRENT_PID=
+						crashed=1
+					fi
 					result=pass
 					break
 				fi
