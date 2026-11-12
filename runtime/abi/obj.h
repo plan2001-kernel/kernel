@@ -19,7 +19,8 @@
 #ifndef PLAN2001_ABI_OBJ_H
 #define PLAN2001_ABI_OBJ_H
 
-#define OBJ_ABI_VERSION 1
+#define OBJ_ABI_VERSION 2
+#include "objectspace.h"
 
 struct Ospawn;
 
@@ -48,6 +49,7 @@ enum {
 	ObjKindBytes		= 0,
 	ObjKindGe		= 2,
 	ObjKindRegion		= 4,	/* volatile capability-mapped pages */
+	ObjKindObjectSpace = 5,	/* capability-addressed relation graph */
 	ObjCreateKindMask	= 0xff,
 };
 
@@ -132,6 +134,10 @@ enum {
 	/* Any object/process Handle: immutable owner metadata.  This reports
 	 * identity only; it never grants management of another owner's object. */
 	ObjOpOwnerInfo = 52,
+	ObjOpSpaceBind = 53,	/* add one labeled capability relation */
+	ObjOpSpaceUnbind = 54,	/* remove exactly one binding id */
+	ObjOpSpaceResolve = 55,	/* binding id -> attenuated target handle */
+	ObjOpSpaceEnumerate = 56,	/* paged stable-snapshot metadata */
 };
 
 /* ObjOpRegionMap arg1 flags. */

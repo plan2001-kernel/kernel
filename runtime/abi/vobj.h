@@ -50,6 +50,7 @@ enum {
 	VkindNamespaceControl = 16,	/* caller's current namespace */
 	VkindRegion	= 17,	/* volatile capability-mapped memory region */
 	VkindProcess	= 18,	/* volatile process observation/control capability */
+	VkindObjectSpace = 19,	/* independent named capability graph node */
 	/* Kinds 1 (message FIFO), 2 (TCP), 5 (UDP6), 6 (Pipe), 9 (USB service)
 	 * and 12 (ProcessSelf) are reserved historical identifiers and are
 	 * never installed. */
