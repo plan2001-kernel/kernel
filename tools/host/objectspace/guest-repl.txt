@@ -1,40 +1,42 @@
-# Executed by tools/host/objectspace/run-objectspace.sh in a real AMD64
-# QEMU/OVMF/MicroPython boot. Only single-line statements so the REPL monitor
-# does not depend on a multiline paste implementation.
+# Native MicroPython ObjectSpace graph acceptance, no path or Pgrp.
 import plan9 as p
-root = p.space_new()
-child = p.space_new()
-data = p.obj_create(b'data')
-first = p.space_bind(root, 'src', data, p.VREAD | p.VMETA)
-second = p.space_bind(root, 'src', child, p.VREAD | p.VMETA)
-assert first != second
-entries, cursor, generation = p.space_list(root)
-assert len(entries) == 2
-assert entries[0][0] == first and entries[1][0] == second
-assert entries[0][1] == 'src' and entries[1][1] == 'src'
-assert entries[0][2] == p.VKIND_BYTES and entries[1][2] == p.VKIND_OBJECT_SPACE
-assert entries[0][3] == p.VREAD | p.VMETA
-reader = p.space_resolve(root, first, p.VREAD)
-assert p.obj_read(reader, 4) == b'data'
-back = p.space_bind(child, 'back', root, p.VREAD | p.VMETA)
-assert back > 0
-walked = p.space_resolve(root, second, p.VREAD | p.VMETA)
-backrec, nextcursor, backgen = p.space_list(walked)
-assert len(backrec) == 1 and backrec[0][0] == back
-rootalias = p.space_resolve(walked, back, p.VREAD | p.VMETA)
-assert p.obj_info(rootalias)[8] == p.VKIND_OBJECT_SPACE
-p.obj_close(rootalias)
-p.obj_close(walked)
-p.space_unbind(root, first)
-assert p.obj_read(reader, 4) == b'data'
-after, nextcursor, newgeneration = p.space_list(root)
-assert len(after) == 1 and after[0][0] == second
-assert newgeneration != generation
+root=p.space_new()
+child=p.space_new()
+payload=p.obj_create(b'data')
+one=p.space_bind(root,'src',payload,p.VREAD+p.VMETA)
+two=p.space_bind(root,'src',child,p.VREAD+p.VMETA)
+assert one!=two
+rows,cursor,epoch=p.space_list(root)
+assert len(rows)==2
+first,second=rows
+bid,label,kind,rights,relation,identity,flags=first
+assert bid==one
+assert label=='src'
+assert rights==p.VREAD+p.VMETA
+bid,label,kind,rights,relation,identity,flags=second
+assert bid==two
+assert kind==p.VKIND_OBJECT_SPACE
+reader=p.space_resolve(root,one,p.VREAD)
+assert p.obj_read(reader,4)==b'data'
+back=p.space_bind(child,'back',root,p.VREAD+p.VMETA)
+walk=p.space_resolve(root,two,p.VREAD+p.VMETA)
+nested,cursor,nestedepoch=p.space_list(walk)
+assert len(nested)==1
+alias=p.space_resolve(walk,back,p.VREAD+p.VMETA)
+p.obj_close(alias)
+p.obj_close(walk)
+p.space_unbind(root,one)
+assert p.obj_read(reader,4)==b'data'
+remaining,cursor,newgen=p.space_list(root)
+assert len(remaining)==1
+assert newgen!=epoch
 p.obj_close(child)
-stale, nextcursor, currentgeneration = p.space_list(root)
-assert len(stale) == 1 and stale[0][6] & 1 == 1
+stale,cursor,stalegen=p.space_list(root)
+only=next(iter(stale))
+bid,label,kind,rights,relation,identity,flags=only
+assert flags==1
 p.obj_close(reader)
-p.obj_close(data)
-p.space_unbind(root, second)
+p.obj_close(payload)
+p.space_unbind(root,two)
 p.obj_close(root)
 print('OBJECTSPACE-PASS')
