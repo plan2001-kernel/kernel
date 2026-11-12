@@ -1,0 +1,26 @@
+# Following a crash, the LAST PUBLISHED graph must still be valid.
+import plan9 as p
+v=p.obj_open_volume()
+space=p.space_load(v,@GRAPH@)
+rows,cursor,epoch=p.space_list(space)
+assert len(rows)==1
+assert rows[0][0]==@NEWBINDING@
+assert rows[0][1]=='second'
+h=p.space_resolve(space,@NEWBINDING@,p.VREAD)
+assert p.obj_read(h,11)==b'payload-two'
+bad,boid=p.obj_create_ge(v,b'corrupt-metadata')
+p.obj_commit(v)
+invalid=[]
+exec("try:\n p.space_load(v,boid)\nexcept OSError:\n invalid.append(1)")
+assert invalid==[1]
+readonly=p.obj_open_handle(v,p.VREAD)
+denied=[]
+exec("try:\n p.space_load(readonly,@GRAPH@)\nexcept OSError:\n denied.append(1)")
+assert denied==[1]
+volatile=p.obj_create(b'volatile')
+other=p.space_new()
+p.space_bind(other,'volatile',volatile,p.VREAD)
+rejected=[]
+exec("try:\n p.space_save(other,v,@GRAPH@)\nexcept OSError:\n rejected.append(1)")
+assert rejected==[1]
+print('PERSISTENT-RECOVERY-PASS')
