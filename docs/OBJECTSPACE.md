@@ -136,14 +136,16 @@ the snapshot and returns a new process-local ObjectSpace Handle. The
 caller must first allocate the graph OID with `obj_create_ge`. Neither
 operation opens a volume implicitly or reformats any existing O volume.
 
-The on-disk record is versioned and bounded: a magic/version header,
-binding count, highest BindingID, mutation epoch, checksum and sorted
-BindingID records (label, GE/O target OID, kind, rights ceiling and
-relation). No process-local Handle, in-memory pointer, boot incarnation
-or OwnerID equality is serialized as authority. A save rejects revoked
-or unsupported targets. GE/O uses one atomic publication version for
-the complete serialized snapshot, not separately committed binding
-records.
+The version-2 disk image is one checksummed record containing a graph
+header, at most 16 ObjectSpace nodes, and up to 64 bindings per node
+(1024 total). Each graph-local node has its own BindingID high-water mark
+and epoch; edges carry either a GE/O target OID or a graph-local node
+index. The root is node zero. The save discovers reachable nested spaces,
+pins them, locks all graph nodes in a stable order, and rejects stale or
+changing topology. GE/O publishes the complete image under one version.
+No process-local Handle, pointer, boot incarnation or OwnerID is stored
+as authority. Rejected objects include volatile bytes, devices, processes
+and regions.
 
 Restore requires an authorized `VkindGeVolume` Handle with
 `Vread|Vdelegate`. Each target is independently reopened with owner-
@@ -154,13 +156,16 @@ non-monotonic BindingIDs, missing objects and excess rights. Failed
 restore closes the unpublished partial graph. Knowing an OID or reading
 serialized rights never grants a capability.
 
-**Implementation limit:** this initial durable format supports edges to
-persisted GE/O byte objects only. It deliberately rejects volatile
-objects, devices, processes, regions and nested ObjectSpaces. It does
-not yet implement durable ObjectSpace-to-ObjectSpace cycles, an
-automatically restored process-root catalog, graph garbage collection
-or cross-volume references. Phase 4 is not complete until the full
-ObjectSpace graph scope is addressed and the tests pass.
+**Implementation status and limits:** The version-2 record can encode
+nested ObjectSpaces, aliases and cycles using local node indices. During
+restore all nodes are allocated first and then their weak inter-node
+edges are rebuilt. The restored root pins the graph's other nodes for
+its lifetime, without introducing strong edge cycles. CI includes a
+two-boot three-node nested ObjectSpace test. Dedicated alias/diamond/cycle
+tests, concurrent update stress, sector-level torn-write fault injection,
+persistent process-root selection, garbage collection and cross-volume
+references remain outstanding. Phase 4 is not complete until those
+requirements are addressed and verified.
 
 Native tests in `tools/host/objectspace/run-persistent.sh` use one fresh,
 disposable GE/O disk over four QEMU boots: initial snapshot, restore
