@@ -87,6 +87,9 @@ assert int(graph) and int(obj) and int(binding)
 data = (fixtures / "graph-boot4.txt.in").read_text()
 data = data.replace("@GRAPH@", graph).replace("@NEWBINDING@", binding)
 (out / "graph-boot4.txt").write_text(data)
+mid = (fixtures / "graph-midcommit.txt.in").read_text()
+mid = mid.replace("@GRAPH@", graph).replace("@NEWBINDING@", binding)
+(out / "graph-midcommit.txt").write_text(mid)
 PY
 
 # SIGKILL is intentionally abrupt, with no guest shutdown. An unpublished
@@ -94,15 +97,24 @@ PY
 QOB_REPL_SYNC_LINES=0 QOB_CRASH_AFTER_EXPECT=1 run_boot crash "$QOB_OUT/graph-crash.txt" '^PERSISTENT-UNCOMMITTED'
 run_boot boot4 "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
 
+# The earlier crash was before COMMIT was entered. This second fault is
+# inside objtxcommit, after staged records were flushed but before the
+# published-version header changes. Kill the hung guest, reboot the SAME disk
+# and assert the entire previously published snapshot is still visible.
+QOB_REPL_SYNC_LINES=0 QOB_CRASH_AFTER_EXPECT=1 run_boot midcommit "$QOB_OUT/graph-midcommit.txt" '^OWNERID-CRASH graph-before-publication'
+run_boot after-midcommit "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
+
 python3 - "$QOB_OUT" <<'PY'
 from pathlib import Path
 import re
 import sys
 out = Path(sys.argv[1])
-for tag in ("boot1", "boot2", "crash", "boot4"):
+for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit"):
     log = (out / ("boot-" + tag + ".log")).read_text(errors="replace")
     assert not re.search(r"^(?:Traceback|AssertionError|panic:)", log, re.M), f"guest exception in {tag}"
 assert "PERSISTENT-UNCOMMITTED" in (out / "boot-crash.log").read_text()
 assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-boot4.log").read_text()
-print("PASS: GE/O ObjectSpace snapshot / reboot / overwrite / power-loss recovery")
+assert "OWNERID-CRASH graph-before-publication" in (out / "boot-midcommit.log").read_text()
+assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-after-midcommit.log").read_text()
+print("PASS: GE/O ObjectSpace snapshot / reboot / overwrite / pre-publication crash recovery")
 PY
