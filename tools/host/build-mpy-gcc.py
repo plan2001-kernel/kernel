@@ -365,7 +365,7 @@ def compile_one(item, outdir: pathlib.Path, stamp: str, asm: bool = False):
            if asm else [CC, "-c", "-o", str(obj)] + CFLAGS + [str(src)])
     p = run(cmd, log=log, quiet=True)
     if p.returncode:
-        return name, "FAIL", (p.stdout + p.stderr).strip().splitlines()[:3]
+        return name, "FAIL", (p.stdout + p.stderr).strip().splitlines()[-50:]
     return name, "PASS", ""
 
 
