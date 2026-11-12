@@ -169,7 +169,7 @@ struct Ospawn {
 #define	OBJCREATE	136
 #define	OBJOPEN		137
 #define	OBJCLOSE	138
-#define	OBJBIND		139
+#define	OBJBIND		139 /* reserved: retired role bind ABI */
 #define	OBJINVOKE	140
 /* OBJLIST(141) is RESERVED: own-process Handle-table introspection is
  * SYSCTL(144), operation SysctlHandleList. */
