@@ -1,0 +1,41 @@
+name: OwnerID provenance and capability authority
+on:
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - 'ge/storage/**'
+      - 'runtime/**'
+      - 'micropython/**'
+      - 'tools/host/capability/**'
+      - '.github/workflows/owner-authority.yml'
+  workflow_dispatch:
+
+jobs:
+  cross-owner-capabilities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-14 binutils clang lld file mtools ovmf qemu-system-x86 python3
+      - name: Audit owner checks and capability gates
+        run: python3 tools/host/capability/owner-authority-contract.py
+      - name: Build AMD64 kernel
+        run: CC=gcc-14 tools/build-gcc.sh --kernel -j 4
+      - name: Build UEFI loader
+        run: tools/build-efi-gcc.sh -j 4
+      - name: Build MicroPython
+        run: CC=gcc-14 tools/build-mpy-gcc.sh -j 4
+      - name: Build GE/O volume tools
+        run: tools/build.sh
+      - name: QEMU real cross-owner permission acceptance
+        run: tools/host/capability/run-owner-authority.sh
+      - name: Upload QEMU diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-capability-qemu
+          path: build/capauth/run
+          if-no-files-found: ignore
