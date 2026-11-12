@@ -597,6 +597,7 @@ struct Gefs {
 	Gkern	k;
 	Proc	*syncproc;	/* the syncing process: it may take the reserve */
 	Proc	*sweepproc;
+	QLock	oalloclk;	/* volume-local allocator and commit/sync gate */
 	void	*otxs;		/* obj.c's transactions, under mutlk */
 	void	*ck;		/* check.c's state while it runs */
 };

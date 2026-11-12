@@ -24,7 +24,7 @@ enum {
 };
 
 /*
- * Native OID allocation state.  It is appended to the Space header's
+ * Native OID allocation state. It is appended to the volume header's
  * existing user part, so it advances in the same Kobj transaction as
  * the object it names; no allocator record is itself an OID, and no
  * ordinary ospaceput can reach it.  The first 72 bytes are the
@@ -509,7 +509,6 @@ static void	setuserstate(Otx*, Ohdr*, uvlong, int);
 static void	packownerkey(char*, uvlong, uvlong);
 
 /* serializes a whole create (or commit) with its sync across handles */
-static QLock	oalloclk;
 
 /*
  * A candidate is never handed out if it falls in a reserved range or if
@@ -574,7 +573,7 @@ txhasoid(Otx *tx, uvlong oid)
 }
 
 /*
- * Read the allocator's published state.  A Space with no user part, or
+ * Read the volume allocator's published state. A header with no user part, or
  * with the pre-allocator 72-byte seed header, upgrades on first use.
  * Anything else is rejected instead of being reset to zero.
  */
@@ -593,7 +592,7 @@ getalloc(Ohdr *h, uvlong *next)
 			error("O: corrupt allocator state");
 		return;
 	}
-	error("O: unrecognized Space allocator state");
+	error("O: unrecognized volume allocator state");
 }
 
 /*
@@ -620,7 +619,7 @@ objunpubclear(Otx *tx, uvlong oid, uvlong upto, int owners)
 /*
  * Allocate one never-before-committed OID and publish its initial
  * payload (including an empty one).  The allocator high-water mark and
- * the object are written in one Space transaction and become visible
+ * the object are written in one volume transaction and become visible
  * with one commit; the caller sees the OID only after gesync succeeds.
  */
 long
@@ -636,9 +635,9 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 	if(owner == 0)
 		error(Ebadarg);
 	fs = sp->fs;
-	qlock(&oalloclk);
+	qlock(&fs->oalloclk);
 	if(waserror()){
-		qunlock(&oalloclk);
+		qunlock(&fs->oalloclk);
 		nexterror();
 	}
 	qlock(&sp->lk);
@@ -659,7 +658,7 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 	tx = ospacetx(sp);
 	objtxbegin(tx);
 	if(!gethdr(&fs->snap, &h))
-		error("O: no Space header");
+		error("O: no volume header");
 	getalloc(&h, &next);
 	for(;;){
 		if(next >= Objalloclimit)
@@ -713,7 +712,7 @@ ospacecreate(Ospace *sp, void *data, long n, uvlong *oid, uvlong owner)
 	qunlock(&sp->lk);
 	poperror();
 	*oid = cand;
-	qunlock(&oalloclk);
+	qunlock(&fs->oalloclk);
 	poperror();
 	return 0;
 }
@@ -1154,7 +1153,7 @@ ospaceput(Ospace *sp, uvlong oid, void *data, long n, uvlong owner)
 	}
 	objtxbegin(tx);
 	if(!gethdr(tx->tree, &h))
-		error("O: no Space header");
+		error("O: no volume header");
 	/* A write may be the first publication of an OID after a crash.
 	 * Clear abandoned payload chunks; owner records of a live object are
 	 * rewritten by the migration below, so do not remove them here. */
@@ -1178,9 +1177,9 @@ ospacecommit(Ospace *sp)
 	Ohdr h;
 	uvlong v;
 
-	qlock(&oalloclk);
+	qlock(&fs->oalloclk);
 	if(waserror()){
-		qunlock(&oalloclk);
+		qunlock(&fs->oalloclk);
 		nexterror();
 	}
 	qlock(&sp->lk);
@@ -1209,7 +1208,7 @@ ospacecommit(Ospace *sp)
 	}
 	qunlock(&sp->lk);
 	poperror();
-	qunlock(&oalloclk);
+	qunlock(&fs->oalloclk);
 	poperror();
 	return v;
 }
