@@ -1,0 +1,7 @@
+# Deterministic interruption inside GE/O commit after staging, before publication.
+import plan9 as p
+v=p.obj_open_volume()
+s=p.space_load(v,@GRAPH@)
+p.space_unbind(s,@NEWBINDING@)
+p.ownerid_fault(105)
+p.space_save(s,v,@GRAPH@)
