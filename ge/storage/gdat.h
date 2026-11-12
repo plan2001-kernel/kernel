@@ -85,7 +85,7 @@ enum {
 	 */
 
 	/*
-	 * Retained on-disk key numbers.  The native O engine uses Kobj/Ko;
+	 * Retained on-disk key numbers.  The native O engine uses flat Kobj/Kowner records;
 	 * the inherited FS pathname layer that used these is gone.
 	 */
 	Kdat,	/* qid[8] off[8] => ptr:		pointer to data page */

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect an at-rest O v1 image without running GE or Python payload code.
+"""Inspect an at-rest O v2 image without running GE or Python payload code.
 
 Input is opened rb; no replay, mount, repair or guest boot. Checks superblocks,
 arena copies, log payload hashes and the snapshot tree. Buffered O insert/delete
@@ -137,13 +137,13 @@ def graph(b):
     return out
 
 
-def inspect(path, extract=None, sid=1):
+def inspect(path, extract=None):
     im = ge['Image'](path)
     try:
         supers = [ge['parse_super'](im, off, label) for off, label in
                   ((0, 'primary'), (im.size // BS * BS - BS, 'backup'))]
         sb = next((s for s in supers if s['hash']['ok']), None)
-        require(sb is not None and sb['flag'] == (1 << 63 | 1), 'no valid O v1 superblock')
+        require(sb is not None and sb['flag'] == (1 << 63 | 2), 'no valid O v2 superblock')
         mode = sb['hash']['mode']
         checked, arenas, freesets = {}, [], []
         for addr, want in sb['arenabp']:
@@ -228,15 +228,15 @@ def inspect(path, extract=None, sid=1):
             return values
 
         values = tree(sb['snapbp'])
-        require(values.get(b'\x08init') == (1).to_bytes(8, 'big'), 'invalid init catalog')
-        hdr = values[b'\x07' + sid.to_bytes(8, 'big')]
+        # A single flat volume header; no Ko name or SpaceID.
+        hdr = values[b'\x07']
         published, oldest, writer = struct.unpack_from('>QQQ', hdr)
         user = hdr[24:]
         owner_mode = len(user) >= 104 and user[88:96] == b'OOWNMODE'
         owners = {}
         for k, v in values.items():
-            if len(k) == 25 and k[:9] == b'\x09' + sid.to_bytes(8, 'big'):
-                oid, negver = struct.unpack_from('>QQ', k, 9)
+            if len(k) == 17 and k[:1] == b'\x08':
+                oid, negver = struct.unpack_from('>QQ', k, 1)
                 owners.setdefault('%016x' % oid, []).append(
                     {'version': NIL ^ negver,
                      'owner': v[8:16].hex() if len(v) >= 16 else None,
@@ -245,18 +245,16 @@ def inspect(path, extract=None, sid=1):
             recs.sort(key=lambda r: r['version'])
         objects = {}
         for k, v in values.items():
-            if len(k) == 29 and k[:9] == b'\x07' + sid.to_bytes(8, 'big'):
-                oid, negver, idx = struct.unpack_from('>QQI', k, 9)
+            if len(k) == 21 and k[:1] == b'\x07':
+                oid, negver, idx = struct.unpack_from('>QQI', k, 1)
                 ver = NIL ^ negver
                 if ver <= published:
                     objects.setdefault(oid, {}).setdefault(ver, {})[idx] = v
         result = {'superblocks': supers, 'arenas': arenas, 'tree_blocks': len(checked),
-                  'tree_records': len(values), 'space': {'id': sid, 'N': published, 'K': oldest, 'W': writer},
+                  'tree_records': len(values), 'volume': {'N': published, 'K': oldest, 'W': writer},
                   'owner_mode': owner_mode,
                   'owners': owners,
-                  'catalog': {k[1:].decode('utf-8'): uint(v, 0)
-                              for k, v in values.items() if k[:1] == b'\x08' and len(v) == 8},
-                  'objects': {}}
+                   'objects': {}}
         if extract:
             pathlib.Path(extract).mkdir()  # refuse an existing output directory
         for oid, versions in sorted(objects.items()):
@@ -284,8 +282,5 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('image')
     ap.add_argument('--extract', help='new directory for published object bytes')
-    ap.add_argument('--space-id', type=int, default=1, help='numeric SpaceID (default 1)')
     args = ap.parse_args()
-    if not 0 <= args.space_id < 2**64:
-        ap.error('SpaceID must fit in 64 bits')
-    print(json.dumps(inspect(args.image, args.extract, args.space_id), indent=2))
+    print(json.dumps(inspect(args.image, args.extract), indent=2))

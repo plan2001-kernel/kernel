@@ -60,7 +60,8 @@ onativeopen(void *v, char *name)
 uvlong
 onativesid(void *v)
 {
- return ((Ospace*)v)->sid;
+ USED(v);
+	return 0; /* flat volume: no SpaceID */
 }
 
 long

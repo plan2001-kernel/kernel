@@ -94,7 +94,6 @@ void	gestart(void*);
 void	gesync(Gefs*, int);
 void*	oopenblk(char*, void*, vlong, vlong, int,
 		long (*)(void*, void*, long, uvlong, int), int (*)(void*));
-uvlong	ospaceid(Gefs*, char*);
 /* Plan2001 Stage 4: opaque wrappers for port/gefs/sysgefs.c's syscalls
  * (6c's cross-module signatures for an incomplete struct differ) */
 void*	onativeopen(void*, char*);
