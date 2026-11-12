@@ -447,6 +447,11 @@ objtxcommit(Otx *tx)
 	uvlong k0, pin;
 
 	objtxflush(tx);
+	/* Boot-only deterministic power-loss checkpoint: all staged graph
+	 * records have reached the tree, but the published N is unchanged.
+	 * The host kills QEMU here and verifies old-version recovery. */
+	if(ownercrash == 105)
+		ownercrashstop("graph-before-publication", 0);
 	gethdr(txroot(tx), &h);
 	if(h.w != tx->ver)
 		error(Ecorrupt);
