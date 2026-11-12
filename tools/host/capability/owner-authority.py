@@ -173,7 +173,10 @@ ge=findkind(p.VKIND_GE,p.VREAD|p.VMETA)
 ready=findkind(p.VKIND_REGION,p.VWRITE)
 go=0
 for h in p.obj_list():
-    i=p.obj_info(h)
+    try:
+        i=p.obj_info(h)
+    except OSError:
+        continue
     if i[8]==p.VKIND_REGION and (i[10]&p.VREAD) and not (i[10]&p.VWRITE):
         go=h
         break
