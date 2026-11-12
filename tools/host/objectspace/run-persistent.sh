@@ -104,17 +104,39 @@ run_boot boot4 "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
 QOB_REPL_SYNC_LINES=0 QOB_CRASH_AFTER_EXPECT=1 run_boot midcommit "$QOB_OUT/graph-midcommit.txt" '^OWNERID-CRASH graph-before-publication'
 run_boot after-midcommit "$QOB_OUT/graph-boot4.txt" '^PERSISTENT-RECOVERY-PASS'
 
+# Nested-ObjectSpace acceptance uses the same persistent GE/O volume across
+# two more real boots. A saved graph has three nodes, two space edges and a
+# persistent leaf, not merely an embedded flat list of GE object bindings.
+run_boot nested1 "$ROOT/tools/host/objectspace/graph-nested-boot1.txt" '^NESTED-GRAPH-SAVED [0-9]+ [0-9]+ [0-9]+ [0-9]+'
+python3 - "$ROOT/tools/host/objectspace" "$QOB_OUT" <<'PY'
+from pathlib import Path
+import re
+import sys
+fixtures, out = map(Path, sys.argv[1:])
+log = (out / "boot-nested1.log").read_text(errors="replace")
+m = re.search(r"^NESTED-GRAPH-SAVED (\d+) (\d+) (\d+) (\d+)", log, re.M)
+assert m, "nested graph was not published"
+data = (fixtures / "graph-nested-boot2.txt.in").read_text()
+for key, val in zip(("@NESTED_GRAPH@", "@CHILD_BINDING@", "@GRAND_BINDING@", "@LEAF_BINDING@"), m.groups()):
+    assert int(val) > 0
+    data = data.replace(key, val)
+(out / "graph-nested-boot2.txt").write_text(data)
+PY
+run_boot nested2 "$QOB_OUT/graph-nested-boot2.txt" '^NESTED-GRAPH-REBOOT-PASS'
+
+
 python3 - "$QOB_OUT" <<'PY'
 from pathlib import Path
 import re
 import sys
 out = Path(sys.argv[1])
-for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit"):
+for tag in ("boot1", "boot2", "crash", "boot4", "midcommit", "after-midcommit", "nested1", "nested2"):
     log = (out / ("boot-" + tag + ".log")).read_text(errors="replace")
     assert not re.search(r"^(?:Traceback|AssertionError|panic:)", log, re.M), f"guest exception in {tag}"
 assert "PERSISTENT-UNCOMMITTED" in (out / "boot-crash.log").read_text()
 assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-boot4.log").read_text()
 assert "OWNERID-CRASH graph-before-publication" in (out / "boot-midcommit.log").read_text()
 assert "PERSISTENT-RECOVERY-PASS" in (out / "boot-after-midcommit.log").read_text()
-print("PASS: GE/O ObjectSpace snapshot / reboot / overwrite / pre-publication crash recovery")
+assert "NESTED-GRAPH-REBOOT-PASS" in (out / "boot-nested2.log").read_text()
+print("PASS: GE/O ObjectSpace snapshots / nested graph reboot / pre-publication crash recovery")
 PY
