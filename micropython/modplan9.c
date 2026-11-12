@@ -139,7 +139,7 @@ static mp_obj_t p9_objowner(mp_obj_t handle) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objowner_obj, p9_objowner);
 
-/* program_register(name, owner_name, space_handle, source_oid,
+/* program_register(name, owner_name, volume_handle, source_oid,
  *                  policy=OWNER_PROGRAM_LAUNCHABLE) -> (owner, installed_oid)
  *
  * Trusted boot/installation only.  The kernel installs a private
@@ -163,7 +163,7 @@ static mp_obj_t p9_programregister(size_t n, const mp_obj_t *a) {
                      : (unsigned int)OWNER_PROGRAM_LAUNCHABLE;
     r.namelen = (unsigned int)strlen(name);
     r.ownerlen = (unsigned int)strlen(owner);
-    r.space = mp_obj_get_int(a[2]);
+    r.volume = mp_obj_get_int(a[2]);
     r.oid = (unsigned long long)mp_obj_get_uint(a[3]);
     memmove(r.name, name, r.namelen);
     memmove(r.owner_name, owner, r.ownerlen);
