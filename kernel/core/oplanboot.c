@@ -46,7 +46,7 @@ int
 oplanbootvalidate(BootInfo *b, u64int blob, u32int arch, char *err, int errlen)
 {
 	uchar *p, *fdt;
-	u64int off[4], len[4], mlen;
+	u64int off[5], len[5], mlen;
 	int i, j;
 
 	if(b == nil || blob == 0 || (blob & (OplanBootPageSize-1)) != 0)
@@ -65,7 +65,11 @@ oplanbootvalidate(BootInfo *b, u64int blob, u32int arch, char *err, int errlen)
 	off[2] = b->fdtoff, len[2] = b->fdtlen;
 	mlen = (u64int)b->mmapcount * b->mmapentsize;
 	off[3] = b->mmapoff, len[3] = mlen;
-	for(i = 0; i < 4; i++){
+	off[4] = b->manifestoff, len[4] = b->manifestlen;
+	for(i = 0; i < 5; i++){
+		/* Older v1 loaders do not contain a manifest section. */
+		if(i == 4 && len[i] == 0 && off[i] == 0)
+			continue;
 		if(!inblob(b, off[i], len[i]))
 			return fail(err, errlen, "section outside blob");
 		for(j = 0; j < i; j++)
@@ -78,6 +82,10 @@ oplanbootvalidate(BootInfo *b, u64int blob, u32int arch, char *err, int errlen)
 	p = (uchar*)(uintptr)blob;
 	if(p[b->configoff + b->configlen - 1] != 0)
 		return fail(err, errlen, "config is not NUL-terminated");
+	if(b->manifestlen != 0 && (b->manifestlen < 2 ||
+	    p[b->manifestoff + b->manifestlen - 1] != 0 ||
+	    p[b->manifestoff + b->manifestlen - 2] != '\n'))
+		return fail(err, errlen, "manifest not terminated");
 
 	/* a device tree, if there is one, is a whole one */
 	if(b->fdtlen != 0){

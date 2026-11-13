@@ -181,6 +181,7 @@ void	bootinforandinit(void);
 void	bootinfoclock(void);
 BootMem*	bootmem(int);
 char*	bootconfig(void);
+char*	bootmanifest(void);
 uchar*	bootfdt(ulong*);
 enum { BootInfoArch = BootArchArm64 };	/* the blob must be made for this ISA */
 enum { BootClassRAM, BootClassACPI, BootClassReserved };
