@@ -1638,6 +1638,7 @@ pexit(char *exitstr)
 	up->egrp = nil;
 	qunlock(&up->debug);
 
+	vconsoleexit(up);
 	oprocexit(up);
 	vobjprocexit(up);
 	kbdprocexit(up);
