@@ -70,6 +70,6 @@ for marker in [
 assert "panic:" not in s, "kernel panic"
 assert "boot process died:" not in s, "one process failure terminated system"
 assert "o: OEXECUTE oid=0x4f45584543000003" in s, "main GE/O executable never ran"
-assert "o: OEXECUTE oid=0x10020304" in s, "missing GE/O executable not attempted"
+assert "o-server: OID=0x10020304" in s, "missing GE/O executable not attempted"
 print("PASS: EFI manifest -> BootInfo -> three independent process starts")
 PY
