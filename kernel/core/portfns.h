@@ -404,3 +404,5 @@ long		zerofill(void*, long);
 #pragma varargck argpos pprint	1
 
 void envsetval(Egrp*, char*, char*);
+
+void fbconsolegeometry(uint*, uint*);

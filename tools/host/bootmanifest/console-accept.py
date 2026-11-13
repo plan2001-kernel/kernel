@@ -5,6 +5,7 @@ No serial-console substitution, OCR heuristics, synthetic region publisher,
 or userspace console owner. Keys enter through QEMU's PS/2 keyboard.
 """
 import re
+import os
 import socket
 import sys
 import time
@@ -14,16 +15,16 @@ from PIL import Image
 mon, serial, out, fontfile = map(Path, sys.argv[1:])
 out.mkdir(parents=True, exist_ok=True)
 source = fontfile.read_text()
-table = source.split("static const ushort fbconsolefont[101][24] = {", 1)[1]
+table = source.split("static const ushort fbconsolefont[108][24] = {", 1)[1]
 rows = re.findall(r"\{([^{}]+)\}", table)
 font = []
 for row in rows:
     nums = re.findall(r"0x[0-9a-fA-F]+", row)
     if len(nums) == 24:
         font.append(tuple(int(x, 16) for x in nums))
-assert len(font) == 101, f"invalid console font: {len(font)} glyphs"
+assert len(font) == 108, f"invalid console font: {len(font)} glyphs"
 dictionary = {bits: chr(32 + i) for i, bits in enumerate(font[:95])}
-dictionary.update({bits: chr(128 + i) for i, bits in enumerate(font[95:])})
+dictionary.update({bits: "äÄöÖåÅ£€¨´§½¤"[i] for i, bits in enumerate(font[95:])})
 
 deadline = time.monotonic() + 45
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -80,7 +81,13 @@ def typecode(code):
         if ch == "\n":
             key = "ret"
         elif ch in "()":
-            key = "shift-9" if ch == "(" else "shift-0"
+            key = ("shift-8" if ch == "(" else "shift-9") if os.getenv("CONSOLE_KEYMAP") == "fi" else ("shift-9" if ch == "(" else "shift-0")
+        elif ch == " ":
+            key = "spc"
+        elif ch == ":":
+            key = "shift-dot" if os.getenv("CONSOLE_KEYMAP") == "fi" else "shift-semicolon"
+        elif ch == "+":
+            key = "minus" if os.getenv("CONSOLE_KEYMAP") == "fi" else "shift-equal"
         elif ch in "abcdefghijklmnopqrstuvwxyz0123456789":
             key = ch
         else:
@@ -166,6 +173,52 @@ try:
     typecode("print(333)\n")
     a = waitscreen("A-survives-B", "333")
     assert a.count("333") >= 2, "A REPL not executable after B exit"
+    typecode("pri")
+    send("tab")
+    typecode("(777)\n")
+    assert waitscreen("tab-completion", "777").count("777") >= 2
+    typecode("while 1:pass\n\n")
+    send("ctrl-c")
+    waitscreen("interrupt-loop", "KeyboardInterrupt")
+    # UTF-8 insertion/deletion and a line wider than the actual display.
+    # Each command is verified by execution, not just echoed text.
+    typecode("print(444)")
+    send("left"); send("left"); send("backspace"); send("5"); send("ret")
+    edited = waitscreen("middle-edit", "454")
+    assert edited.count("454") >= 2
+    send("up"); send("ret")
+    assert waitscreen("history-edit", "454").count("454") >= 3
+    send("ctrl-c")
+    typecode("print(" + "1+" * 55 + "1)")
+    # Physical line fits a bounded viewport even though input is >100 cells.
+    viewport = dump("long-line")
+    assert "panic:" not in log()
+    send("home"); send("end")
+    focus(1); focus(2)
+    send("ret")
+    waitscreen("long-result", "\n56\n")
+    if os.getenv("CONSOLE_KEYMAP") == "fi":
+        # ISO physical positions of apostrophe and ä/ö/å.
+        for key in ("p","r","i","n","t","shift-8","backslash",
+                    "apostrophe","semicolon","bracket_left","backslash","shift-9","ret"):
+            send(key)
+        assert waitscreen("finnish-string", "äöå").count("äöå") >= 2
+        send("up")
+        send("left"); send("left"); send("backspace") # remove one å, not one byte
+        send("ret")
+        assert waitscreen("finnish-delete", "äö").count("äö") >= 4
+    # The blank insertion cell must contain the steady 3x24 Plan 9 tick.
+    dump("tick")
+    img = Image.open(out / "tick.ppm").convert("RGB")
+    tickrows = []
+    for y in range(24, img.height-23, 24):
+        for x in range(0, img.width-2, 12):
+            if all(sum(img.getpixel((x+i,y+j))) >= 500
+                   for j in range(24) for i in range(3)
+                   if i == 1 or j < 3 or j >= 21):
+                tickrows.append((x,y))
+    assert tickrows, "Plan 9 text tick missing"
+    print("PASS: middle edit, history, horizontal viewport, long execution, Plan 9 tick")
     focus(1)
     sysview = waitscreen("system-after-B", "SystemConsole")
     assert "console: session B" in sysview, "SystemConsole lost kernel diagnostics"

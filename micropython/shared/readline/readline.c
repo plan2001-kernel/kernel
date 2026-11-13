@@ -32,6 +32,9 @@
 #include "py/repl.h"
 #include "py/mphal.h"
 #include "shared/readline/readline.h"
+#ifdef MICROPY_REPL_HORIZONTAL
+#include "p9console.h"
+#endif
 
 #if 0 // print debugging info
 #define DEBUG_PRINT (1)
@@ -77,14 +80,19 @@ static void mp_hal_move_cursor_back(uint pos) {
         // fast path for most common case of 1 step back
         mp_hal_stdout_tx_strn("\b\b\b\b", pos);
     } else {
-        char vt100_command[6];
-        // snprintf needs space for the terminating null character
-        int n = snprintf(&vt100_command[0], sizeof(vt100_command), "\x1b[%u", pos);
-        if (n > 0) {
-            assert((unsigned)n < sizeof(vt100_command));
-            vt100_command[n] = 'D'; // replace null char
-            mp_hal_stdout_tx_strn(vt100_command, n + 1);
-        }
+        // Build the decimal count directly: the port's snprint uses a
+        // different unsigned format from standard snprintf.
+        char vt100_command[3 * sizeof(uint) + 3];
+        char *end = vt100_command + sizeof(vt100_command);
+        char *p = end;
+        *--p = 'D';
+        do {
+            *--p = '0' + pos % 10;
+            pos /= 10;
+        } while (pos != 0);
+        *--p = '[';
+        *--p = '\x1b';
+        mp_hal_stdout_tx_strn(p, end - p);
     }
 }
 
@@ -146,6 +154,37 @@ static size_t cells(size_t from, size_t to) {
     }
     return n;
 }
+
+
+#ifdef MICROPY_REPL_HORIZONTAL
+/* Keep one physical row reserved for the prompt. Byte offsets always lie
+ * on UTF-8 boundaries; the supported console repertoire is single-cell. */
+static size_t viewport, terminal_columns;
+static void horizontal_redraw(void) {
+    size_t width = terminal_columns;
+    if(width < 8) return;
+    size_t prompt = strlen(rl.prompt);
+    if(prompt + 2 >= width) return;
+    size_t room = width - prompt - 1; /* avoid terminal auto-wrap */
+    if(viewport < rl.orig_line_len || viewport > rl.cursor_pos)
+        viewport = rl.orig_line_len;
+    while(cells(viewport, rl.cursor_pos) >= room) {
+        viewport++;
+        while(viewport < rl.line->len && UTF8_CONT(rl.line->buf[viewport])) viewport++;
+    }
+    size_t end = viewport, count = 0;
+    while(end < rl.line->len && count < room) {
+        end++;
+        while(end < rl.line->len && UTF8_CONT(rl.line->buf[end])) end++;
+        count++;
+    }
+    mp_hal_stdout_tx_str("\r");
+    mp_hal_stdout_tx_str(rl.prompt);
+    mp_hal_stdout_tx_strn(rl.line->buf + viewport, end - viewport);
+    mp_hal_stdout_tx_str("\x1b[K");
+    mp_hal_move_cursor_back(cells(rl.cursor_pos, end));
+}
+#endif
 
 #if MICROPY_REPL_EMACS_WORDS_MOVE
 static size_t cursor_count_word(int forward) {
@@ -517,6 +556,11 @@ delete_key:
 redraw:
 #endif
 
+#ifdef MICROPY_REPL_HORIZONTAL
+    rl.cursor_pos -= redraw_step_back;
+    rl.cursor_pos += redraw_step_forward;
+    horizontal_redraw();
+#else
     // redraw command prompt, efficiently
     if (redraw_step_back > 0) {
         mp_hal_move_cursor_back(cells(rl.cursor_pos - redraw_step_back, rl.cursor_pos));
@@ -538,6 +582,7 @@ redraw:
         rl.cursor_pos += redraw_step_forward;
     }
 
+#endif
     #if MICROPY_REPL_AUTO_INDENT
     rl.auto_indent_state &= ~AUTO_INDENT_JUST_ADDED;
     #endif
@@ -592,6 +637,9 @@ static void readline_auto_indent(void) {
 #endif
 
 void readline_note_newline(const char *prompt) {
+#ifdef MICROPY_REPL_HORIZONTAL
+    viewport = rl.line->len;
+#endif
     rl.orig_line_len = rl.line->len;
     rl.cursor_pos = rl.orig_line_len;
     rl.prompt = prompt;
@@ -603,6 +651,10 @@ void readline_note_newline(const char *prompt) {
 
 void readline_init(vstr_t *line, const char *prompt) {
     rl.line = line;
+#ifdef MICROPY_REPL_HORIZONTAL
+    viewport = line->len;
+    terminal_columns = p9_console_columns();
+#endif
     rl.orig_line_len = line->len;
     rl.escape_seq = ESEQ_NONE;
     rl.escape_seq_buf[0] = 0;

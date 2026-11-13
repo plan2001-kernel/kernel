@@ -9,6 +9,7 @@ on:
       - 'tools/qemu-o-boot.sh'
       - 'tools/host/build-kernel.py'
       - 'tools/host/bootmanifest/**'
+      - 'tools/host/console-input/**'
       - '.github/workflows/kernel-console.yml'
   workflow_dispatch:
 
@@ -33,8 +34,12 @@ jobs:
         run: CC=gcc-14 tools/build-mpy-gcc.sh -j 4
       - name: Build GE/O host tools
         run: tools/build.sh
+      - name: Kernel keyboard decoder regression
+        run: tools/host/console-input/run-decoder.sh
       - name: QEMU real framebuffer SystemConsole and two independent REPLs
         run: bash tools/host/bootmanifest/run-console-sessions.sh
+      - name: QEMU Finnish keyboard and UTF-8 editor
+        run: CONSOLE_KEYMAP=fi CONSOLE_SESSIONS_OUT="$PWD/build/console-fi/run" bash tools/host/bootmanifest/run-console-sessions.sh
       - name: QEMU three REPLs and the kernel command prompt
         run: bash tools/host/bootmanifest/run-console-prompt.sh
       - name: Upload serial and framebuffer diagnostics
@@ -44,5 +49,6 @@ jobs:
           name: kernel-console-qemu
           path: |
             build/console-sessions/run/
+            build/console-fi/run/
             build/console-prompt/run/
           if-no-files-found: ignore
