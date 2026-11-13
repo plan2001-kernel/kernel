@@ -66,7 +66,8 @@ def command(s):
 
 def send(key):
     command("sendkey " + key)
-    time.sleep(0.08)
+    # QEMU releases sendkey after 100 ms; never overlap modifier keys.
+    time.sleep(0.16)
 
 
 def focus(n):
