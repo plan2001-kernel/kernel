@@ -277,7 +277,6 @@ bootconsolestart(void)
 		return;
 	started = 1;
 	traceoutput = getconf("bootconsoletrace") != nil;
-	print("boot-console: TRACE enabled=%d\n", traceoutput);
 	screenputs = systemscreeen;
 	kproc("boot-console", consoleworker, nil);
 	kproc("boot-keyboard", keyboardworker, nil);
@@ -352,8 +351,6 @@ bootconsolegrant(int stream, uvlong requested, VobjId *id)
 	if((requested & ~(uvlong)rights) != 0 || requested == 0)
 		error(Eperm);
 	h = vobjinstallobj(o, (int)requested);
-	print("boot-console: GRANT pid=%lud stream=%d handle=%d rights=%#llux\n",
-		up->pid, stream, h, requested);
 	if(id != nil){
 		id->incarnation = o->incarnation;
 		id->space = o->space;
