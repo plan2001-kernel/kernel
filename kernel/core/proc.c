@@ -1647,7 +1647,9 @@ pexit(char *exitstr)
 	if(egrp != nil)
 		closeegrp(egrp);
 
-	if(up->boot)
+	/* Manifest processes are independent roots: a failed service must not
+	 * panic the kernel or terminate other manifest entries. */
+	if(up->boot && bootmanifest() == nil)
 		panic("boot process died: %s",
 			status[0] != '\0' ? status : "unknown");
 

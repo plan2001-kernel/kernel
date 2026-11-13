@@ -622,6 +622,7 @@ def make_generated() -> None:
                      0x11000, "_reboot_entry")
     stubs = make_user_stubs()
     make_user_image("obootoid", ROOT / "kernel/amd64/obootoid.c", stubs)
+    make_user_image("omemory", ROOT / "kernel/amd64/omemory.c", stubs)
 
 
 def base_command(cc: str, src: Path, obj: Path, extra: list[str] | None = None) -> list[str]:
