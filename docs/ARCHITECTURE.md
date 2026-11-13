@@ -81,8 +81,11 @@ object-right classes. No new transport or userspace service is required.
 
 ### Console/session contract (target)
 
-The keyboard owner processes raw device input and offers it to the active
-session through the existing region-publication transport. Sessions offer
+For v1 manifest boot on AMD64 the **kernel** owns raw PS/2 input and
+SystemConsole framebuffer focus.  Older Phase 6 test code includes a
+userspace console owner, but it is not the privileged boot-console manager.
+The trusted kernel offers input to each selected independent boot session
+through the existing region-publication transport. Sessions offer
 output and diagnostics back through that same transport. One RW publisher,
 RO observers and WAIT/WAKE remain the IPC mechanics. Input routing, focus,
 echo, editing and control-key behavior are decisions of the owning code.
@@ -92,6 +95,19 @@ support bounded buffering and backpressure, and preserve protected kernel
 boot/panic diagnostics. Trusted restart of the same registered owner may
 recover a failed device-facing process. Phase 6 evidence describes the
 current implementation, not a request to add programs or change IPC.
+
+### Future recovery console invariants (design only)
+
+C1 SystemConsole exists without userspace; C2 process failure isolation;
+C3 kernel reclaims focus from failed sessions; C4 terminal-independent
+stdin/stdout/stderr; C5 focus independent of process identity/lifecycle;
+C6 diagnostic log separate from REPL output; C7 no GE/O or network stack
+dependency for local recovery; C8 explicit remote authentication; C9 no
+general heap allocations or user waits in panic path; C10 no mandatory
+physical console endpoint.  Only the minimal AMD64 GOP+PS/2 manifest
+implementation is committed now.  Ethernet L2, UART, panic-interactive
+recovery, multi-volume GE/O and network program loading are not part of this
+change.  See KERNEL-INTERFACE.md for the implemented subset.
 
 ## CURRENT IMPLEMENTATION
 

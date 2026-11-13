@@ -295,3 +295,41 @@ is **not authenticated**; UEFI Secure Boot, signed manifest verification,
 kernel hash checking and executable hash checking remain separate
 security work. Neither its source bytes nor the process owner strings
 must be interpreted as cryptographic authority.
+
+## Boot-owned SystemConsole and process sessions (AMD64 minimal implementation)
+
+With a v1 boot manifest, the kernel owns the GOP framebuffer, kernel
+diagnostic view and exclusive PS/2 keyboard claim.  It creates three distinct
+volatile capability regions for **each** manifest process: kernel-written,
+read-only-to-process stdin; process-written stdout; process-written stderr
+(diagnostic stream).  The existing ring publication ABI is used without a new
+IPC provider or system call.  A boot process opens only its own regions with
+`OBJOPEN(ObjOpenConsole)` streams 3, 4, 5.  The kernel grants them by
+*current process PID*, never by a guessed session slot or OwnerID.
+The MicroPython native console automatically attaches those regions; it does
+not claim the PS/2 device when a manifest console exists.  Manifest processes
+have no permission to open the legacy direct framebuffer output stream.
+
+Framebuffer focus starts on SystemConsole (slot 0).  `Ctrl+Alt+F1` selects
+the kernel view; `Ctrl+Alt+F2` through `Ctrl+Alt+F9` select manifest
+entries 1..8 while alive.  Switching does not start, stop or reparent a
+process.  Each session retains a bounded 8 KiB output history for redraw;
+the kernel's existing kmesg is separate.  A dead focused process falls back
+to SystemConsole; its input writer ends and cannot own the physical keyboard.
+There is intentionally **no** kernel command interpreter or recovery shell.
+The optional `bootconsoletrace=1` boot setting mirrors session text to
+the *serial diagnostics only* for QEMU acceptance; it does not grant any
+userspace raw device capability.  It should not be enabled on systems where
+session output may contain secrets.
+
+This is an AMD64/GOP/PS2 minimal implementation, not a 100% hardware
+availability guarantee.  The following are planned **architectural
+invariants**, not all proven by this version: C1 kernel console independent
+of user processes; C2 session failure isolation; C3 kernel can reclaim
+keyboard focus; C4 stdin/stdout/stderr independent of physical endpoint;
+C5 focus independent of process lifecycle and authority; C6 protected kernel
+diagnostic log; C7 recovery independent of storage/network stack; C8
+authenticated remote control; C9 allocation-free panic path; C10 missing
+endpoint must not stop the kernel.  C8 and full panic-path recovery C7/C9
+are deferred.  The UART rescue path, raw Ethernet L2 console, remote
+management, multi-volume GE/O and network executables are also deferred.
