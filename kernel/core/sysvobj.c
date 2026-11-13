@@ -1116,6 +1116,9 @@ vobjregionmap(int handle, uintptr va, int flags)
 	poperror();
 	vhandput(h);
 	flushmmu();
+	if(up->boot && bootmanifest() != nil)
+		print("boot-console: MAP pid=%lud handle=%d va=%#p write=%d\n",
+			up->pid, handle, va, write);
 	return va;
 }
 
