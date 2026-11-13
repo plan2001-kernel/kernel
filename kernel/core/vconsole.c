@@ -29,6 +29,8 @@ struct Vconsole {
 };
 static Vconsole sessions[Consoles+1];
 static int nsessions, current, consolemanagerready;
+/* Only the manager switches the framebuffer or mutates the history. */
+static volatile int requestedview = -1;
 static int keyboardclaimed;
 
 /* Configured once before the first manifest root is started. */
@@ -136,8 +138,10 @@ keyboardproc(void *arg)
             continue;
         if(ctl && alt && sc >= 0x3b && sc <= 0x43){
             target = sc - 0x3b;
-            if(target <= nsessions)
-                selectview(target);
+            if(target <= nsessions){
+                requestedview = target;
+                coherence();
+            }
             continue;
         }
         target = current;
@@ -212,6 +216,13 @@ vconsolemanager(void *arg)
     consolemanagerready = 1;
     print("console: SystemConsole ready, %d independent sessions\n", nsessions);
     for(;;){
+        if(requestedview >= 0){
+            k = requestedview;
+            requestedview = -1;
+            selectview(k);
+        }
+        if(current > 0 && !sessions[current].alive)
+            selectview(0);
         for(i=1; i<=nsessions; i++){
             c = &sessions[i];
             if(c->ready){
@@ -262,8 +273,8 @@ vconsoleexit(Proc *p)
     c = &sessions[p->console_slot];
     c->alive = 0;
     vobjregionwriterrelease(c->region[Input]);
-    if(current == p->console_slot)
-        selectview(0);
+    /* The manager does the fallback in its own context, avoiding a
+     * framebuffer/history race against a simultaneous output drain. */
     print("console: session %s pid=%lud exited\n", c->name, p->pid);
     p->console_slot = 0;
 }
