@@ -17,6 +17,8 @@ enum {
     Input = 0,
     Output = 1,
     Diagnostic = 2,
+    Cmdline = 128,
+    Kconshistory = 4096,
 };
 typedef struct Vconsole Vconsole;
 struct Vconsole {
@@ -25,13 +27,20 @@ struct Vconsole {
     uvlong iseq, oseq, dseq;
     char history[History];
     int nhistory;
-    int defined, ready, alive;
+    ulong pid;
+    int defined, ready, alive, bound;
 };
 static Vconsole sessions[Consoles+1];
 static int nsessions, current, consolemanagerready;
 /* Only the manager switches the framebuffer or mutates the history. */
 static volatile int requestedview = -1;
 static int keyboardclaimed;
+/* SystemConsole command prompt: kernel-owned, independent of all processes. */
+static char cmdline[Cmdline];
+static int ncmdline;
+static char kconshistory[Kconshistory];
+static int nkconshistory;
+static Lock kconslock;
 
 /* Configured once before the first manifest root is started. */
 void
@@ -66,6 +75,186 @@ historyappend(Vconsole *c, char *buf, ulong n)
     c->nhistory += n;
 }
 
+/* SystemConsole command transcript.  It is separate from kmesg so that
+ * kernel diagnostics stay a clean boot/error log and shell-like command
+ * output does not recursively appear in its own `dmesg` result. */
+static void
+kconshistoryappend(char *buf, int n)
+{
+    int cut;
+
+    if(n <= 0)
+        return;
+    lock(&kconslock);
+    if(n >= Kconshistory){
+        buf += n - Kconshistory;
+        n = Kconshistory;
+        nkconshistory = 0;
+    }
+    if(nkconshistory + n > Kconshistory){
+        cut = nkconshistory + n - Kconshistory;
+        memmove(kconshistory, kconshistory + cut, nkconshistory - cut);
+        nkconshistory -= cut;
+    }
+    memmove(kconshistory + nkconshistory, buf, n);
+    nkconshistory += n;
+    unlock(&kconslock);
+}
+
+static void
+kconsbytes(char *buf, int n)
+{
+    if(n <= 0)
+        return;
+    kconshistoryappend(buf, n);
+    fbconsoleappend(0, buf, n);
+}
+
+static void
+kconsputs(char *s)
+{
+    if(s != nil)
+        kconsbytes(s, strlen(s));
+}
+
+static void
+kconsprintf(char *fmt, ...)
+{
+    char buf[256];
+    va_list arg;
+    int n;
+
+    va_start(arg, fmt);
+    n = vseprint(buf, buf+sizeof buf, fmt, arg) - buf;
+    va_end(arg);
+    kconsbytes(buf, n);
+}
+
+static void
+cmdhelp(void)
+{
+    kconsputs("commands:\n"
+              "  help      this command list\n"
+              "  status    kernel and boot status\n"
+              "  sessions  console slot, name, pid and state\n"
+              "  dmesg     kernel diagnostics\n");
+}
+
+static void
+cmdstatus(void)
+{
+    char buf[512];
+    int i, live, n;
+
+    n = bootstatustext(buf, sizeof buf);
+    if(n > 0)
+        kconsbytes(buf, n);
+    live = 0;
+    for(i=1; i<=nsessions; i++)
+        if(sessions[i].alive)
+            live++;
+    kconsprintf("console: %d sessions, %d live\n", nsessions, live);
+}
+
+static void
+cmdsessions(void)
+{
+    Vconsole *c;
+    int i;
+
+    kconsprintf("console sessions: %d\n", nsessions);
+    for(i=1; i<=nsessions; i++){
+        c = &sessions[i];
+        kconsprintf("  F%d slot=%d name=%s pid=%lud %s\n",
+                    i+1, i, c->name, c->pid,
+                    c->alive ? "live" : c->bound ? "exited" : "starting");
+    }
+}
+
+static void
+cmddmesg(void)
+{
+    char buf[256];
+    long off, n;
+
+    for(off=0; (n=kmesgreadat(buf, sizeof buf, off)) > 0; off+=n)
+        kconsbytes(buf, (int)n);
+}
+
+static void
+cmdexecute(char *line)
+{
+    char *p, *tok, *end;
+
+    for(p=line; *p == ' ' || *p == '\t'; p++)
+        ;
+    tok = p;
+    while(*p != 0 && *p != ' ' && *p != '\t')
+        p++;
+    end = p;
+    if(end == tok)
+        return;
+    *end = 0;
+    if(strcmp(tok, "help") == 0)
+        cmdhelp();
+    else if(strcmp(tok, "status") == 0)
+        cmdstatus();
+    else if(strcmp(tok, "sessions") == 0)
+        cmdsessions();
+    else if(strcmp(tok, "dmesg") == 0)
+        cmddmesg();
+    else{
+        kconsprintf("kernel: unknown command: %s\n", tok);
+        kconsputs("try 'help'\n");
+    }
+}
+
+/* Bounded line editor for the kernel-owned SystemConsole.  It never
+ * delegates to a user process and never accepts control sequences. */
+static void
+kconskey(int c)
+{
+    char ch;
+
+    if(c == '\r' || c == '\n'){
+        kconsputs("\n");
+        cmdline[ncmdline] = 0;
+        cmdexecute(cmdline);
+        ncmdline = 0;
+        kconsputs("kernel> ");
+        return;
+    }
+    if(c == '\b'){
+        if(ncmdline > 0){
+            ncmdline--;
+            kconsputs("\b \b");
+        }
+        return;
+    }
+    if(c < 0x20 || c > 0x7e)
+        return;
+    if(ncmdline >= (int)sizeof cmdline - 1)
+        return;
+    cmdline[ncmdline++] = c;
+    ch = c;
+    kconsbytes(&ch, 1);
+}
+
+/* Render the SystemConsole as kmesg followed by the command transcript.
+ * Live print() output still appears immediately, but a periodic redraw puts
+ * the always-returning prompt back below newly arrived diagnostics. */
+static void
+showsystem(int announce)
+{
+    fbconsoleselect(0, kmesg.buf, kmesg.n);
+    if(announce)
+        print("console: focus SystemConsole\n");
+    lock(&kconslock);
+    if(nkconshistory > 0)
+        fbconsoleappend(0, kconshistory, nkconshistory);
+    unlock(&kconslock);
+}
+
 static void
 selectview(int slot)
 {
@@ -76,8 +265,7 @@ selectview(int slot)
         return;
     current = slot;
     if(slot == 0){
-        fbconsoleselect(0, kmesg.buf, kmesg.n);
-        print("console: focus SystemConsole\n");
+        showsystem(1);
         return;
     }
     c = &sessions[slot];
@@ -144,10 +332,6 @@ keyboardproc(void *arg)
             }
             continue;
         }
-        target = current;
-        if(target == 0 || !sessions[target].alive)
-            continue;
-        c = &sessions[target];
         b = keys[sc];
         if(shift){
             if(shifted[sc] != 0)
@@ -159,6 +343,16 @@ keyboardproc(void *arg)
             b = 3;
         else if(ctl && sc == 0x20)
             b = 4;
+        target = current;
+        if(target == 0){
+            /* Slot 0 is the kernel command prompt, never a user process. */
+            if(!ctl && !alt)
+                kconskey(b);
+            continue;
+        }
+        if(target < 0 || target > nsessions || !sessions[target].alive)
+            continue;
+        c = &sessions[target];
         if(b != 0 && vobjregionringpublish(c->region[Input], &c->iseq, &b, 1) < 0)
             print("console: input publish failed slot=%d\n", target);
     }
@@ -193,8 +387,11 @@ void
 vconsolemanager(void *arg)
 {
     Vconsole *c;
-    int i, k;
+    uvlong lastkmesg;
+    int i, k, refreshwait;
     USED(arg);
+    lastkmesg = 0;
+    refreshwait = 0;
     for(i=1; i<=nsessions; i++){
         c = &sessions[i];
         for(k=0; k<3; k++){
@@ -215,14 +412,18 @@ vconsolemanager(void *arg)
     coherence();
     consolemanagerready = 1;
     print("console: SystemConsole ready, %d independent sessions\n", nsessions);
+    kconsputs("kernel> ");
     for(;;){
         if(requestedview >= 0){
             k = requestedview;
             requestedview = -1;
             selectview(k);
+            lastkmesg = kmesg.n;
         }
-        if(current > 0 && !sessions[current].alive)
+        if(current > 0 && !sessions[current].alive){
             selectview(0);
+            lastkmesg = kmesg.n;
+        }
         for(i=1; i<=nsessions; i++){
             c = &sessions[i];
             if(c->ready){
@@ -230,6 +431,17 @@ vconsolemanager(void *arg)
                 drain(c, Diagnostic, &c->dseq);
             }
         }
+        /* New kernel diagnostics would otherwise leave the prompt above the
+         * final log line.  Redraw at a bounded rate while SystemConsole is
+         * selected; always finish with the command prompt and current line. */
+        if(current == 0 && kmesg.n != lastkmesg){
+            if(++refreshwait >= 10){
+                showsystem(0);
+                lastkmesg = kmesg.n;
+                refreshwait = 0;
+            }
+        }else
+            refreshwait = 0;
         tsleep(&up->sleep, return0, nil, 20);
     }
 }
@@ -243,6 +455,8 @@ vconsolebind(Proc *p, int slot)
         tsleep(&p->sleep, return0, nil, 10);
     p->console_slot = slot;
     sessions[slot].alive = 1;
+    sessions[slot].bound = 1;
+    sessions[slot].pid = p->pid;
     print("console: session %s pid=%lud slot=%d\n",
           sessions[slot].name, p->pid, slot);
 }

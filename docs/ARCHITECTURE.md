@@ -95,10 +95,13 @@ Ctrl+Alt+F2 through F9 select independent manifest slots 1 through 8.
 The kernel retains process output off-screen while other sessions continue
 running. Process exit cannot destroy the kernel console or another session.
 Kernel diagnostics remain in kmesg, separate from REPL output. The SystemConsole
-shows diagnostic history and recent lifecycle/focus events; a kernel command
-interpreter is deliberately absent. PS/2 may be unavailable on some machines;
-in that case the kernel remains running, but interactive switching is not
-provided by this minimum implementation.
+shows diagnostic history and recent lifecycle/focus events, and provides a
+bounded kernel-resident command prompt (`help`, `status`, `sessions`, `dmesg`)
+on slot 0. The prompt reads the focused keyboard in the kernel, is independent
+of every user process, and introduces no IPC mechanism or syscall. It accepts
+only those strictly read-only commands. PS/2 may be unavailable on some
+machines; in that case the kernel remains running, but interactive switching
+and typing are not provided by this minimum implementation.
 
 The following **C1-C10 are target invariants**, not a claim that all recovery
 features have shipped:

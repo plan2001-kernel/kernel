@@ -296,6 +296,12 @@ kernel hash checking and executable hash checking remain separate
 security work. Neither its source bytes nor the process owner strings
 must be interpreted as cryptographic authority.
 
+`tools/gcc-o-install.sh --bootmanifest FILE` installs the sidecar as
+`<ESP>/processes.conf`, adds `bootmanifest=/processes.conf` to the canonical
+`plan9.ini`, and verifies the copied bytes with `--verify`. It cannot be
+combined with `--obootexec`. The installer also backs up every ESP file it
+replaces; see [HARDWARE-BOOT.md](HARDWARE-BOOT.md).
+
 ## Kernel-owned boot process consoles (AMD64)
 
 With a `bootmanifest=` configuration the kernel owns the permanent
@@ -315,6 +321,18 @@ remain separate from user stdout/stderr; they are not automatically
 mirrored to serial. The framebuffer path is only as available as the
 hardware framebuffer and kernel; full panic-interactive recovery is not
 implemented.
+
+Slot 0 also has a bounded kernel-resident command prompt. It reads the
+currently focused keyboard in kernel context, never delegates to a user
+process, and adds no syscall or IPC primitive. The initial commands are
+strictly read-only: `help`, `status` (kernel build and boot mode),
+`sessions` (slot, name, PID and live/exited state) and `dmesg` (the
+kernel diagnostic ring). Input is line-buffered with Backspace and Enter,
+unknown commands return an error and a fresh prompt, and the prompt is
+redrawn below new diagnostics. The command transcript is separate from
+kmesg so that `dmesg` does not recursively contain itself. A missing PS/2
+keyboard leaves the kernel and all sessions running but removes interactive
+focus switching; USB-only keyboard support is not implemented.
 
 For separate boot REPLs, `micropython -O PARTUUID=... -R` enters a
 session-only interactive REPL **without** running `init.run()`, selecting

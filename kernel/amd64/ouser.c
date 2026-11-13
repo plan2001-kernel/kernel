@@ -96,6 +96,30 @@ static int manifestnprocs;
 static QLock bootconslk;
 static int bootconsready;
 
+/* Bounded status text for the kernel-owned SystemConsole prompt. */
+int
+bootstatustext(char *buf, int n)
+{
+	int m;
+
+	if(buf == nil || n <= 0)
+		return 0;
+	m = snprint(buf, n, "kernel: %s\n", kernelbuild);
+	if(m < n-1 && bootmanifest() != nil)
+		m += snprint(buf+m, n-m, "boot: manifest processes=%d\n",
+			     manifestnprocs);
+	else if(m < n-1 && bootkernelonly)
+		m += snprint(buf+m, n-m, "boot: kernel-only\n");
+	else if(m < n-1)
+		m += snprint(buf+m, n-m, "boot: obootexec oid=%#llux repl=%d\n",
+			     bootoid, bootismpy);
+	if(m < n-1 && obootvollen > 0)
+		m += snprint(buf+m, n-m, "volume: %s\n", obootvol);
+	if(m < n-1)
+		m += snprint(buf+m, n-m, "cpus: %lud\n", conf.nmach);
+	return m;
+}
+
 static void
 bootconsinit(void)
 {

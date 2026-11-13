@@ -182,6 +182,7 @@ void	bootinfoinit(void);
 BootMem*	bootmem(int);
 char*	bootconfig(void);
 char*	bootmanifest(void);
+int	bootstatustext(char*, int);
 uchar*	bootfdt(ulong*);
 enum { BootInfoArch = BootArchAmd64 };	/* the blob must be made for this ISA */
 enum { BootClassRAM, BootClassACPI, BootClassReserved };

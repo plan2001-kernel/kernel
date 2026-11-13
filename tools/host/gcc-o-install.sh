@@ -33,10 +33,20 @@
 #   --obootgraph OID   add obootgraph=OID: trusted persistent ObjectSpace root
 #                      graph on the obootvol GE/O volume (requires --obootexec)
 #   --ncpu N           write *ncpu=N instead of *ncpu=1 (1..128, kernel MAXMACH)
+#   --bootmanifest FILE
+#                      install FILE as <ESP>/processes.conf and add
+#                      bootmanifest=/processes.conf to plan9.ini.  The loader
+#                      requires LF termination and no CR/NUL bytes; the
+#                      installer stages and verifies the exact bytes.  This is
+#                      integrity of the copied file, not manifest
+#                      authentication.  Cannot be combined with --obootexec.
 #
 # --install requires the GCC ESP directory to exist; --bootstrap may create
-# it.  Both ensure the single canonical GRUB entry.  --plan and --verify are
-# read-only for the ESP and GRUB; their reports live under build/gcc/o-install.
+# it.  Both ensure the single canonical GRUB entry and back up every ESP file
+# they replace so a failure can restore both ESP and GRUB.  --plan and
+# --verify are read-only for the ESP and GRUB; their reports live under
+# build/gcc/o-install.  Pass the same selector flags (including
+# --bootmanifest) to --verify as to the original --install.
 set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -61,6 +71,7 @@ puuid=
 obootexec=
 obootcpu=
 obootgraph=
+bootmanifest=
 ncpu=1
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -74,20 +85,46 @@ while [ $# -gt 0 ]; do
 	--obootexec) [ $# -ge 2 ] || { echo "--obootexec needs an OID" >&2; exit 2; }; obootexec=$2; shift ;;
 	--obootcpu) [ $# -ge 2 ] || { echo "--obootcpu needs a CPU" >&2; exit 2; }; obootcpu=$2; shift ;;
 	--obootgraph) [ $# -ge 2 ] || { echo "--obootgraph needs an OID" >&2; exit 2; }; obootgraph=$2; shift ;;
+	--bootmanifest) [ $# -ge 2 ] || { echo "--bootmanifest needs a file" >&2; exit 2; }; bootmanifest=$2; shift ;;
 	--ncpu) [ $# -ge 2 ] || { echo "--ncpu needs a count" >&2; exit 2; }; ncpu=$2; shift ;;
 	-h|--help) sed -n '2,/^set -euo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
-	*) echo "usage: $0 --plan|--install|--bootstrap|--verify --device DEV --partuuid UUID [--esp PATH] [--obootexec OID] [--obootcpu CPU] [--obootgraph OID] [--ncpu N]" >&2; exit 2 ;;
+	*) echo "usage: $0 --plan|--install|--bootstrap|--verify --device DEV --partuuid UUID [--esp PATH] [--obootexec OID] [--obootcpu CPU] [--obootgraph OID] [--bootmanifest FILE] [--ncpu N]" >&2; exit 2 ;;
 	esac
 	shift
 done
 
 rollback_state=0
 rollback_done=0
+esp_backup=$out/esp-backup
+esp_restore_list=$out/esp-restore.txt
+rollback_esp() {
+	local line dst rest mode backup rel tmp
+	[ -f "$esp_restore_list" ] || return 0
+	say "ROLLBACK: restoring the pre-install ESP files"
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		dst=${line#restore=}
+		dst=${dst%% mode=*}
+		rest=${line#* mode=}
+		mode=${rest%% backup=*}
+		backup=${rest#* backup=}
+		if [ "$backup" = yes ]; then
+			rel=${dst#"$esp"/}
+			tmp=$(dirname "$dst")/.$(basename "$dst").rollback.$$
+			rdo cp "$esp_backup/$rel" "$tmp" && rdo chmod "$mode" "$tmp" &&
+				rdo mv -f "$tmp" "$dst"
+		else
+			rdo rm -f "$dst"
+		fi
+	done <"$esp_restore_list"
+	rdo sync
+}
 rollback_grub_core() {
 	[ "$rollback_done" = 1 ] && return 0
 	rollback_done=1
-	say "ROLLBACK: restoring the pre-install GRUB files"
 	set +e
+	rollback_esp
+	say "ROLLBACK: restoring the pre-install GRUB files"
 	rdo cp "$out/grub.cfg.pre" "$grubcfg"
 	rdo chmod "$grubcfg_mode" "$grubcfg"
 	for f in "${legacy_scripts[@]:-}"; do
@@ -102,7 +139,7 @@ rollback_grub_core() {
 		rdo rm -f "$newscript"
 	fi
 	rdo sync
-	say "ROLLBACK: GRUB files restored; ESP artifacts were left in place"
+	say "ROLLBACK: ESP and GRUB files restored to their pre-install state"
 }
 die() {
 	printf 'gcc-o-install: %s\n' "$*" >&2
@@ -172,6 +209,8 @@ valid_dec() {
 maxmach=128
 val_num=0
 boot_is_mpy=0
+manifest_size=0
+manifest_sha=
 [ -z "$obootexec" ] || valid_oid "$obootexec" "--obootexec"
 [ -z "$obootgraph" ] || valid_oid "$obootgraph" "--obootgraph"
 if [ -n "$obootexec" ]; then
@@ -207,6 +246,33 @@ if [ -n "$obootgraph" ]; then
 		;;
 	esac
 	[ -n "$obootexec" ] || die "--obootgraph requires --obootexec"
+fi
+check_manifest_file() {
+	local f=$1 label=$2 size bad
+	[ -f "$f" ] || die "$label boot manifest is not a regular file: $f"
+	[ -r "$f" ] || die "$label boot manifest is not readable: $f"
+	size=$(stat -c %s "$f")
+	[ "$size" -ge 1 ] || die "$label boot manifest is empty"
+	[ "$size" -le 16383 ] || die "$label boot manifest is too large: $size bytes (max 16383)"
+	[ "$(last_byte "$f")" = 0a ] || die "$label boot manifest must end in LF"
+	[ "$(tr -d '\000' <"$f" | wc -c | tr -d ' ')" = "$size" ] || \
+		die "$label boot manifest contains NUL"
+	[ "$(tr -d '\r' <"$f" | wc -c | tr -d ' ')" = "$size" ] || \
+		die "$label boot manifest contains CR"
+	[ "$(awk 'NF && $0 !~ /^#/ {print; exit}' "$f")" = version=1 ] || \
+		die "$label boot manifest must start with version=1"
+	grep -q '^\[process\.' "$f" || die "$label boot manifest has no [process.NAME] entries"
+	if [ -n "$puuid" ]; then
+		bad=$(sed -n 's/.*source=geo:PARTUUID=\([^:]*\):.*/\1/p' "$f" | grep -vx "$puuid" || true)
+		[ -z "$bad" ] || die "$label boot manifest PARTUUID does not match --partuuid: $bad"
+	fi
+}
+if [ -n "$bootmanifest" ]; then
+	[ -z "$obootexec" ] || die "--bootmanifest cannot be combined with --obootexec"
+	[ -z "$obootgraph" ] || die "--bootmanifest cannot be combined with --obootgraph"
+	check_manifest_file "$bootmanifest" intended
+	manifest_size=$(stat -c %s "$bootmanifest")
+	manifest_sha=$(sha "$bootmanifest")
 fi
 valid_dec "$ncpu" "--ncpu"
 ncpu_num=$val_num
@@ -300,6 +366,7 @@ write_ini() {
 	[ -z "$obootexec" ] || printf 'obootexec=%s\n' "$obootexec" >>"$f"
 	[ -z "$obootcpu" ] || printf 'obootcpu=%s\n' "$obootcpu" >>"$f"
 	[ -z "$obootgraph" ] || printf 'obootgraph=%s\n' "$obootgraph" >>"$f"
+	[ -z "$bootmanifest" ] || printf 'bootmanifest=/processes.conf\n' >>"$f"
 	[ "$boot_is_mpy" = 1 ] && printf 'obootrepl=1\n' >>"$f"
 	printf '*ncpu=%s\n' "$ncpu" >>"$f"
 }
@@ -328,12 +395,24 @@ check_ini() {
 	else
 		! grep -q '^obootgraph=' "$f" || die "$label plan9.ini has an unexpected obootgraph"
 	fi
+	if [ -n "$bootmanifest" ]; then
+		grep -qx 'bootmanifest=/processes.conf' "$f" || die "$label plan9.ini bootmanifest mismatch"
+	else
+		! grep -q '^bootmanifest=' "$f" || die "$label plan9.ini has an unexpected bootmanifest"
+	fi
 	if [ "$boot_is_mpy" = 1 ]; then
 		grep -qx 'obootrepl=1' "$f" || die "$label plan9.ini obootrepl mismatch"
 	else
 		! grep -q '^obootrepl=' "$f" || die "$label plan9.ini has an unexpected obootrepl"
 	fi
 	grep -qxF "*ncpu=$ncpu" "$f" || die "$label plan9.ini *ncpu mismatch"
+}
+
+check_manifest() {
+	local f=$1 label=$2
+	check_manifest_file "$f" "$label"
+	[ "$(stat -c %s "$f")" = "$manifest_size" ] || die "$label manifest size mismatch"
+	[ "$(sha "$f")" = "$manifest_sha" ] || die "$label manifest hash mismatch"
 }
 
 # Stage the exact bytes that will be installed.
@@ -344,6 +423,10 @@ write_ini "$stage/$newrel/plan9.ini"
 ini_size=$(stat -c %s "$stage/$newrel/plan9.ini")
 ini_sha=$(sha "$stage/$newrel/plan9.ini")
 check_ini "$stage/$newrel/plan9.ini" staged
+if [ -n "$bootmanifest" ]; then
+	cp "$bootmanifest" "$stage/processes.conf"
+	check_manifest "$stage/processes.conf" staged
+fi
 
 # Read the current GRUB state read-only.
 rdo test -r "$grubcfg" || die "cannot read $grubcfg"
@@ -405,6 +488,8 @@ plan2001_count_pre=$(awk 'tolower($0) ~ /^[ \t]*(menuentry|submenu)[ \t]/ && tol
 	printf 'esp=%s\nesp_uuid=%s\nesp_source=%s\n' "$esp" "$esp_uuid" "$esp_source"
 	printf 'ini_sha256=%s\nini_size=%s\nini_last_byte=%s\n' "$ini_sha" "$ini_size" "$(last_byte "$stage/$newrel/plan9.ini")"
 	printf 'obootexec=%s\nobootcpu=%s\nobootgraph=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "${obootgraph:-none}" "$ncpu"
+	printf 'bootmanifest=%s\nbootmanifest_esp_path=%s\n' "${bootmanifest:-none}" "$([ -n "$bootmanifest" ] && echo /processes.conf || echo none)"
+	printf 'manifest_sha256=%s\nmanifest_size=%s\n' "${manifest_sha:-none}" "${manifest_size:-0}"
 	printf 'grub_plan2001_entries_before=%s\nnewscript_present=%s\n' "$plan2001_count_pre" "$newscript_present"
 	printf 'date=%s\n' "$(date -Is)"
 } >"$out/preflight.txt"
@@ -464,6 +549,20 @@ install_file() {
 	[ "$(rsha "$dst")" = "$(sha "$src")" ] || die "installed $(basename "$dst") hash mismatch"
 }
 
+esp_backup_file() {
+	local dst=$1 rel
+	rel=${dst#"$esp"/}
+	if rdo test -e "$dst"; then
+		mkdir -p "$esp_backup/$(dirname "$rel")"
+		rdo cat "$dst" >"$esp_backup/$rel" || die "cannot back up $dst"
+		[ "$(sha "$esp_backup/$rel")" = "$(rsha "$dst")" ] || \
+			die "ESP backup hash mismatch for $dst"
+		printf 'restore=%s mode=%s backup=yes\n' "$dst" "$(rdo stat -c %a "$dst")" >>"$esp_restore_list"
+	else
+		printf 'restore=%s mode=- backup=no\n' "$dst" >>"$esp_restore_list"
+	fi
+}
+
 install_grub_script() {
 	local src=$1 tmp
 	sh -n "$src" || die "generated GRUB script does not parse"
@@ -483,6 +582,12 @@ if [ "$mode" = plan ]; then
 	printf 'plan9.ini (sha256 %s, %s bytes, last byte %s):\n' \
 		"$ini_sha" "$ini_size" "$(last_byte "$stage/$newrel/plan9.ini")"
 	cat "$stage/$newrel/plan9.ini"
+	if [ -n "$bootmanifest" ]; then
+		say "would install $esp/processes.conf from $bootmanifest"
+		printf 'processes.conf (sha256 %s, %s bytes, last byte %s):\n' \
+			"$manifest_sha" "$manifest_size" "$(last_byte "$stage/processes.conf")"
+		cat "$stage/processes.conf"
+	fi
 	say "GRUB entries to be removed from generation: ${legacy_scripts[*]:-none}"
 	write_grub_script "$out/44_plan2001_gcc.canonical"
 	say "canonical $newscript:"
@@ -504,6 +609,13 @@ if [ "$mode" = verify ]; then
 	cmp -s "$stage/$newrel/plan9.ini" "$out/plan9.ini.installed" || die "installed plan9.ini differs from canonical bytes"
 	check_ini "$out/plan9.ini.installed" installed
 	[ "$(rsha "$esp/$newrel/plan9.ini")" = "$ini_sha" ] || die "installed plan9.ini hash mismatch"
+	if [ -n "$bootmanifest" ]; then
+		[ "$(rsha "$esp/processes.conf")" = "$manifest_sha" ] || die "installed processes.conf hash mismatch"
+		rdo cat "$esp/processes.conf" >"$out/processes.conf.installed"
+		cmp -s "$stage/processes.conf" "$out/processes.conf.installed" || \
+			die "installed processes.conf differs from staged bytes"
+		check_manifest "$out/processes.conf.installed" installed
+	fi
 	rdo cat "$grubcfg" >"$out/grub.cfg.verify"
 	check_cfg_contract "$out/grub.cfg.verify" "installed"
 	for f in "${legacy_scripts[@]}"; do
@@ -525,6 +637,8 @@ if [ "$mode" = verify ]; then
 		printf 'installed_ini_size=%s\n' "$ini_size"
 		printf 'installed_ini_last_byte=%s\n' "$(last_byte "$out/plan9.ini.installed")"
 		printf 'obootexec=%s\nobootcpu=%s\nobootgraph=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "${obootgraph:-none}" "$ncpu"
+		printf 'bootmanifest=%s\ninstalled_manifest_sha256=%s\nmanifest_size=%s\n' \
+			"${bootmanifest:-none}" "${manifest_sha:-none}" "${manifest_size:-0}"
 		printf 'grub_plan2001_entries=%s\n' "$(count_plan2001_entries "$out/grub.cfg.verify")"
 		printf 'grub_entry_title=%s\ngrub_entry_id=%s\n' "$newtitle" "$newid"
 		printf 'legacy_scripts_deactivated=%s\n' "${legacy_scripts[*]:-none}"
@@ -547,10 +661,20 @@ else
 	rdo test -d "$esp/$newrel" || die "missing $esp/$newrel; use --bootstrap to create it"
 fi
 
+# Back up every ESP path this run may replace.  A later failure restores both
+# the ESP files and the GRUB files; the previous boot entry is never guessed.
+: >"$esp_restore_list"
+esp_backup_file "$esp/$newrel/9pc64.elf"
+esp_backup_file "$esp/$newrel/BOOTX64.EFI"
+esp_backup_file "$esp/$newrel/plan9.ini"
+[ -z "$bootmanifest" ] || esp_backup_file "$esp/processes.conf"
+rollback_state=1
+
 # ESP artifacts first, verified before any GRUB change.
 install_file "$stage/$newrel/9pc64.elf" "$esp/$newrel/9pc64.elf"
 install_file "$stage/$newrel/BOOTX64.EFI" "$esp/$newrel/BOOTX64.EFI"
 install_file "$stage/$newrel/plan9.ini" "$esp/$newrel/plan9.ini"
+[ -z "$bootmanifest" ] || install_file "$stage/processes.conf" "$esp/processes.conf"
 rdo sync
 
 # Re-read the installed kernel from the ESP before any GRUB change: its bytes
@@ -601,13 +725,16 @@ rdo sync
 rdo mv -f "$tmp" "$grubcfg"
 rdo sync
 
-# Post-install verification; on failure restore only the GRUB files changed
-# here.  The ESP artifacts remain because they are valid and already verified.
+# Post-install verification; on failure restore the backed-up ESP and GRUB
+# files to their exact pre-install state.
 rdo cat "$grubcfg" >"$out/grub.cfg.post" || die "cannot read installed grub.cfg"
 check_cfg_contract "$out/grub.cfg.post" installed
 [ "$(rsha "$esp/$newrel/9pc64.elf")" = "$kernel_sha" ] || die "installed kernel hash changed"
 [ "$(rsha "$esp/$newrel/BOOTX64.EFI")" = "$loader_sha" ] || die "installed loader hash changed"
 [ "$(rsha "$esp/$newrel/plan9.ini")" = "$ini_sha" ] || die "installed plan9.ini hash changed"
+if [ -n "$bootmanifest" ]; then
+	[ "$(rsha "$esp/processes.conf")" = "$manifest_sha" ] || die "installed processes.conf hash changed"
+fi
 for f in "${legacy_scripts[@]}"; do
 	if rdo test -e "$f"; then
 		[ ! -x "$f" ] || die "legacy Plan2001 GRUB script is still executable: $f"
@@ -622,6 +749,8 @@ done
 	printf 'installed_ini_size=%s\n' "$ini_size"
 	printf 'installed_ini_last_byte=%s\n' "$(last_byte "$out/plan9.ini.installed" 2>/dev/null || last_byte "$stage/$newrel/plan9.ini")"
 	printf 'obootexec=%s\nobootcpu=%s\nobootgraph=%s\nncpu=%s\n' "${obootexec:-none}" "${obootcpu:-none}" "${obootgraph:-none}" "$ncpu"
+	printf 'bootmanifest=%s\ninstalled_manifest_sha256=%s\nmanifest_size=%s\n' \
+		"${bootmanifest:-none}" "${manifest_sha:-none}" "${manifest_size:-0}"
 	printf 'grub_default=0 (Debian)\n'
 	printf 'grub_entry_title=%s\ngrub_entry_id=%s\n' "$newtitle" "$newid"
 	printf 'grub_plan2001_entries=%s\n' "$(count_plan2001_entries "$out/grub.cfg.post")"

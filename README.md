@@ -56,6 +56,7 @@ early-boot PASS is not a claim of physical-hardware validation.
 - [Architecture and architecture maturity](docs/ARCHITECTURE.md)
 - [GE/O persistent object storage](docs/OBJECT-STORAGE.md)
 - [Kernel interface: target and current status](docs/KERNEL-INTERFACE.md)
+- [AMD64 UEFI hardware boot, manifest and rollback guide](docs/HARDWARE-BOOT.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
 - [Olio ja objekti: tietoteoreettinen manifesti (suomeksi)](docs/OLIO-OBJEKTI-MANIFESTI.md)
 

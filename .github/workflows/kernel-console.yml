@@ -35,10 +35,14 @@ jobs:
         run: tools/build.sh
       - name: QEMU real framebuffer SystemConsole and two independent REPLs
         run: bash tools/host/bootmanifest/run-console-sessions.sh
+      - name: QEMU three REPLs and the kernel command prompt
+        run: bash tools/host/bootmanifest/run-console-prompt.sh
       - name: Upload serial and framebuffer diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kernel-console-qemu
-          path: build/console-sessions/run/
+          path: |
+            build/console-sessions/run/
+            build/console-prompt/run/
           if-no-files-found: ignore
