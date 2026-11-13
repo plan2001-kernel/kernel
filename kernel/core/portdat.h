@@ -533,6 +533,7 @@ struct Proc
 
 	Procstat *stat;		/* completion resource, nil only before creation */
 	int	boot;		/* explicit initial/boot process, never ancestry */
+	int	console_slot;	/* kernel-owned boot console, 0 = no session */
 	uvlong	owner;		/* immutable process/program OwnerID */
 
 	QLock	seglock;	/* locked whenever seg[] changes */

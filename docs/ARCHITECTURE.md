@@ -79,35 +79,46 @@ device capabilities across owners; publication remains another option. Exclusive
 claims and memory protections are safety constraints, not Unix-style
 object-right classes. No new transport or userspace service is required.
 
-### Console/session contract (target)
+### Console/session contract: kernel-owned minimum and future invariants
 
-For v1 manifest boot on AMD64 the **kernel** owns raw PS/2 input and
-SystemConsole framebuffer focus.  Older Phase 6 test code includes a
-userspace console owner, but it is not the privileged boot-console manager.
-The trusted kernel offers input to each selected independent boot session
-through the existing region-publication transport. Sessions offer
-output and diagnostics back through that same transport. One RW publisher,
-RO observers and WAIT/WAKE remain the IPC mechanics. Input routing, focus,
-echo, editing and control-key behavior are decisions of the owning code.
+The kernel owns the framebuffer, persistent SystemConsole, physical keyboard
+focus, and all initial boot sessions. **No user-space init or console-owner
+process is required.** A boot process receives three attenuated
+capability-region grants: read-only stdin, writable stdout and writable
+stderr/diagnostics. The existing publication ring is the sole transport;
+there is no new IPC mechanism, path/FD console or userspace framebuffer grant.
+The OEXECUTE boundary discards bootstrap Handles and installs each process's
+three console grants again after the exec commit.
 
-Keep input isolated between sessions; deliver Ctrl-C and Ctrl-D correctly,
-support bounded buffering and backpressure, and preserve protected kernel
-boot/panic diagnostics. Trusted restart of the same registered owner may
-recover a failed device-facing process. Phase 6 evidence describes the
-current implementation, not a request to add programs or change IPC.
+One framebuffer has one selected view. Ctrl+Alt+F1 selects SystemConsole;
+Ctrl+Alt+F2 through F9 select independent manifest slots 1 through 8.
+The kernel retains process output off-screen while other sessions continue
+running. Process exit cannot destroy the kernel console or another session.
+Kernel diagnostics remain in kmesg, separate from REPL output. The SystemConsole
+shows diagnostic history and recent lifecycle/focus events; a kernel command
+interpreter is deliberately absent. PS/2 may be unavailable on some machines;
+in that case the kernel remains running, but interactive switching is not
+provided by this minimum implementation.
 
-### Future recovery console invariants (design only)
+The following **C1-C10 are target invariants**, not a claim that all recovery
+features have shipped:
 
-C1 SystemConsole exists without userspace; C2 process failure isolation;
-C3 kernel reclaims focus from failed sessions; C4 terminal-independent
-stdin/stdout/stderr; C5 focus independent of process identity/lifecycle;
-C6 diagnostic log separate from REPL output; C7 no GE/O or network stack
-dependency for local recovery; C8 explicit remote authentication; C9 no
-general heap allocations or user waits in panic path; C10 no mandatory
-physical console endpoint.  Only the minimal AMD64 GOP+PS/2 manifest
-implementation is committed now.  Ethernet L2, UART, panic-interactive
-recovery, multi-volume GE/O and network program loading are not part of this
-change.  See KERNEL-INTERFACE.md for the implemented subset.
+| ID | Target invariant | Minimum implementation |
+|---|---|---|
+| C1 | SystemConsole does not depend on user processes. | Kernel framebuffer view exists independently. |
+| C2 | Failure of one process does not terminate another console session. | Independent boot roots, isolated regions. |
+| C3 | Kernel can reclaim console control independently of user space. | Kernel owns focus; full emergency recovery later. |
+| C4 | stdin/stdout/stderr belong to a process session. | Three capability regions, no shared direct framebuffer. |
+| C5 | Switching sessions does not change ownership, rights or process lifetime. | Kernel focus/view state only. |
+| C6 | Kernel diagnostics survive user REPL failure. | Kernel kmesg remains distinct. |
+| C7 | A recovery console needs neither GE/O nor a network stack. | Later: UART/L2 recovery and independent boot recovery. |
+| C8 | Remote commands require authorization and authentication. | Later: no remote console implemented. |
+| C9 | Panic path cannot allocate memory or depend on userspace. | Later: interactive panic console; basic panic output retained. |
+| C10 | Missing or broken physical console does not stop the kernel. | Kernel does not require successful PS/2 claim; fallback transport later. |
+
+This phase does not implement Ethernet L2 console, UART recovery, interactive
+panic-mode input, remote console, multi-volume GE/O, or network loading.
+Do not claim those future invariants are verified by the QEMU session test.
 
 ## CURRENT IMPLEMENTATION
 

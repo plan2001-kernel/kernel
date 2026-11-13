@@ -2,6 +2,7 @@
 #include "p9compat.h"
 #include <keyboard.h>
 #include "../../runtime/abi/obj.h"
+#include "../../runtime/abi/vobj.h"
 #include "p9console.h"
 
 /*
@@ -194,19 +195,32 @@ p9_console_native(int on)
 void
 p9_console_probe(void)
 {
-	/* Manifest boot: the kernel owns focus, keyboard and three region
-	 * streams.  Open only our own process-local capability grants. */
-	int ih = console_open(ObjConsoleSessionInput);
-	if(ih >= 0){
-		int oh = console_open(ObjConsoleSessionOutput);
-		int dh = console_open(ObjConsoleSessionDiag);
-		if(oh >= 0 && dh >= 0 && p9_console_attach(ih, oh, dh) == 0){
-			nativeout = 0;
-			return;
+	/* The trusted kernel installs exactly three region capabilities after
+	 * OEXECUTE: RO input, writable stdout and writable diagnostics.
+	 * No process searches for or claims the physical keyboard here. */
+	VobjListRec list[96];
+	long count, i;
+	int inh = -1, out = -1, diag = -1;
+	count = obj_list(list, 96);
+	if(count >= 0 && count <= 96){
+		for(i=0; i<count; i++){
+			if(list[i].kind != VkindRegion)
+				continue;
+			if(list[i].rights & Vwrite){
+				if(out < 0) out = (int)list[i].handle;
+				else if(diag < 0) diag = (int)list[i].handle;
+				else return;
+			}else if(list[i].rights & Vread){
+				if(inh >= 0) return;
+				inh = (int)list[i].handle;
+			}
 		}
-		if(dh >= 0) obj_close(dh);
-		if(oh >= 0) obj_close(oh);
-		obj_close(ih);
+		if(inh >= 0 && out >= 0 && diag >= 0){
+			if(p9_console_attach(inh, out, diag) == 0)
+				return;
+			p9_dprintf("console: inherited session invalid: %s\\n",
+				p9_console_session_error());
+		}
 	}
 	if(nativeout == 0){
 		if(outh < 0)
@@ -214,6 +228,12 @@ p9_console_probe(void)
 		if(outh >= 0)
 			nativeout = 1;
 	}
+}
+
+int
+p9_console_is_session(void)
+{
+	return sessin >= 0;
 }
 
 int

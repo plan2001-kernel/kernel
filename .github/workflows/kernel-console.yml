@@ -1,0 +1,44 @@
+name: Kernel SystemConsole / independent REPL sessions
+on:
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - 'micropython/**'
+      - 'runtime/**'
+      - 'boot/**'
+      - 'tools/qemu-o-boot.sh'
+      - 'tools/host/build-kernel.py'
+      - 'tools/host/bootmanifest/**'
+      - '.github/workflows/kernel-console.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  amd64-console:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build, QEMU and framebuffer inspection dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-14 binutils clang lld file mtools ovmf qemu-system-x86 python3 python3-pil
+      - name: Build canonical kernel
+        run: CC=gcc-14 tools/build-gcc.sh --kernel -j 4
+      - name: Build native UEFI loader
+        run: tools/build-efi-gcc.sh -j 4
+      - name: Build MicroPython
+        run: CC=gcc-14 tools/build-mpy-gcc.sh -j 4
+      - name: Build GE/O host tools
+        run: tools/build.sh
+      - name: QEMU real framebuffer SystemConsole and two independent REPLs
+        run: bash tools/host/bootmanifest/run-console-sessions.sh
+      - name: Upload serial and framebuffer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-console-qemu
+          path: build/console-sessions/run/
+          if-no-files-found: ignore

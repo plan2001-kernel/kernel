@@ -1600,8 +1600,6 @@ pexitcause(Proc *p)
 	return PcauseFault;
 }
 
-extern void bootconsoleexit(Proc*);
-
 _Noreturn void
 pexit(char *exitstr)
 {
@@ -1640,8 +1638,8 @@ pexit(char *exitstr)
 	up->egrp = nil;
 	qunlock(&up->debug);
 
+	vconsoleexit(up);
 	oprocexit(up);
-	bootconsoleexit(up);
 	vobjprocexit(up);
 	kbdprocexit(up);
 	uartprocexit(up);

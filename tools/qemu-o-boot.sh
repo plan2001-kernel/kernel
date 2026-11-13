@@ -821,9 +821,6 @@ qob_boot_once()
 	if [ "$QOB_INTERACTIVE" = 1 ]; then
 		display=(-display gtk)
 		extra=(-device VGA)
-	elif [ "$mode" = consoles ]; then
-		# Headless OVMF still needs a GOP-capable VGA device for focus tests.
-		extra=(-device VGA)
 	fi
 	local ctrl=()
 	case "$QOB_CONTROLLER" in
@@ -888,22 +885,6 @@ qob_boot_once()
 					fi
 					sleep 0.2
 				done
-			fi
-			if [ "$mode" = consoles ]; then
-				local ready_deadline=$(( $(date +%s) + 60 ))
-				while [ "$(qob_count_fixed 'PLAN2001-O: REPL READY' "$serial")" -lt 2 ]; do
-					if qob_fail_marker "$serial" || [ "$(date +%s)" -ge "$ready_deadline" ]; then
-						reason="two manifest REPLs did not become ready"
-						break 2
-					fi
-					sleep 0.2
-				done
-				qob_say "verifying boot consoles with QEMU monitor and screendump"
-				if ! python3 "$input" "$mon" "$serial" "$QOB_OUT"; then
-					reason="boot console keyboard/framebuffer acceptance failed"
-					break
-				fi
-				input=
 			fi
 			if [ -n "$input" ]; then
 				local prompts pdeadline

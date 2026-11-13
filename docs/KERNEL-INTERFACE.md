@@ -296,52 +296,35 @@ kernel hash checking and executable hash checking remain separate
 security work. Neither its source bytes nor the process owner strings
 must be interpreted as cryptographic authority.
 
-## Boot-owned SystemConsole and process sessions (AMD64 minimal implementation)
+## Kernel-owned boot process consoles (AMD64)
 
-With a v1 boot manifest, the kernel owns the GOP framebuffer, kernel
-diagnostic view and exclusive PS/2 keyboard claim.  It creates three distinct
-volatile capability regions for **each** manifest process: kernel-written,
-read-only-to-process stdin; process-written stdout; process-written stderr
-(diagnostic stream).  The existing ring publication ABI is used without a new
-IPC provider or system call.  A boot process opens only its own regions with
-`OBJOPEN(ObjOpenConsole)` streams 3, 4, 5.  The kernel grants them by
-*current process PID*, never by a guessed session slot or OwnerID.
-The MicroPython native console automatically attaches those regions; it does
-not claim the PS/2 device when a manifest console exists.  Manifest processes
-have no permission to open the legacy direct framebuffer output stream.
+With a `bootmanifest=` configuration the kernel owns the permanent
+SystemConsole framebuffer view and the exclusive PS/2 keyboard focus.
+Each manifest process has its own input, output and diagnostic/stderr
+capability-region ring, created by the kernel. The three attenuated
+Handle grants are installed after `OEXECUTE` clears the bootstrap Handles.
+MicroPython attaches by enumerating its process-local region grants.
+No new IPC primitive or syscall is introduced. A process may not write to
+the framebuffer or kernel `kmesg` through these console grants.
 
-Framebuffer focus starts on SystemConsole (slot 0).  `Ctrl+Alt+F1` selects
-the kernel view; `Ctrl+Alt+F2` through `Ctrl+Alt+F9` select manifest
-entries 1..8 while alive.  Switching does not start, stop or reparent a
-process.  Each session retains a bounded 8 KiB output history for redraw;
-the kernel's existing kmesg is separate.  A dead focused process falls back
-to SystemConsole; its input writer ends and cannot own the physical keyboard.
-There is intentionally **no** kernel command interpreter or recovery shell.
-The optional `bootconsoletrace=1` boot setting mirrors session text to
-the *serial diagnostics only* for QEMU acceptance; it does not grant any
-userspace raw device capability.  It should not be enabled on systems where
-session output may contain secrets.
+`Ctrl+Alt+F1` selects the kernel SystemConsole; `Ctrl+Alt+F2` through
+`F9` select a live process session. The kernel retains off-screen output
+history independently of user process lifetime. A session exit releases
+its input and does not terminate other processes. Kernel diagnostics
+remain separate from user stdout/stderr; they are not automatically
+mirrored to serial. The framebuffer path is only as available as the
+hardware framebuffer and kernel; full panic-interactive recovery is not
+implemented.
 
-This is an AMD64/GOP/PS2 minimal implementation, not a 100% hardware
-availability guarantee.  The following are planned **architectural
-invariants**, not all proven by this version: C1 kernel console independent
-of user processes; C2 session failure isolation; C3 kernel can reclaim
-keyboard focus; C4 stdin/stdout/stderr independent of physical endpoint;
-C5 focus independent of process lifecycle and authority; C6 protected kernel
-diagnostic log; C7 recovery independent of storage/network stack; C8
-authenticated remote control; C9 allocation-free panic path; C10 missing
-endpoint must not stop the kernel.  C8 and full panic-path recovery C7/C9
-are deferred.  The UART rescue path, raw Ethernet L2 console, remote
-management, multi-volume GE/O and network executables are also deferred.
+For separate boot REPLs, `micropython -O PARTUUID=... -R` enters a
+session-only interactive REPL **without** running `init.run()`, selecting
+a GE/O object graph or automatically committing storage. The executable
+still comes from its manifest GE/O OID. Unlike `-I`, `-R` requires
+a kernel-provided console session, and Ctrl+D exits that process only.
+This mode avoids unrelated concurrent GE/O write transactions in the
+console acceptance. `-I` and `-N` keep their previous boot semantics.
 
-### Boot-time REPL-only program option
-
-For independent boot-console testing the MicroPython `-O VOLUME -R`
-entrypoint starts a native, interactive REPL without executing `init.run()`,
-opening a GE/O graph or committing any storage transaction automatically.
-The OEXECUTE loader still reads the interpreter from the configured GE/O
-volume.  This is deliberately different from `-I` which runs the normal
-boot workload before entering the REPL.  More than one `-I` on the same
-volume can conflict on GE/O writes and is not an acceptable console
-isolation fixture.  `-R` keeps that unrelated storage behavior out of the
-QEMU console acceptance.
+The future C1–C10 recovery invariants are documented in
+[ARCHITECTURE.md](ARCHITECTURE.md#console/session-contract-kernel-owned-minimum-and-future-invariants).
+Ethernet L2, UART rescue, remote terminals, interactive panic recovery,
+network program loading, and multi-volume GE/O are not implemented.

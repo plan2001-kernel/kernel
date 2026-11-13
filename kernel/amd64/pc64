@@ -30,7 +30,7 @@ misc
 	bootarch
 	bootfb
 	fbconsole
-	bootconsole
+	vconsole
 
 	sdiahci		pci sdscsi led
 	sdvirtio10	pci sdscsi virtio10pc
