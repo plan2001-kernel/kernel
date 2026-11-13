@@ -28,7 +28,7 @@ struct Vconsole {
     int defined, ready, alive;
 };
 static Vconsole sessions[Consoles+1];
-static int nsessions, current, ready;
+static int nsessions, current, consolemanagerready;
 static int keyboardclaimed;
 
 /* Configured once before the first manifest root is started. */
@@ -208,7 +208,7 @@ vconsolemanager(void *arg)
     }else
         print("console: PS/2 unavailable; SystemConsole remains visible\n");
     coherence();
-    ready = 1;
+    consolemanagerready = 1;
     print("console: SystemConsole ready, %d independent sessions\n", nsessions);
     for(;;){
         for(i=1; i<=nsessions; i++){
@@ -227,7 +227,7 @@ vconsolebind(Proc *p, int slot)
 {
     if(p == nil || slot < 1 || slot > nsessions || !sessions[slot].defined)
         panic("console: invalid process binding");
-    while(!ready)
+    while(!consolemanagerready)
         tsleep(&p->sleep, return0, nil, 10);
     p->console_slot = slot;
     sessions[slot].alive = 1;
