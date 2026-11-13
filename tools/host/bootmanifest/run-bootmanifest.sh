@@ -6,7 +6,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 export QEMU_O_BOOT_LIB=1
 source "$ROOT/tools/qemu-o-boot.sh"
 QOB_OUT=${BOOT_MANIFEST_OUT:-"$ROOT/build/bootmanifest/run"}
-QOB_TIMEOUT=240
+QOB_TIMEOUT=70
 QOB_ACCEL=${QOB_ACCEL:-kvm:tcg}
 QOB_CPUS=2
 QOB_INI_NCPU=2
