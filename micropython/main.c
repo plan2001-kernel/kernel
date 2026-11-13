@@ -272,8 +272,14 @@ int main(int argc, char **argv) {
                 p9_dprintf("PLAN2001-O: BOOT SUCCESS\n"
                     "PLAN2001-O: GE/O COMMIT SUCCESS\n"
                     "PLAN2001-O: REPL READY\n");
-                // Ctrl-D ends the friendly REPL but not init: reset to
-                // friendly REPL and read the keyboard again.
+                /* Console sessions are independent boot roots.  Ctrl-D
+                 * terminates this one process, never the system console or
+                 * another root.  Keep legacy single-REPL behavior unchanged. */
+                if (p9_console_is_session()) {
+                    pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+                    repl();
+                    p9_console_exit(0);
+                }
                 for (;;) {
                     pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
                     repl();
