@@ -209,4 +209,7 @@ void	osvolumeid(Ohand*, uchar *out);
 int	oshandrights(Ohand*);
 void	oscheckhand(Ohand*);
 
+void vobjconsoleinfo(int, ObjConsoleInfo*);
+int vconsoleisinput(Vobj*);
+
 #endif

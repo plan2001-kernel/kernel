@@ -42,6 +42,7 @@
 #define MICROPY_REPL_AUTO_INDENT (1)
 #define MICROPY_REPL_AUTO_INDENT_ENTER_ENDS (1)
 #define MICROPY_REPL_UTF8 (1)
+#define MICROPY_REPL_HORIZONTAL (1)
 /* tabs and spaces mixed so that the blocks are ambiguous: an error */
 #define MICROPY_LEXER_TAB_CHECK (1)
 #define MICROPY_ENABLE_EXTERNAL_IMPORT (1)

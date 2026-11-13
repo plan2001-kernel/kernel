@@ -44,27 +44,31 @@ enum {
 };
 
 static volatile u32int *fbmem;
-static uchar textcells[Maxcols*Maxrows];
 static int redrawpending;
-static ulong fbwidth;
-static ulong fbstride;
-static ulong fbheight;
-static ulong texttop;		/* first whole text row below the marker strip */
-static ulong textrows;
-static ulong textcols;
-static ulong currow;
-static ulong curcol;
+static ulong fbwidth, fbstride, fbheight, texttop, textrows, textcols;
 static int inited;
-
-static int escstate;
-static int escparam[Maxparam];
-static int escnparam;
-static int escvalue;
-static int eschave;
-static int escprivate;
-
-static char utf[UTFmax];
-static int nutf;
+typedef struct Textview Textview;
+struct Textview {
+    uchar cells[Maxcols*Maxrows];
+    ulong row, col;
+    int state, param[Maxparam], nparam, value, have, private;
+    char utfbuf[UTFmax];
+    int nbuf;
+};
+static Textview views[9];
+static Textview *view = &views[0];
+#define textcells (view->cells)
+#define currow (view->row)
+#define curcol (view->col)
+#define escstate (view->state)
+#define escparam (view->param)
+#define escnparam (view->nparam)
+#define escvalue (view->value)
+#define eschave (view->have)
+#define escprivate (view->private)
+#define utf (view->utfbuf)
+#define nutf (view->nbuf)
+static int hidden;
 
 static Lock fbconsolelock;
 static int activeview; /* 0 = permanent SystemConsole, >0 = process slot */
@@ -74,7 +78,7 @@ fbfill(ulong x, ulong y, ulong w, ulong h, u32int color)
 {
 	ulong i, j, x1, y1;
 
-	if(fbmem == nil || x >= fbwidth || y >= fbheight || fbstride < fbwidth)
+	if(hidden || fbmem == nil || x >= fbwidth || y >= fbheight || fbstride < fbwidth)
 		return;
 	x1 = x + w;
 	if(x1 > fbwidth || x1 < x)
@@ -96,7 +100,7 @@ fbfill(ulong x, ulong y, ulong w, ulong h, u32int color)
 static void
 fbpixel(ulong x, ulong y, u32int color)
 {
-	if(x >= fbwidth || y >= fbheight)
+	if(hidden || x >= fbwidth || y >= fbheight)
 		return;
 	fbmem[y*fbstride + x] = color;
 }
@@ -111,7 +115,7 @@ fbglyph(ulong row, ulong col, int c)
 
 	if(fbmem == nil || row >= textrows || col >= textcols)
 		return;
-	if(c >= 0x80 && c <= 0x85)
+	if(c >= 0x80 && c <= 0x8c)
 		idx = 95 + c - 0x80;
 	else
 		idx = c - 0x20;
@@ -153,7 +157,7 @@ fbredraw(void)
 			p = fbmem + (texttop + row*Fbheight + j)*fbstride;
 			for(col = 0; col < textcols; col++){
 				c = textcells[row*textcols + col];
-				if(c >= 0x80 && c <= 0x85)
+				if(c >= 0x80 && c <= 0x8c)
 					c = 95 + c - 0x80;
 				else
 					c -= 0x20;
@@ -164,6 +168,36 @@ fbredraw(void)
 		}
 	}
 	redrawpending = 0;
+}
+
+/* Plan 9 libframe tick geometry: one-pixel stem, 3x3 end caps.
+ * Restore from RAM cells, never read the write-combining framebuffer. */
+static void
+fbtick(int on)
+{
+    ulong col, x, y, i, j, first, last;
+    if(hidden || !inited || textcols == 0 || textrows == 0) return;
+    col = curcol < textcols ? curcol : textcols-1;
+    x = col*Fbwidth;
+    first = col > 0 ? col-1 : col;
+    last = col+1 < textcols ? col+1 : col;
+    if(!on){
+        for(i=first; i<=last; i++)
+            fbglyph(currow, i, textcells[currow*textcols+i]);
+        return;
+    }
+    y = texttop + currow*Fbheight;
+    for(j=0; j<Fbheight; j++)
+        for(i=0; i<3; i++)
+            if(i == 1 || j < 3 || j >= Fbheight-3)
+                fbpixel(x+i, y+j, Fg);
+}
+
+void
+fbconsolegeometry(uint *cols, uint *rows)
+{
+    *cols = textcols;
+    *rows = textrows;
 }
 
 static void
@@ -197,7 +231,7 @@ fbputglyph(int c)
 {
 	if(curcol >= textcols)
 		fbnewline();
-	if(!((c >= 0x20 && c <= 0x7e) || (c >= 0x80 && c <= 0x85)))
+	if(!((c >= 0x20 && c <= 0x7e) || (c >= 0x80 && c <= 0x8c)))
 		return;
 	textcells[currow*textcols + curcol] = c;
 	if(!redrawpending)
@@ -346,7 +380,7 @@ fbcontrol(int c)
 		}
 		break;
 	default:
-		if(c >= 0x20 && c <= 0x7e)
+		if((c >= 0x20 && c <= 0x7e) || (c >= 0x80 && c <= 0x8c))
 			fbputglyph(c);
 		break;
 	}
@@ -420,12 +454,19 @@ fbconsolebytes(char *s, int n)
 			case 0x00d6: fbconsolechar(0x83); break;
 			case 0x00e5: fbconsolechar(0x84); break;
 			case 0x00c5: fbconsolechar(0x85); break;
+			case 0x00a3: fbconsolechar(0x86); break;
+			case 0x20ac: fbconsolechar(0x87); break;
+			case 0x00a8: fbconsolechar(0x88); break;
+			case 0x00b4: fbconsolechar(0x89); break;
+			case 0x00a7: fbconsolechar(0x8a); break;
+			case 0x00bd: fbconsolechar(0x8b); break;
+			case 0x00a4: fbconsolechar(0x8c); break;
 			default: fbfallback(); break;
 			}
 		}
 	}
 
-	if(redrawpending)
+	if(redrawpending && !hidden)
 		fbredraw();
 }
 
@@ -444,42 +485,57 @@ fbconsoleputs(char *s, int n)
 	if(activeview == 0 || panicking){
 		if(panicking && activeview != 0){
 			activeview = 0;
+            view = &views[0];
+            hidden = 0;
 			fbclear();
 			currow = curcol = 0;
 			escstate = Escnone;
 			nutf = 0;
 		}
+		fbtick(0);
 		fbconsolebytes(s, n);
+		fbtick(1);
 	}
 	unlock(&fbconsolelock);
 }
 
 /* Both switching and active-session output reuse the existing text renderer,
- * with exactly one kernel-owned framebuffer mapping and parser state. */
+ * with one kernel-owned framebuffer mapping and separate per-view parser state. */
 void
 fbconsoleselect(int slot, char *history, int len)
 {
-	if(!inited)
+	if(!inited || slot < 0 || slot >= 9)
 		return;
 	lock(&fbconsolelock);
-	activeview = slot;
-	fbclear();
-	currow = curcol = 0;
-	escstate = Escnone;
-	escnparam = escvalue = eschave = escprivate = nutf = 0;
-	if(history != nil && len > 0)
-		fbconsolebytes(history, len);
+    fbtick(0);
+    activeview = slot;
+    view = &views[slot];
+    hidden = 0;
+    if(slot == 0){
+        fbclear();
+        currow = curcol = 0;
+        escstate = Escnone;
+        escnparam = escvalue = eschave = escprivate = nutf = 0;
+        if(history != nil && len > 0) fbconsolebytes(history, len);
+    }
+    fbredraw();
+    fbtick(1);
 	unlock(&fbconsolelock);
 }
 
 void
 fbconsoleappend(int slot, char *bytes, int len)
 {
-	if(!inited || bytes == nil || len <= 0)
+	if(!inited || slot < 0 || slot >= 9 || bytes == nil || len <= 0)
 		return;
 	lock(&fbconsolelock);
-	if(activeview == slot)
-		fbconsolebytes(bytes, len);
+	if(activeview == slot) fbtick(0);
+    view = &views[slot];
+    hidden = activeview != slot;
+    fbconsolebytes(bytes, len);
+    hidden = 0;
+    view = &views[activeview];
+    if(activeview == slot) fbtick(1);
 	unlock(&fbconsolelock);
 }
 
@@ -529,6 +585,8 @@ fbconsoleinit(void)
 	escprivate = 0;
 	nutf = 0;
 
+	memset(views, 0, sizeof views);
+	{ int i; for(i=0; i<9; i++) memset(views[i].cells, ' ', sizeof views[i].cells); }
 	fbclear();
 
 	/* loader log first, then the kernel's, each exactly once */
