@@ -225,16 +225,37 @@ pump(Bootconsole *b, Vobj *r, uvlong *last)
 	}
 }
 
+/* The queue read can sleep waiting for a key.  Do not perform it in the
+ * output pump: a silent keyboard must never block every process stdout. */
 static void
-consoleworker(void *arg)
+keyboardworker(void *arg)
 {
-	int i, j, n;
+	int j, n;
 	uchar keys[32];
 
 	USED(arg);
 	keyboardheld = kbdscancodeacquire() == 0;
 	print("boot-console: SYSTEM READY framebuffer=%d keyboard=%d\n",
 		fbconsoleavailable(), keyboardheld);
+	if(!keyboardheld)
+		pexit("PS/2 keyboard unavailable");
+	for(;;){
+		n = kbdscancoderead(keys, sizeof keys);
+		if(n > 0)
+			for(j=0; j<n; j++)
+				keyevent(keys[j]);
+		else
+			tsleep(&up->sleep, return0, nil, 10);
+	}
+}
+
+/* The output worker always progresses independently of keyboard input. */
+static void
+consoleworker(void *arg)
+{
+	int i;
+
+	USED(arg);
 	for(;;){
 		for(i=0; i<Nbootconsole; i++){
 			Bootconsole *b = &consoles[i];
@@ -242,12 +263,6 @@ consoleworker(void *arg)
 				continue;
 			pump(b, b->out, &b->outseq);
 			pump(b, b->diag, &b->diagseq);
-		}
-		if(keyboardheld){
-			n = kbdscancoderead(keys, sizeof keys);
-			if(n > 0)
-				for(j=0; j<n; j++)
-					keyevent(keys[j]);
 		}
 		if(redraw)
 			showfocus();
@@ -265,6 +280,7 @@ bootconsolestart(void)
 	print("boot-console: TRACE enabled=%d\n", traceoutput);
 	screenputs = systemscreeen;
 	kproc("boot-console", consoleworker, nil);
+	kproc("boot-keyboard", keyboardworker, nil);
 }
 
 /* Called only by the manifest's trusted kproc before its user transition.
