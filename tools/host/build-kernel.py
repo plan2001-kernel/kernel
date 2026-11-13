@@ -110,6 +110,7 @@ KERNEL_SOURCES = {
     "ethervirtio10": "kernel/core/ethervirtio10.c",
     "fault": "kernel/core/fault.c",
     "fbconsole": "kernel/core/fbconsole.c",
+    "vconsole": "kernel/core/vconsole.c",
     "fpu": "kernel/amd64/fpu.c",
     "g_avl": "ge/storage/avl.c",
     "g_blk": "ge/storage/blk.c",
