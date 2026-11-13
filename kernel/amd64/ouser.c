@@ -88,6 +88,7 @@ struct Bootproc {
 	int kind;
 	int required;
 	int seen;
+	int consoleslot;
 };
 
 static Bootproc manifestprocs[ManifestMaxprocs];
@@ -288,6 +289,8 @@ ouserproc(void *arg)
 	ownerinit();
 	up->boot = bp == nil || bp->kind == SourceGeo;
 	up->owner = bp == nil ? ownerroot() : ownercreate(bp->ownername, strlen(bp->ownername));
+	if(bp != nil)
+		vconsolebind(up, bp->consoleslot);
 
 	ts = newseg(SG_TEXT|SG_RONLY, UTZERO, 1);
 	ts->flushme = 1;
@@ -343,6 +346,10 @@ ouserproc(void *arg)
 	up->iomask = Iomout|Iomdiag;
 	procpriority(up, PriNormal, 0);
 	procsetup(up);
+	/* The memory:selftest image does not OEXECUTE.  GE/O loaders have
+	 * their console grants reinstalled by execcommit() after OEXECUTE. */
+	if(bp != nil && bp->kind == SourceMemory)
+		vconsoleexec(up);
 
 	flushmmu();
 	poperror();
@@ -698,6 +705,14 @@ manifeststart(void)
 	ownerinit();
 	/* Do not register an unrelated implicit default program. */
 	ownerprogrambootprepare(0);
+	/* The permanent console manager owns keyboard and framebuffer routing,
+	 * never any boot user process.  It exists independently of all roots. */
+	for(i=0; i<manifestnprocs; i++){
+		b = &manifestprocs[i];
+		b->consoleslot = i+1;
+		vconsoledefine(i+1, b->name);
+	}
+	kproc("*consolemanager*", vconsolemanager, nil);
 	for(i=0; i<manifestnprocs; i++){
 		b = &manifestprocs[i];
 		print("boot-manifest: START %s source=%s cpu=%d required=%d\n",
