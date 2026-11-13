@@ -333,3 +333,15 @@ authenticated remote control; C9 allocation-free panic path; C10 missing
 endpoint must not stop the kernel.  C8 and full panic-path recovery C7/C9
 are deferred.  The UART rescue path, raw Ethernet L2 console, remote
 management, multi-volume GE/O and network executables are also deferred.
+
+### Boot-time REPL-only program option
+
+For independent boot-console testing the MicroPython `-O VOLUME -R`
+entrypoint starts a native, interactive REPL without executing `init.run()`,
+opening a GE/O graph or committing any storage transaction automatically.
+The OEXECUTE loader still reads the interpreter from the configured GE/O
+volume.  This is deliberately different from `-I` which runs the normal
+boot workload before entering the REPL.  More than one `-I` on the same
+volume can conflict on GE/O writes and is not an acceptable console
+isolation fixture.  `-R` keeps that unrelated storage behavior out of the
+QEMU console acceptance.

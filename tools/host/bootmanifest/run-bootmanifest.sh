@@ -86,7 +86,7 @@ version=1
 source=geo:PARTUUID=$puuid:OID=0x4f45584543000003
 owner=alpha
 cpu=0
-args=-I
+args=-R
 required=true
 [process.beta]
 source=geo:PARTUUID=$puuid:OID=0x4f45584543000003

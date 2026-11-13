@@ -119,7 +119,7 @@ static void bootfailed(const char *why) {
 
 int main(int argc, char **argv) {
     volatile uintptr_t stack_top;
-    int fail = 0, nativeboot = 0, nativerepl = 0, autorun = 0, bootfail = 0;
+    int fail = 0, nativeboot = 0, nativerepl = 0, replonly = 0, autorun = 0, bootfail = 0;
     const char *source = NULL, *ovol = NULL, *env = NULL;
     const char *booterror = "initialization or run() failed (see error above)";
     char useenv[128];
@@ -142,6 +142,11 @@ int main(int argc, char **argv) {
         nativeboot = 1;
     } else if (argc == 2 && strcmp(argv[1], "-I") == 0) {
         nativerepl = 1;
+    } else if (argc == 2 && strcmp(argv[1], "-R") == 0) {
+        /* Independent boot session: interactive REPL only, no init.run(),
+         * no implicit GE/O commit, no storage mutation on startup. */
+        nativerepl = 1;
+        replonly = 1;
     } else if (argc == 3 && strcmp(argv[1], "-c") == 0) {
         source = argv[2];
     } else if (argc != 1) {
@@ -176,9 +181,20 @@ int main(int argc, char **argv) {
     if (nativeboot || nativerepl) {
         mp_obj_list_append(mp_sys_argv, mp_obj_new_str("micropython", 11));
         mp_obj_list_append(mp_sys_argv,
-            mp_obj_new_str(nativeboot ? "-N" : "-I", 2));
+            mp_obj_new_str(nativeboot ? "-N" : replonly ? "-R" : "-I", 2));
     }
     syscallt0checkpoint();
+    if (replonly) {
+        /* The manifest loader already authenticated its own OEXECUTE grant.
+         * Native console grants come from this PID, not from a shell owner.
+         * Delay any GE/O transactions until the operator explicitly asks. */
+        atnotify(onnote, 1);
+        p9_dprintf("PLAN2001-O: REPL READY\n");
+        for (;;) {
+            pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+            repl();
+        }
+    }
     if (ovol != NULL && p9_space_o(ovol) < 0) {
         if (nativeboot || nativerepl)
             bootfailed("cannot open native O volume (see error above)");
