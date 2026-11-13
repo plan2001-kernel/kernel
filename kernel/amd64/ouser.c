@@ -18,6 +18,7 @@
  * the "init" Space and OEXECUTEs the MicroPython interpreter stored there.
  */
 #include	"obootoid.i"
+#include	"omemory.i"
 
 enum {
 	Maxargv		= 8,
@@ -50,6 +51,96 @@ static int bootreqset;
 static uvlong bootreqoid;
 static int obootcpu = -1;
 static const char kernelbuild[] = PLAN2001_KERNEL_BUILD_ID;
+
+
+/*
+ * Boot manifest v1: a bounded, explicit set of independent process roots.
+ * Syntax:
+ *   version=1
+ *   [process.name]
+ *   source=geo:PARTUUID=<uuid>:OID=<number> | memory:selftest
+ *   owner=<name>     (required, immutable identity, not authority by itself)
+ *   args=-N          (optional, whitespace-separated argv for the program)
+ *   cpu=0            (optional, -1 = scheduler chooses)
+ *   required=true    (optional, diagnostic label; never blocks siblings)
+ *
+ * One configured manifest replaces the implicit obootexec bootstrap.
+ * Unsupported sources, including network sources and a second GE/O volume,
+ * fail as individual process entries, never silently reroute.
+ */
+enum {
+	ManifestMaxprocs = 8,
+	ManifestMaxline = 384,
+	SourceGeo = 1,
+	SourceMemory = 2,
+};
+
+typedef struct Bootproc Bootproc;
+struct Bootproc {
+	char name[32];
+	char ownername[32];
+	char volspec[128];
+	char argline[256];
+	char argv[Maxargv][128];
+	uvlong oid;
+	int argc;
+	int cpu;
+	int kind;
+	int required;
+	int seen;
+	int consoleslot;
+};
+
+static Bootproc manifestprocs[ManifestMaxprocs];
+static int manifestnprocs;
+static QLock bootconslk;
+static int bootconsready;
+
+static void
+bootconsinit(void)
+{
+	qlock(&bootconslk);
+	if(!bootconsready){
+		consinit();
+		bootconsready = 1;
+	}
+	qunlock(&bootconslk);
+}
+
+static int
+manifestname(char *s)
+{
+	int i;
+	if(*s == 0)
+		return 0;
+	for(i=0; s[i]; i++)
+		if(!(s[i] >= 'a' && s[i] <= 'z') &&
+		   !(s[i] >= 'A' && s[i] <= 'Z') &&
+		   !(s[i] >= '0' && s[i] <= '9') &&
+		   s[i] != '_' && s[i] != '-')
+			return 0;
+	return 1;
+}
+
+static int
+manifestarg(Bootproc *b, char *arg)
+{
+	int n;
+	if(b->argc >= Maxargv)
+		return -1;
+	n = strlen(arg);
+	if(n <= 0 || n >= sizeof b->argv[0])
+		return -1;
+	memmove(b->argv[b->argc], arg, n+1);
+	b->argc++;
+	return 0;
+}
+
+/* Reject any malformed or unsupported entry before starting the first one. */
+
+static void manifestparse(void);
+static void manifeststart(void);
+
 
 /*
  * Strict full-string unsigned parser: decimal digits or 0x-prefixed hex.
@@ -157,14 +248,21 @@ ouserproc(void *arg)
 	Oargs oa;
 	Oenter oe;
 	char *repl;
+	Bootproc *bp;
+	int cpu;
 
-	USED(arg);
+	bp = arg;
 	/* No legacy Dev init on this path: start the Dev-independent services. */
-	consinit();
-	if(waserror())
+	bootconsinit();
+	if(waserror()){
+		if(bp != nil){
+			print("boot-manifest: FAIL %s: %s\n", bp->name, up->errstr);
+			pexit("manifest launch failed");
+		}
 		panic("o-server bootstrap: %s", up->errstr);
-	img = obootoid;
-	imglen = sizeof(obootoid);
+	}
+	img = bp != nil && bp->kind == SourceMemory ? omemory : obootoid;
+	imglen = bp != nil && bp->kind == SourceMemory ? sizeof(omemory) : sizeof(obootoid);
 	ouserimage(img, imglen, "o-server", &entry, &text);
 
 	/*
@@ -189,8 +287,10 @@ ouserproc(void *arg)
 	 * from ancestry or from a zero parent PID.  The first userspace
 	 * process is an ordinary named owner (root), not a kernel override. */
 	ownerinit();
-	up->boot = 1;
-	up->owner = ownerroot();
+	up->boot = bp == nil || bp->kind == SourceGeo;
+	up->owner = bp == nil ? ownerroot() : ownercreate(bp->ownername, strlen(bp->ownername));
+	if(bp != nil)
+		vconsolebind(up, bp->consoleslot);
 
 	ts = newseg(SG_TEXT|SG_RONLY, UTZERO, 1);
 	ts->flushme = 1;
@@ -207,6 +307,14 @@ ouserproc(void *arg)
 	stackpage(up->seg[SSEG], USTKTOP-BY2PG, nil, 0);
 
 	memset(&oa, 0, sizeof oa);
+	if(bp != nil){
+		oa.vollen = strlen(bp->volspec);
+		memmove(oa.volspec, bp->volspec, oa.vollen);
+		oa.oid = bp->oid;
+		oa.argc = bp->argc;
+		for(int ai=0; ai<bp->argc; ai++)
+			strcpy(oa.argv[ai], bp->argv[ai]);
+	}else{
 	oa.vollen = obootvollen;
 	memmove(oa.volspec, obootvol, obootvollen);
 	oa.oid = bootoid;
@@ -225,6 +333,7 @@ ouserproc(void *arg)
 		memmove(oa.argv[0], "oexec", 6);
 		memmove(oa.argv[1], obootvol, obootvollen+1);
 	}
+	}
 
 	argp = USTKTOP-2*BY2PG;
 	stackpage(up->seg[SSEG], argp, &oa, sizeof oa);
@@ -237,6 +346,10 @@ ouserproc(void *arg)
 	up->iomask = Iomout|Iomdiag;
 	procpriority(up, PriNormal, 0);
 	procsetup(up);
+	/* The memory:selftest image does not OEXECUTE.  GE/O loaders have
+	 * their console grants reinstalled by execcommit() after OEXECUTE. */
+	if(bp != nil && bp->kind == SourceMemory)
+		vconsoleexec(up);
 
 	flushmmu();
 	poperror();
@@ -269,12 +382,18 @@ ouserproc(void *arg)
 	print("Plan2001-O kernel build: %s\n",
 		kernelbuild + sizeof(PLAN2001_KERNEL_BUILD_MAGIC) - 1);
 
-	if(obootcpu >= 0){
-		if(!proccpuonline(obootcpu))
-			panic("o-server: obootcpu %d is not online", obootcpu);
-		procwiredexact(up, obootcpu);
-		procfirstlog(up, obootcpu);
-		while(m->machno != obootcpu || up->firstuser)
+	cpu = bp != nil ? bp->cpu : obootcpu;
+	if(cpu >= 0){
+		if(!proccpuonline(cpu)){
+			if(bp != nil){
+				print("boot-manifest: FAIL %s: CPU %d offline\n", bp->name, cpu);
+				pexit("manifest CPU offline");
+			}
+			panic("o-server: obootcpu %d is not online", cpu);
+		}
+		procwiredexact(up, cpu);
+		procfirstlog(up, cpu);
+		while(m->machno != cpu || up->firstuser)
 			sched();
 	}else
 		procfirstlog(up, -1);
@@ -295,7 +414,7 @@ static void
 kernelreadyproc(void *arg)
 {
 	USED(arg);
-	consinit();
+	bootconsinit();
 	if(okernelvol(obootvol) != 1)
 		panic("o-server: kernel-only O volume open failed");
 	/* Let the remaining boot services finish before printing the
@@ -313,6 +432,15 @@ o_user_bootstrap(void)
 {
 	char *p;
 	int n;
+
+	if(bootmanifest() != nil){
+		manifestparse();
+		up = nil;
+		if(eve == nil)
+			kstrdup(&eve, "");
+		manifeststart();
+		return;
+	}
 
 	p = getconf("obootvol");
 	if(p == nil || strncmp(p, "PARTUUID=", 9) != 0){
@@ -418,4 +546,178 @@ o_user_bootstrap(void)
 		return;
 	}
 	kproc("*ouser*", ouserproc, nil);
+}
+
+
+static void
+manifestparse(void)
+{
+	Bootproc *b;
+	char *p, *e, line[ManifestMaxline], *v, *q, *oid;
+	int n, version, i;
+
+	p = bootmanifest();
+	if(p == nil)
+		return;
+	manifestnprocs = 0;
+	b = nil;
+	version = 0;
+	while(*p != 0){
+		for(e = p; *e && *e != '\n'; e++)
+			;
+		n = e-p;
+		if(*e != '\n' || n >= sizeof line)
+			panic("boot-manifest: line too long or unterminated");
+		memmove(line, p, n);
+		line[n] = 0;
+		p = e+1;
+		if(line[0] == 0 || line[0] == '#')
+			continue;
+		if(strcmp(line, "version=1") == 0){
+			if(version != 0 || b != nil)
+				panic("boot-manifest: invalid version position");
+			version = 1;
+			continue;
+		}
+		if(version != 1)
+			panic("boot-manifest: version=1 must be first");
+		if(line[0] == '['){
+			if(n < 11 || strcmp(line+n-1, "]") != 0 ||
+			   strncmp(line, "[process.", 9) != 0)
+				panic("boot-manifest: invalid process header");
+			line[n-1] = 0;
+			if(strlen(line+9) >= sizeof manifestprocs[0].name ||
+			   !manifestname(line+9) || manifestnprocs >= ManifestMaxprocs)
+				panic("boot-manifest: invalid process name/count");
+			for(i=0; i<manifestnprocs; i++)
+				if(strcmp(manifestprocs[i].name, line+9) == 0)
+					panic("boot-manifest: duplicate process name");
+			b = &manifestprocs[manifestnprocs++];
+			memset(b, 0, sizeof *b);
+			strcpy(b->name, line+9);
+			b->cpu = -1;
+			continue;
+		}
+		if(b == nil || (v = strchr(line, '=')) == nil)
+			panic("boot-manifest: setting outside process");
+		*v++ = 0;
+		if(strcmp(line, "source") == 0){
+			if(b->seen & 1)
+				panic("boot-manifest: duplicate source");
+			b->seen |= 1;
+			if(strcmp(v, "memory:selftest") == 0){
+				b->kind = SourceMemory;
+			}else if(strncmp(v, "geo:", 4) == 0){
+				q = v+4;
+				oid = strstr(q, ":OID=");
+				if(oid == nil || oid-q >= sizeof b->volspec || oid-q <= 9)
+					panic("boot-manifest: bad GE/O source");
+				memmove(b->volspec, q, oid-q);
+				b->volspec[oid-q] = 0;
+				if(strncmp(b->volspec, "PARTUUID=", 9) != 0 ||
+				   parseoid(oid+5, &b->oid) != 0 || b->oid == 0)
+					panic("boot-manifest: invalid GE/O PARTUUID or OID");
+				b->kind = SourceGeo;
+			}else
+				panic("boot-manifest: unsupported source");
+		}else if(strcmp(line, "owner") == 0){
+			if(b->seen & 2 || strlen(v) >= sizeof b->ownername || !manifestname(v))
+				panic("boot-manifest: bad owner");
+			b->seen |= 2;
+			strcpy(b->ownername, v);
+		}else if(strcmp(line, "cpu") == 0){
+			uvlong idx;
+			if(b->seen & 4 || parseoid(v, &idx) != 0 || idx > 0x7fffffffULL)
+				panic("boot-manifest: invalid cpu index");
+			b->seen |= 4;
+			b->cpu = (int)idx;
+		}else if(strcmp(line, "args") == 0){
+			if(b->seen & 8 || strlen(v) >= sizeof b->argline)
+				panic("boot-manifest: args too long");
+			b->seen |= 8;
+			strcpy(b->argline, v);
+		}else if(strcmp(line, "required") == 0){
+			if(b->seen & 16)
+				panic("boot-manifest: duplicate required");
+			b->seen |= 16;
+			if(strcmp(v, "true") == 0)
+				b->required = 1;
+			else if(strcmp(v, "false") != 0)
+				panic("boot-manifest: required must be true/false");
+		}else
+			panic("boot-manifest: unknown setting");
+	}
+	if(version != 1 || manifestnprocs == 0)
+		panic("boot-manifest: missing version or processes");
+	for(i=0; i<manifestnprocs; i++){
+		b = &manifestprocs[i];
+		if((b->seen & 3) != 3 || b->kind == 0)
+			panic("boot-manifest: incomplete process entry");
+		if(b->kind == SourceMemory){
+			if(b->seen & 8)
+				panic("boot-manifest: memory selftest has no args");
+			continue;
+		}
+		/* One GE/O volume is currently implemented. Enforce equality.
+		 * Never pretend a second disk was loaded from the first one. */
+		if(obootvollen != 0 && strcmp(obootvol, b->volspec) != 0)
+			panic("boot-manifest: GE/O source does not match obootvol");
+		if(obootvollen == 0){
+			strcpy(obootvol, b->volspec);
+			obootvollen = strlen(obootvol);
+		}
+		if(b->oid == MpyOid){
+			if(manifestarg(b, "micropython") < 0 ||
+			   manifestarg(b, "-O") < 0 ||
+			   manifestarg(b, b->volspec) < 0 ||
+			   manifestarg(b, b->argline[0] ? b->argline : "-N") < 0)
+				panic("boot-manifest: invalid MicroPython arguments");
+		}else{
+			if(manifestarg(b, b->name) < 0)
+				panic("boot-manifest: invalid argv");
+			q = b->argline;
+			while(*q){
+				while(*q == ' ' || *q == '\t')
+					q++;
+				if(*q == 0)
+					break;
+				v = q;
+				while(*q != 0 && *q != ' ' && *q != '\t')
+					q++;
+				n = *q;
+				*q = 0;
+				if(manifestarg(b, v) < 0)
+					panic("boot-manifest: too many args");
+				*q = n;
+				if(n == 0)
+					break;
+			}
+		}
+	}
+	print("boot-manifest: validated %d independent process entries\n", manifestnprocs);
+}
+
+static void
+manifeststart(void)
+{
+	Bootproc *b;
+	int i;
+	ownerinit();
+	/* Do not register an unrelated implicit default program. */
+	ownerprogrambootprepare(0);
+	/* The permanent console manager owns keyboard and framebuffer routing,
+	 * never any boot user process.  It exists independently of all roots. */
+	for(i=0; i<manifestnprocs; i++){
+		b = &manifestprocs[i];
+		b->consoleslot = i+1;
+		vconsoledefine(i+1, b->name);
+	}
+	kproc("*consolemanager*", vconsolemanager, nil);
+	for(i=0; i<manifestnprocs; i++){
+		b = &manifestprocs[i];
+		print("boot-manifest: START %s source=%s cpu=%d required=%d\n",
+			b->name, b->kind == SourceGeo ? "geo" : "memory",
+			b->cpu, b->required);
+		kproc(b->name, ouserproc, b);
+	}
 }

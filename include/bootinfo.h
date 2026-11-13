@@ -134,6 +134,10 @@ struct BootInfo {
 	 */
 	u64int	rdbase;
 	u64int	rdlen;		/* bytes */
+
+	/* optional separate boot process manifest; NUL-terminated UTF-8 text */
+	u32int	manifestoff;
+	u32int	manifestlen;	/* bytes including terminal NUL, 0 if absent */
 };
 
 #endif /* PLAN2001_BOOTINFO_H */

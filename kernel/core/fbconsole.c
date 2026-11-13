@@ -67,6 +67,7 @@ static char utf[UTFmax];
 static int nutf;
 
 static Lock fbconsolelock;
+static int activeview; /* 0 = permanent SystemConsole, >0 = process slot */
 
 static void
 fbfill(ulong x, ulong y, ulong w, ulong h, u32int color)
@@ -386,21 +387,13 @@ fbfallback(void)
 }
 
 static void
-fbconsoleputs(char *s, int n)
+fbconsolebytes(char *s, int n)
 {
 	char *e;
 	int c;
 
 	if(s == nil || n <= 0)
 		return;
-	if(!islo()){
-		if(!canlock(&fbconsolelock))
-			return;
-	}else{
-		while(!canlock(&fbconsolelock))
-			;
-	}
-
 	for(e = s + n; s < e; s++){
 		c = *(uchar*)s;
 		if(c < Runeself){
@@ -434,6 +427,59 @@ fbconsoleputs(char *s, int n)
 
 	if(redrawpending)
 		fbredraw();
+}
+
+/* Screen writes never modify a hidden view.  Kernel diagnostics stay
+ * separately in kmesg, and are replayed when SystemConsole is selected. */
+static void
+fbconsoleputs(char *s, int n)
+{
+	if(!islo()){
+		if(!canlock(&fbconsolelock))
+			return;
+	}else{
+		while(!canlock(&fbconsolelock))
+			;
+	}
+	if(activeview == 0 || panicking){
+		if(panicking && activeview != 0){
+			activeview = 0;
+			fbclear();
+			currow = curcol = 0;
+			escstate = Escnone;
+			nutf = 0;
+		}
+		fbconsolebytes(s, n);
+	}
+	unlock(&fbconsolelock);
+}
+
+/* Both switching and active-session output reuse the existing text renderer,
+ * with exactly one kernel-owned framebuffer mapping and parser state. */
+void
+fbconsoleselect(int slot, char *history, int len)
+{
+	if(!inited)
+		return;
+	lock(&fbconsolelock);
+	activeview = slot;
+	fbclear();
+	currow = curcol = 0;
+	escstate = Escnone;
+	escnparam = escvalue = eschave = escprivate = nutf = 0;
+	if(history != nil && len > 0)
+		fbconsolebytes(history, len);
+	unlock(&fbconsolelock);
+}
+
+void
+fbconsoleappend(int slot, char *bytes, int len)
+{
+	if(!inited || bytes == nil || len <= 0)
+		return;
+	lock(&fbconsolelock);
+	if(activeview == slot)
+		fbconsolebytes(bytes, len);
 	unlock(&fbconsolelock);
 }
 

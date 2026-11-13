@@ -103,6 +103,7 @@ efifree(uvlong pa, uvlong len)
 enum {
 	ConfCap = 8*1024,	/* plan9.ini text, including the NUL */
 	LogCap = 4*1024,	/* print()'s captured text */
+	ManifestCap = 16*1024,	/* bounded separate process manifest */
 };
 static BootInfo *bi;
 static void bootinfohdr(void);
@@ -658,6 +659,66 @@ fdtfind(void)
  * Called at the start (efimain()) and again from eficonfig() whenever
  * the configuration is cleared, as that zeroes the header.
  */
+
+/*
+ * The manifest is optional for legacy boot, but mandatory if named in
+ * plan9.ini. It comes from the same EFI volume as the kernel. The loader
+ * does not interpret process directives: the kernel owns that ABI.
+ * NOTE: authenticity is NOT verified here; signed boot is phase 3.
+ */
+static int
+bootmanifestload(void)
+{
+	char path[MAXPATH], extra;
+	char *s;
+	void *f;
+	int n, used, k;
+
+	bi->manifestlen = 0;
+	if((s = findconf("bootmanifest=")) == nil)
+		return 0;
+	s += strlen("bootmanifest=");
+	for(k = 0; s[k] != '\n' && s[k] != 0; k++){
+		if(k >= MAXPATH-1 || (uchar)s[k] < 32 || (uchar)s[k] > 126)
+			return -1;
+		path[k] = s[k];
+	}
+	path[k] = 0;
+	if(path[0] != '/' || strchr(path, ':') != nil || strchr(path, '\\') != nil)
+		return -1;
+	/* Do not accept path traversal through a writable ESP. */
+	for(k = 0; path[k] != 0; k++)
+		if(path[k] == '.' && path[k+1] == '.' && (k == 0 || path[k-1] == '/') && (path[k+2] == '/' || path[k+2] == 0))
+			return -1;
+	f = open(path);
+	if(f == nil)
+		return -1;
+	used = 0;
+	for(;;){
+		n = read(f, blob + bi->manifestoff + used, ManifestCap-1-used);
+		if(n <= 0)
+			break;
+		used += n;
+		if(used == ManifestCap-1){
+			if(read(f, &extra, 1) > 0){
+				close(f);
+				return -1;
+			}
+			break;
+		}
+	}
+	close(f);
+	if(used == 0 || blob[bi->manifestoff + used-1] != '\n')
+		return -1;
+	for(k = 0; k < used; k++)
+		if(blob[bi->manifestoff + k] == 0 || blob[bi->manifestoff + k] == '\r')
+			return -1;
+	blob[bi->manifestoff + used] = 0;
+	bi->manifestlen = used+1;
+	print("[P2 L12] separate boot manifest loaded\n");
+	return 0;
+}
+
 static void
 bootinfohdr(void)
 {
@@ -670,7 +731,8 @@ bootinfohdr(void)
 	bi->logoff = bi->configoff + ConfCap;
 	bi->fdtoff = bi->logoff + LogCap;
 	bi->fdtlen = fdtsize;
-	bi->mmapoff = bi->fdtoff + ((fdtsize + 7) & ~7);
+	bi->manifestoff = bi->fdtoff + ((fdtsize + 7) & ~7);
+	bi->mmapoff = bi->manifestoff + ManifestCap;
 	bi->mmapentsize = sizeof(BootMem);
 }
 
@@ -710,7 +772,7 @@ efimain(EFI_HANDLE ih, EFI_SYSTEM_TABLE *st)
 	 */
 	fdtfind();
 	mmapcap = MapBufSize / sizeof(EFI_MEMORY_DESCRIPTOR);
-	blobsize = PGROUND(((sizeof(BootInfo) + 7) & ~7) + ConfCap + LogCap + ((fdtsize + 7) & ~7) + mmapcap*sizeof(BootMem));
+	blobsize = PGROUND(((sizeof(BootInfo) + 7) & ~7) + ConfCap + LogCap + ((fdtsize + 7) & ~7) + ManifestCap + mmapcap*sizeof(BootMem));
 	if((la = bloballoc(blobsize)) == 0){
 		print("[P2 L02] FATAL: cannot allocate the BootInfo blob\n");
 		for(;;)
@@ -769,6 +831,11 @@ efimain(EFI_HANDLE ih, EFI_SYSTEM_TABLE *st)
 	for(;;){
 		print("[P2 L12] configure kernel path\n");
 		kern = configure(f, path);
+		if(bootmanifestload() != 0){
+			print("[P2 L12] FATAL: bootmanifest unreadable or invalid\n");
+			for(;;)
+				;
+		}
 		print("[P2 L13] open kernel\n");
 		f = open(kern);
 		if(f == nil){

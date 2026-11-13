@@ -236,11 +236,14 @@ oblockopenpart(char *guid, char *dev, int ndev, vlong *off, vlong *size)
  */
 static Proc *bootowner;
 static ulong bootpid;
+static QLock bootvollk;
+static char bootvolspec[128];
 
 static int
 oboot(void)
 {
-	return up == bootowner && up->pid == bootpid;
+	return up != nil && ((up == bootowner && up->pid == bootpid)
+		|| (bootmanifest() != nil && up->boot));
 }
 
 static Gefs *ovol;
@@ -273,9 +276,14 @@ osvolumeopen(char *p, int n)
 	vlong off, size;
 	void *v;
 
-	if(n <= 0 || n > 256)
-		error(Ebadarg);
+	if(n <= 0 || n > 256 || up == nil || !up->boot)
+		error(Eperm);
 	validaddr((uintptr)p, n, 0);
+	qlock(&bootvollk);
+	if(waserror()){
+		qunlock(&bootvollk);
+		nexterror();
+	}
 	spec = smalloc(n+1);
 	if(waserror()){
 		free(spec);
@@ -284,9 +292,12 @@ osvolumeopen(char *p, int n)
 	memmove(spec, p, n);
 	spec[n] = 0;
 	if(ovol != nil){
-		if(!oboot()) error(Eperm);
+		if(!oboot() || strcmp(spec, bootvolspec) != 0)
+			error("ovolopen: only the configured GE/O boot volume is active");
 		free(spec);
 		poperror();
+		poperror();
+		qunlock(&bootvollk);
 		return 1;
 	}
 	if(cistrncmp(spec, "PARTUUID=", 9) != 0)
@@ -312,11 +323,16 @@ osvolumeopen(char *p, int n)
 	oobjownersetlegacy(ownerroot());
 	bootowner = up;
 	bootpid = up->pid;
+	if(strlen(spec) >= sizeof bootvolspec)
+		error(Ebadarg);
+	strcpy(bootvolspec, spec);
 	/* Trusted boot registration: the actual autostart action remains the
 	 * loader's in-place OEXECUTE; this records the launchable entry. */
 	ownerprogrambootregister();
 	free(spec);
 	poperror();
+	poperror();
+	qunlock(&bootvollk);
 	return 1;
 }
 
@@ -894,7 +910,8 @@ sysoexecute(sysva_list list)
 int
 obootstrap(Proc *p)
 {
-	return p != nil && p == bootowner && p->pid == bootpid;
+	return p != nil && ((p == bootowner && p->pid == bootpid)
+		|| (bootmanifest() != nil && p->boot));
 }
 
 /* GE/O authority revocation is distinct from Handle close and role removal.

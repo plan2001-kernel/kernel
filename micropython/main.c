@@ -119,7 +119,7 @@ static void bootfailed(const char *why) {
 
 int main(int argc, char **argv) {
     volatile uintptr_t stack_top;
-    int fail = 0, nativeboot = 0, nativerepl = 0, autorun = 0, bootfail = 0;
+    int fail = 0, nativeboot = 0, nativerepl = 0, replonly = 0, autorun = 0, bootfail = 0;
     const char *source = NULL, *ovol = NULL, *env = NULL;
     const char *booterror = "initialization or run() failed (see error above)";
     char useenv[128];
@@ -142,10 +142,15 @@ int main(int argc, char **argv) {
         nativeboot = 1;
     } else if (argc == 2 && strcmp(argv[1], "-I") == 0) {
         nativerepl = 1;
+    } else if (argc == 2 && strcmp(argv[1], "-R") == 0) {
+        /* Independent interactive boot session: no init.run or automatic
+         * GE/O write transaction.  This requires kernel console grants. */
+        nativerepl = 1;
+        replonly = 1;
     } else if (argc == 3 && strcmp(argv[1], "-c") == 0) {
         source = argv[2];
     } else if (argc != 1) {
-        p9_dprintf("usage: micropython [-O volume] [-E env] [-N | -I | -c source]\n");
+        p9_dprintf("usage: micropython [-O volume] [-E env] [-N | -I | -R | -c source]\n");
         exits("usage");
     }
     p9_space_native_mode(nativeboot || nativerepl);
@@ -176,9 +181,25 @@ int main(int argc, char **argv) {
     if (nativeboot || nativerepl) {
         mp_obj_list_append(mp_sys_argv, mp_obj_new_str("micropython", 11));
         mp_obj_list_append(mp_sys_argv,
-            mp_obj_new_str(nativeboot ? "-N" : "-I", 2));
+            mp_obj_new_str(nativeboot ? "-N" : replonly ? "-R" : "-I", 2));
     }
     syscallt0checkpoint();
+    if (replonly) {
+        /* The manifest launcher already loaded this interpreter.  An -R
+         * session must never try to own the physical keyboard or perform
+         * init.run / GE/O commit as an implicit REPL side effect. */
+        if (!p9_console_is_session()) {
+            bootfailed("-R requires a kernel-owned console session");
+            p9_console_exit(1);
+            return 1;
+        }
+        atnotify(onnote, 1);
+        p9_dprintf("PLAN2001-O: REPL READY\n");
+        pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+        repl();
+        p9_console_exit(0);
+        return 0;
+    }
     if (ovol != NULL && p9_space_o(ovol) < 0) {
         if (nativeboot || nativerepl)
             bootfailed("cannot open native O volume (see error above)");
@@ -272,8 +293,14 @@ int main(int argc, char **argv) {
                 p9_dprintf("PLAN2001-O: BOOT SUCCESS\n"
                     "PLAN2001-O: GE/O COMMIT SUCCESS\n"
                     "PLAN2001-O: REPL READY\n");
-                // Ctrl-D ends the friendly REPL but not init: reset to
-                // friendly REPL and read the keyboard again.
+                /* Console sessions are independent boot roots.  Ctrl-D
+                 * terminates this one process, never the system console or
+                 * another root.  Keep legacy single-REPL behavior unchanged. */
+                if (p9_console_is_session()) {
+                    pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+                    repl();
+                    p9_console_exit(0);
+                }
                 for (;;) {
                     pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
                     repl();

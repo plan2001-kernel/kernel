@@ -1,0 +1,43 @@
+name: Boot manifest v1 / independent processes
+on:
+  pull_request:
+    paths:
+      - 'boot/**'
+      - 'include/bootinfo.h'
+      - 'kernel/**'
+      - 'ge/storage/**'
+      - 'tools/host/build-kernel.py'
+      - 'tools/host/bootmanifest/**'
+      - '.github/workflows/boot-manifest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  amd64-manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build and QEMU dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-14 binutils clang lld file mtools ovmf qemu-system-x86 python3
+      - name: Build canonical kernel
+        run: CC=gcc-14 tools/build-gcc.sh --kernel -j 4
+      - name: Build native UEFI loader
+        run: tools/build-efi-gcc.sh -j 4
+      - name: Build MicroPython
+        run: CC=gcc-14 tools/build-mpy-gcc.sh -j 4
+      - name: Build GE/O host tools
+        run: tools/build.sh
+      - name: Boot manifest acceptance in QEMU/OVMF
+        run: bash tools/host/bootmanifest/run-bootmanifest.sh
+      - name: Upload QEMU diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-manifest-qemu
+          path: build/bootmanifest/run/
+          if-no-files-found: ignore

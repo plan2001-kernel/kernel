@@ -217,6 +217,16 @@ bootfdt(ulong *len)
 	return bootblob + bootinfo->fdtoff;
 }
 
+
+/* Optional manifest, retained inside the BootInfo allocation. */
+char*
+bootmanifest(void)
+{
+	if(bootinfo == nil || bootinfo->manifestlen == 0)
+		return nil;
+	return (char*)bootblob + bootinfo->manifestoff;
+}
+
 /* the plan9.ini text, NUL-terminated (checked by bootinfoinit()) */
 char*
 bootconfig(void)

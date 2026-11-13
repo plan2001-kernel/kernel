@@ -550,6 +550,7 @@ execcommit(Segment *ts, Segment *ds, Segment *bs, uintptr tstk,
 	 * processes and when no selector is configured.
 	 */
 	osbootrootrestore();
+	vconsoleexec(up);
 	kbdprocexec(up);
 	uartprocexec(up);
 }
