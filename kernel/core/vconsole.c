@@ -163,7 +163,8 @@ keyboardproc(void *arg)
 static void
 drain(Vconsole *c, int which, uvlong *seq)
 {
-    uvlong tail, n, s;
+    uvlong tail, s;
+    ulong n;
     char payload[OBJ_RING_DATA];
     Vobj *r = c->region[which];
 
