@@ -36,8 +36,10 @@ static int traceoutput;
 static int keyboardheld;
 static int keyctrl, keyalt, keyshift, keycaps, keye0;
 static char frame[OBJ_RING_DATA];
+static char kernelview[History];
 
 extern void fbconsolewrite(char*, int);
+extern int fbconsoleavailable(void);
 extern void (*screenputs)(char*, int);
 
 /* Kernel messages must stay in kmesg regardless of the visible session.
@@ -72,7 +74,6 @@ historyappend(Bootconsole *b, char *s, int n)
 static void
 showfocus(void)
 {
-	char kernelview[History];
 	long n, off;
 
 	fbconsolewrite("\033[2J\033[H", 7);
@@ -232,8 +233,8 @@ consoleworker(void *arg)
 
 	USED(arg);
 	keyboardheld = kbdscancodeacquire() == 0;
-	print("boot-console: SYSTEM READY framebuffer=1 keyboard=%d\n",
-		keyboardheld);
+	print("boot-console: SYSTEM READY framebuffer=%d keyboard=%d\n",
+		fbconsoleavailable(), keyboardheld);
 	for(;;){
 		for(i=0; i<Nbootconsole; i++){
 			Bootconsole *b = &consoles[i];

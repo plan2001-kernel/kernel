@@ -1600,9 +1600,9 @@ pexitcause(Proc *p)
 	return PcauseFault;
 }
 
-_Noreturn extern void bootconsoleexit(Proc*);
+extern void bootconsoleexit(Proc*);
 
-void
+_Noreturn void
 pexit(char *exitstr)
 {
 	Procstat *st;
