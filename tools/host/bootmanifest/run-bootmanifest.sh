@@ -47,8 +47,11 @@ mcopy -i "$QOB_OUT/esp.img" "$QOB_OUT/processes.conf" ::/processes.conf
 qob_make_disk "$QOB_OUT/o.img" "$QOB_OUT/disk.img" \
  "$QOB_OUT/esp.img" "$puuid" "$QOB_OUT/disk.layout"
 
+# The kernel now isolates user process stdout/stderr in session regions.
+# Do not demand MicroPython text on the kernel serial diagnostic channel;
+# the separate kernel-console QEMU test verifies actual REPL execution.
 if ! qob_boot_once "$QOB_OUT/disk.img" manifest \
- 'PLAN2001-O: SYSTEM IDLE' norepl '' 'PLAN2001-O: BOOT SUCCESS'; then
+ 'o: OEXECUTE oid=0x4f45584543000003' norepl '' 'o: OEXECUTE oid=0x4f45584543000003'; then
   qob_show_tail "$QOB_OUT/boot-manifest.log"
   qob_die "manifest boot failed: $QOB_BOOT_REASON"
 fi
@@ -63,8 +66,8 @@ for marker in [
     "boot-manifest: START memoryprobe source=memory cpu=1 required=0",
     "boot-manifest: START missing source=geo cpu=1 required=0",
     "boot-manifest: START python source=geo cpu=0 required=1",
-    "PLAN2001-O: BOOT SUCCESS",
-    "PLAN2001-O: SYSTEM IDLE",
+    "console: SystemConsole ready, 3 independent sessions",
+    "console: session python pid=",
 ]:
     assert marker in s, f"missing marker: {marker}"
 assert "panic:" not in s, "kernel panic"
