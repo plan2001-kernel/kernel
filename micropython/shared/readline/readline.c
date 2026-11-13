@@ -80,14 +80,19 @@ static void mp_hal_move_cursor_back(uint pos) {
         // fast path for most common case of 1 step back
         mp_hal_stdout_tx_strn("\b\b\b\b", pos);
     } else {
-        char vt100_command[6];
-        // snprintf needs space for the terminating null character
-        int n = snprintf(&vt100_command[0], sizeof(vt100_command), "\x1b[%u", pos);
-        if (n > 0) {
-            assert((unsigned)n < sizeof(vt100_command));
-            vt100_command[n] = 'D'; // replace null char
-            mp_hal_stdout_tx_strn(vt100_command, n + 1);
-        }
+        // Build the decimal count directly: the port's snprint uses a
+        // different unsigned format from standard snprintf.
+        char vt100_command[3 * sizeof(uint) + 3];
+        char *end = vt100_command + sizeof(vt100_command);
+        char *p = end;
+        *--p = 'D';
+        do {
+            *--p = '0' + pos % 10;
+            pos /= 10;
+        } while (pos != 0);
+        *--p = '[';
+        *--p = '\x1b';
+        mp_hal_stdout_tx_strn(p, end - p);
     }
 }
 
