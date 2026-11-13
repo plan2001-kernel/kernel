@@ -194,6 +194,20 @@ p9_console_native(int on)
 void
 p9_console_probe(void)
 {
+	/* Manifest boot: the kernel owns focus, keyboard and three region
+	 * streams.  Open only our own process-local capability grants. */
+	int ih = console_open(ObjConsoleSessionInput);
+	if(ih >= 0){
+		int oh = console_open(ObjConsoleSessionOutput);
+		int dh = console_open(ObjConsoleSessionDiag);
+		if(oh >= 0 && dh >= 0 && p9_console_attach(ih, oh, dh) == 0){
+			nativeout = 0;
+			return;
+		}
+		if(dh >= 0) obj_close(dh);
+		if(oh >= 0) obj_close(oh);
+		obj_close(ih);
+	}
 	if(nativeout == 0){
 		if(outh < 0)
 			outh = console_open(Iohout);

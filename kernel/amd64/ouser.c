@@ -139,6 +139,8 @@ manifestarg(Bootproc *b, char *arg)
 
 static void manifestparse(void);
 static void manifeststart(void);
+extern void bootconsolestart(void);
+extern int bootconsolecreate(int, char*, ulong);
 
 
 /*
@@ -340,7 +342,11 @@ ouserproc(void *arg)
 	up->kp = 0;
 	up->noswap = 0;
 	up->privatemem = 0;
-	up->iomask = Iomout|Iomdiag;
+	/* Manifest processes must never bypass the kernel's selected viewport. */
+	up->iomask = bp == nil ? Iomout|Iomdiag : 0;
+	if(bp != nil && bootconsolecreate((int)(bp-manifestprocs),
+	    bp->name, up->pid) < 0)
+		error("boot console session allocation failed");
 	procpriority(up, PriNormal, 0);
 	procsetup(up);
 
@@ -698,6 +704,7 @@ manifeststart(void)
 	ownerinit();
 	/* Do not register an unrelated implicit default program. */
 	ownerprogrambootprepare(0);
+	bootconsolestart();
 	for(i=0; i<manifestnprocs; i++){
 		b = &manifestprocs[i];
 		print("boot-manifest: START %s source=%s cpu=%d required=%d\n",

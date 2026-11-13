@@ -437,6 +437,15 @@ fbconsoleputs(char *s, int n)
 	unlock(&fbconsolelock);
 }
 
+/* Explicit kernel framebuffer sink for boot-session focus and restore.
+ * The ordinary screenputs hook is owned by SystemConsole routing. */
+void
+fbconsolewrite(char *s, int n)
+{
+	if(inited)
+		fbconsoleputs(s, n);
+}
+
 void
 fbconsoleinit(void)
 {

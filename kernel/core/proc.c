@@ -1600,7 +1600,9 @@ pexitcause(Proc *p)
 	return PcauseFault;
 }
 
-_Noreturn void
+_Noreturn extern void bootconsoleexit(Proc*);
+
+void
 pexit(char *exitstr)
 {
 	Procstat *st;
@@ -1639,6 +1641,7 @@ pexit(char *exitstr)
 	qunlock(&up->debug);
 
 	oprocexit(up);
+	bootconsoleexit(up);
 	vobjprocexit(up);
 	kbdprocexit(up);
 	uartprocexit(up);

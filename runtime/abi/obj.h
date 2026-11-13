@@ -347,6 +347,15 @@ typedef struct ObjId {
 	unsigned long long	oid;
 } ObjId;
 
+/* Manifest boot console streams are process-local capability region grants.
+ * Only the manifest process PID can open its own session; not an OwnerID.
+ * The old native output streams remain valid only for non-manifest boots. */
+enum {
+	ObjConsoleSessionInput = 3,
+	ObjConsoleSessionOutput = 4,
+	ObjConsoleSessionDiag = 5,
+};
+
 /* obj_open(ObjOpenConsole): bind one native process output stream.  stream
  * is Iohout=1 or Iohdiag=2; the authority is the Proc's existing iomask.
  * The returned Handle carries Vwrite and is the replacement for the retired

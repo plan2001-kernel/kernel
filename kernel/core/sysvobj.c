@@ -3586,6 +3586,8 @@ vobjioctl(int handle, uvlong op, void *data, long len, uvlong arg0)
     return 0;
 }
 
+extern int bootconsolegrant(int, uvlong, VobjId*);
+
 /*
  * Native console provider.  It replaces the retired IOWRITE(62) entry point
  * with an ordinary process-local capability.  Authority comes from the same
@@ -3607,6 +3609,9 @@ vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id)
 	memmove(&cr, req, sizeof cr);
 	if(cr.reserved != 0)
 		error(Ebadarg);
+	if(cr.stream >= ObjConsoleSessionInput &&
+	   cr.stream <= ObjConsoleSessionDiag)
+		return bootconsolegrant(cr.stream, rights, id);
 	if(cr.stream != Iohout && cr.stream != Iohdiag)
 		error(Ebadarg);
 	if(!iowriteok(cr.stream))

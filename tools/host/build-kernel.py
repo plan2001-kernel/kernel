@@ -96,6 +96,7 @@ KERNEL_SOURCES = {
     "bootargs": "kernel/core/bootargs.c",
     "bootfb": "kernel/core/bootfb.c",
     "bootinfo": "kernel/core/bootinfo.c",
+    "bootconsole": "kernel/amd64/bootconsole.c",
     "chan": "kernel/core/chan.c",
     "cons": "kernel/core/cons.c",
     "ec": "kernel/amd64/ec.c",
