@@ -249,3 +249,49 @@ Current `SYSCTL(144)` covers system/own-process inspection and configuration;
 object operations. Their exact records and rights remain in current headers.
 Low-level device and scheduler mechanisms remain necessary. ARM64 currently
 has early boot only; this AMD64 interface is not ARM64 feature parity.
+
+
+## Boot process manifest (v1)
+
+On AMD64, `plan9.ini` can contain `bootmanifest=/processes.conf`. The
+UEFI loader reads the separate LF-terminated file from its boot EFI volume,
+limits it to 16 KiB, and passes it as a distinct NUL-terminated section of
+the shared `BootInfo` v1 blob. A missing named manifest aborts the boot
+instead of silently using a different startup configuration. Without
+`bootmanifest=`, the original `obootexec` behavior is unchanged.
+
+The file is text with `version=1` followed by one to eight named entries.
+Each entry is `[process.NAME]` with required `source=` and `owner=` and
+optional `cpu=`, `args=` and `required=true|false` fields. For example:
+
+```ini
+version=1
+[process.python]
+source=geo:PARTUUID=11111111-1111-1111-1111-111111111111:OID=0x4f45584543000003
+owner=python
+cpu=0
+args=-N
+required=true
+[process.probe]
+source=memory:selftest
+owner=probe
+required=false
+```
+
+The kernel starts each entry as a separate kernel-created process root,
+not as a child of an init user process. A GE/O program receives a separate
+embedded loader, which obtains its own volume Handle and replaces itself
+with the executable addressed by OID. `memory:selftest` is a small
+embedded executable for CI that exits immediately, **not** a rescue
+console. A process failing to load or exiting does not halt unrelated
+manifest processes. `required` is currently a diagnostic label, not a
+dependency or automatic-restart policy.
+
+Current scope is one activated GE/O volume with a matching PARTUUID
+across all `geo:` entries. Additional GE/O volumes and network source
+resolvers are **not implemented**. Malformed manifests or unsupported
+source types are rejected as boot-configuration errors. This v1 manifest
+is **not authenticated**; UEFI Secure Boot, signed manifest verification,
+kernel hash checking and executable hash checking remain separate
+security work. Neither its source bytes nor the process owner strings
+must be interpreted as cryptographic authority.

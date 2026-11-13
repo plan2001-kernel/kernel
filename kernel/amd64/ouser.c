@@ -92,6 +92,19 @@ struct Bootproc {
 
 static Bootproc manifestprocs[ManifestMaxprocs];
 static int manifestnprocs;
+static QLock bootconslk;
+static int bootconsready;
+
+static void
+bootconsinit(void)
+{
+	qlock(&bootconslk);
+	if(!bootconsready){
+		consinit();
+		bootconsready = 1;
+	}
+	qunlock(&bootconslk);
+}
 
 static int
 manifestname(char *s)
@@ -239,7 +252,7 @@ ouserproc(void *arg)
 
 	bp = arg;
 	/* No legacy Dev init on this path: start the Dev-independent services. */
-	consinit();
+	bootconsinit();
 	if(waserror()){
 		if(bp != nil){
 			print("boot-manifest: FAIL %s: %s\n", bp->name, up->errstr);
@@ -394,7 +407,7 @@ static void
 kernelreadyproc(void *arg)
 {
 	USED(arg);
-	consinit();
+	bootconsinit();
 	if(okernelvol(obootvol) != 1)
 		panic("o-server: kernel-only O volume open failed");
 	/* Let the remaining boot services finish before printing the
@@ -633,8 +646,6 @@ manifestparse(void)
 		b = &manifestprocs[i];
 		if((b->seen & 3) != 3 || b->kind == 0)
 			panic("boot-manifest: incomplete process entry");
-		if(b->cpu >= 0 && !proccpuonline(b->cpu))
-			panic("boot-manifest: offline cpu in process entry");
 		if(b->kind == SourceMemory){
 			if(b->seen & 8)
 				panic("boot-manifest: memory selftest has no args");
@@ -649,10 +660,11 @@ manifestparse(void)
 			obootvollen = strlen(obootvol);
 		}
 		if(b->oid == MpyOid){
-			manifestarg(b, "micropython");
-			manifestarg(b, "-O");
-			manifestarg(b, b->volspec);
-			manifestarg(b, b->argline[0] ? b->argline : "-N");
+			if(manifestarg(b, "micropython") < 0 ||
+			   manifestarg(b, "-O") < 0 ||
+			   manifestarg(b, b->volspec) < 0 ||
+			   manifestarg(b, b->argline[0] ? b->argline : "-N") < 0)
+				panic("boot-manifest: invalid MicroPython arguments");
 		}else{
 			if(manifestarg(b, b->name) < 0)
 				panic("boot-manifest: invalid argv");
@@ -670,6 +682,8 @@ manifestparse(void)
 				if(manifestarg(b, v) < 0)
 					panic("boot-manifest: too many args");
 				*q = n;
+				if(n == 0)
+					break;
 			}
 		}
 	}
