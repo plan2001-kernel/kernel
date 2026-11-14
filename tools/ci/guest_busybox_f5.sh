@@ -115,6 +115,17 @@ cat > "$REPORTS/busybox-f5-guest.md" <<'EOF'
 - **PASS:** Real PS/2 input and kernel VGA verify pwd, cd and a separately spawned `ls` applet, errors, root confinement, F1 isolation and F5 focus restore.
 - **PASS:** First boot ends in /usr/bin. Second distinct QEMU boot reuses the exact same scratch GE/O disk, executes init again, and enters / (pwd confirms).
 - **LIMITATION:** Supervisor and Unix init are separate native processes, but the F5 evaluator within init is NOT BusyBox ash/sh or a POSIX TTY.
-- **NOT RUN:** Writable GE/O user files, hardware, crash recovery; this manifest enables Vexecute but does not supply a storage manifest selector.
+- **NOT RUN:** Physical hardware, full POSIX tty, BusyBox ash, and crash-recovery certification.
 EOF
+if [ -n "${UX_GEO_PERSIST:-}" ]; then
+  cat >> "$REPORTS/busybox-f5-guest.md" <<'EOF'
+- **PASS:** A separate native UXRPC client and the F5 shell use the same GE/O-backed UxService and checked persistent manifest.
+- **PASS:** The child writes a file, the shell reads it, and a new child and shell both read it after a second cold QEMU boot using the same GE/O disk.
+- **PASS:** The child receives only four attenuated UXPIPE region grants (no volume Handle), and writes outside the normalized /tmp policy are denied.
+EOF
+else
+  cat >> "$REPORTS/busybox-f5-guest.md" <<'EOF'
+- **NOT RUN in this console-only mode:** GE/O file-service persistence; see the separate Unix GE/O persistence workflow.
+EOF
+fi
 echo "Native unix-init / F5 shell real VGA + cold-boot reset QEMU test PASS"
