@@ -15,6 +15,7 @@
 #include "plan2001_full.h"
 #include "../../unix/uxpipe.h"
 #include <fcntl.h>
+#include <dirent.h>
 
 extern int _fstat(int fd, struct stat *st);
 extern int _open(const char *path, int flags, ...);
@@ -58,6 +59,24 @@ static void check_uxfiles(void)
         check(getcwd(cwd,sizeof cwd)==cwd && strcmp(cwd,"/")==0,
               "Newlib getcwd PVD root");
         check(mkdir("/tmp/ash",0700)==0,"Newlib mkdir PVD directory");
+        {
+            DIR *directory=opendir("/tmp");
+            struct dirent *item;
+            int seen=0;
+            check(directory!=NULL,"POSIX opendir authorized /tmp");
+            while((item=readdir(directory))!=NULL) {
+                if(strcmp(item->d_name,"ash")==0 && item->d_type==DT_DIR)
+                    ++seen;
+            }
+            check(seen==1,"POSIX readdir lists real UXFS directory");
+            rewinddir(directory);
+            check(readdir(directory)!=NULL,"POSIX rewinddir");
+            errno=0;
+            check(dirfd(directory)==-1 && errno==ENOSYS,
+                  "do not manufacture a directory FD");
+            check(closedir(directory)==0,"POSIX closedir");
+        }
+
         check(chdir("/tmp/ash")==0,"Newlib chdir PVD directory");
         check(getcwd(cwd,sizeof cwd)==cwd &&
               strcmp(cwd,"/tmp/ash")==0,"Newlib getcwd changed PVD");
@@ -108,6 +127,10 @@ static void check_uxfiles(void)
     errno=0;
     check(getcwd(buffer,sizeof(buffer))==NULL && errno==ENOSYS,
           "without file service Newlib has no implicit cwd authority");
+    errno=0;
+    check(opendir("/tmp")==NULL && errno==ENOSYS,
+          "without file service there is no ambient directory authority");
+
     printf("PLAN2001-NEWLIB-FULL-UXFILE-PASS\n");
     fflush(stdout);
 }
