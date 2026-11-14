@@ -13,6 +13,7 @@
 #include <sys/time.h>
 #include "obj.h"
 #include "plan2001_full.h"
+#include "../../unix/uxfd.h"
 #include "../../unix/uxpipe.h"
 #include <fcntl.h>
 #include <dirent.h>
