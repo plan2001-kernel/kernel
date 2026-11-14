@@ -61,8 +61,6 @@ CFLAGS = [
 # dispatch-tracing kernel without changing the normal canonical build.
 if os.environ.get("PLAN2001_SYSCALL_TRACE") == "1":
     CFLAGS.append("-DPLAN2001_SYSCALL_TRACE")
-if os.environ.get("PLAN2001_ALARM_NOTETEST") == "1":
-    CFLAGS.append("-DPLAN2001_ALARM_NOTETEST")
 # Opt-in Pgrp/OContext live-allocation tracing for lifecycle diagnostics.
 if os.environ.get("PLAN2001_LIFECYCLE_DIAG") == "1":
     CFLAGS.append("-DPLAN2001_LIFECYCLE_DIAG")
