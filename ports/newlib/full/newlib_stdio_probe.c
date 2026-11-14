@@ -16,6 +16,9 @@
 #include "../../unix/uxpipe.h"
 #include <fcntl.h>
 #include <dirent.h>
+#include <sys/utsname.h>
+#include <poll.h>
+#include <termios.h>
 
 extern int _fstat(int fd, struct stat *st);
 extern int _open(const char *path, int flags, ...);
@@ -221,6 +224,22 @@ int main(int argc, char **argv)
     check(_sbrk(0) != (void *)-1, "BRK_ used by Newlib allocator");
     check(sbrk(0) == _sbrk(0), "sbrk POSIX forward shares break");
 
+    {
+        struct utsname uts;
+        struct termios attr;
+        check(uname(&uts)==0 &&
+              strcmp(uts.sysname,"Plan2001")==0 &&
+              strcmp(uts.machine,"x86_64")==0,
+              "ash uname Plan2001 target identity");
+        errno=0;
+        check(poll(NULL,0,0)==-1 && errno==ENOSYS,
+              "ash poll must not claim a nonexistent fd event service");
+        errno=0;
+        check(tcgetattr(1,&attr)==-1 && errno==ENOTTY,
+              "ash must not claim tty control on native console");
+        printf("PLAN2001-NEWLIB-ASH-POSIX-PASS\\n");
+        fflush(stdout);
+    }
     check(snprintf(tmp, sizeof tmp, "answer:%d:%s", 42, "newlib") == 16,
           "snprintf length");
     check(strcmp(tmp, "answer:42:newlib") == 0, "snprintf content");
