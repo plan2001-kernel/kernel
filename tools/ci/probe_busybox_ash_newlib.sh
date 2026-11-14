@@ -55,7 +55,8 @@ import sys
 p=Path(sys.argv[1])
 s=p.read_text()
 for name in ("HAVE_MNTENT_H", "HAVE_SYS_STATFS_H",
-             "HAVE_NET_ETHERNET_H", "HAVE_DEV_FD"):
+             "HAVE_NET_ETHERNET_H", "HAVE_DEV_FD",
+             "HAVE_UNLOCKED_LINE_OPS", "HAVE_UNLOCKED_STDIO"):
     old=f"#define {name} 1"
     if old not in s:
         raise SystemExit(f"unexpected BusyBox upstream platform.h: {name}")
