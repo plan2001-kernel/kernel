@@ -7,7 +7,10 @@ on:
       - 'ports/busybox/**'
       - 'tests/host/**'
       - 'tools/ci/test_unix_stages.sh'
-      - 'tools/ci/probe_busybox_ash.py'
+      - 'tools/ci/probe_busybox_ash_newlib.sh'
+      - 'tools/ci/build_newlib_libc.sh'
+      - 'ports/newlib/ash/**'
+      - 'ports/newlib/full/**'
   workflow_dispatch:
 
 permissions:
@@ -57,32 +60,44 @@ jobs:
           gcc -std=c11 -O2 -Wall -Wextra -Werror \
             -ffreestanding -nostdinc -fno-builtin -Iports/unix \
             -c ports/unix/fnmatch.c -o "$RUNNER_TEMP/native-fnmatch.o"
-      - name: Attempt actual upstream shell/ash.c against freestanding port
-        shell: bash
+      - name: Install pinned upstream Newlib build requirements
         run: |
-          set +e
-          gcc -std=gnu11 -ffreestanding -nostdinc -fno-builtin \
-            -Iports/busybox -Iports/unix -c "$RUNNER_TEMP/busybox/shell/ash.c" \
-            -o "$RUNNER_TEMP/ash.o" > "$RUNNER_TEMP/ash.log" 2>&1
-          status=$?
-          set -e
-          echo '## Stage 5: BusyBox ash native compile attempt' >> "$GITHUB_STEP_SUMMARY"
-          echo "Compiler exit status: $status" >> "$GITHUB_STEP_SUMMARY"
-          echo 'This must not be mistaken for an upstream ash port: stage 7 uses a separate limited evaluator.' >> "$GITHUB_STEP_SUMMARY"
-          sed -n '1,80p' "$RUNNER_TEMP/ash.log" | tee "$RUNNER_TEMP/ash-summary.txt"
-          if [ "$status" -ne 0 ]; then
-            echo '**BLOCKED:** libbb/header/target-libc dependencies still missing.' >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo 'Compile succeeded; a native static link and guest execution still need verification.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Store upstream ash diagnostic
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-14 g++-14 autoconf automake libtool texinfo flex bison
+
+      - name: Build upstream Newlib 4.6.0 headers and genuine libc
+        run: |
+          bash tools/ci/build_newlib_libc.sh \
+            "$RUNNER_TEMP/newlib-pinned" "$RUNNER_TEMP/ash-newlib-reports"
+
+      - name: Compile ORIGINAL BusyBox ash with real Newlib POSIX sysroot
+        run: |
+          bash tools/ci/probe_busybox_ash_newlib.sh \
+            "$RUNNER_TEMP/busybox" "$RUNNER_TEMP/ash-newlib-reports" \
+            "$RUNNER_TEMP/ash-newlib-reports/ash-probe"
+
+      - name: Publish ash compilation and POSIX interface audit
+        if: always()
+        run: |
+          for p in "$RUNNER_TEMP/ash-newlib-reports/newlib-full-build.md" \
+                   "$RUNNER_TEMP/ash-newlib-reports/ash-probe/ash-newlib-summary.md"; do
+            if [ -f "$p" ]; then
+              cat "$p" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "**NOT COMPLETED:** $p" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Store upstream ash/Newlib real-sysroot diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage5-ash-compiler-diagnostic
+          name: stage5-ash-newlib-posix-compiler
           path: |
-            ${{ runner.temp }}/ash.log
-            ${{ runner.temp }}/ash-summary.txt
+            ${{ runner.temp }}/ash-newlib-reports/newlib-full-build.log
+            ${{ runner.temp }}/ash-newlib-reports/newlib-full-build.md
+            ${{ runner.temp }}/ash-newlib-reports/ash-probe/*
           if-no-files-found: warn
 
   stage6-spawn:
