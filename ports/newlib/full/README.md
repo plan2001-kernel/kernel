@@ -62,8 +62,8 @@ because they take milliseconds, unlike POSIX sleep(seconds).
 | dup/dup2/fcntl | Shared offsets, independent descriptor flags, bounded allocation |
 | pipe | Two native-region UXPIPE endpoints; reference-counted close and EOF |
 | lseek | ESPIPE for streams |
-| getpid | Own-process SYSCTL process info |
-| pathname/process/signal POSIX calls | Explicit errors, not fake success |
+| getpid | Unix projected PID, native SYSCTL for standalone processes |
+| fork/execve/waitpid/signals | Bounded [userspace process projection](../../../docs/UNIX-PROCESS.md) |
 
 ## Deliberate limitations
 
@@ -72,11 +72,12 @@ The library is configured single-threaded; TLS, concurrency and all
 optional APIs are not certified. stdin needs an explicit granted Region
 and stdout/stderr native console authority; children do not inherit
 rights automatically. Explicitly attached UXFS services supply file backends;
-the bounded descriptor table supports local redirection and UXPIPEs. Child
-descriptor delegation and Unix TTY semantics remain unimplemented.
-Native EXITS preserves success versus failure but not
-the exact numeric POSIX exit code. sbrk does not shrink. POSIX alarm,
-fork/exec, signals and arbitrary files are not implemented.
+the bounded descriptor table supports redirection, UXPIPE inheritance, and
+shared volatile file descriptions across fork/exec. Persistent UxService
+callbacks and Unix TTY semantics remain outside this inheritance profile.
+The Unix runtime encodes exact exit codes in native EXITS messages; foreign
+native applications retain their success/failure distinction. sbrk does not
+shrink. Process-group selectors and terminal job control are not implemented.
 
 No kernel ABI changes, physical hardware tests or full GNU/BusyBox
 Newlib linking were made. The prior Newlib-subset/libgloss QEMU tests

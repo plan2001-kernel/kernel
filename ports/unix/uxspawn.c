@@ -25,12 +25,12 @@ int uxspawn_start(const UxLaunch *launch, char **argv, int argc)
     opts.flags = 2;             /* native Oinheritv */
     opts.nhandles = launch->grant_count;
     for (i = 0; i < launch->grant_count; ++i) {
-        UxRights rights = launch->grant[i].rights;
+        UxRights rights = launch->grant[i].rights & ~(UxRights)Vdelegate;
         UxRights stream = Vread|Vwrite|Vmeta;
         UxRights storage = Vread|Vwrite|Vcreate|Vcommit|Vmeta;
         UxRights execution = Vexecute|Vmeta;
         if (launch->grant[i].handle <= 0 || !rights ||
-            (rights & (Vdelegate|Vcontrol)) != 0)
+            (rights & Vcontrol) != 0)
             return -1;
         /* Attenuated stream, complete storage transaction or executable
          * authority. The kernel independently checks the source Handle's

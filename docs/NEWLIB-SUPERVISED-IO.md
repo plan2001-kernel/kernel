@@ -14,17 +14,22 @@ descriptor projection: `read(0)`, `write(1)`, `write(2)`, `close()`, and
 the kernel's own `SYSCTL(SysctlHandleList)` on the **calling process**, not
 raw Handle guesses or a Unix kernel syscall. An inherited stream set is
 accepted only if it contains exactly these six region grants in order,
-plus one independent execute-only GE/O volume Handle:
+plus one independent executable GE/O volume Handle:
 
 | Region index | Stream | Child rights |
 | --- | --- | --- |
-| 0 | stdin data | `Vread` |
-| 1 | stdin ACK | `Vwrite` |
-| 2 | stdout data | `Vwrite` |
-| 3 | stdout ACK | `Vread` |
-| 4 | stderr data | `Vwrite` |
-| 5 | stderr ACK | `Vread` |
-| other | executable volume | `Vexecute` |
+| 0 | stdin data | `Vread`, `Vdelegate` |
+| 1 | stdin ACK | `Vwrite`, `Vdelegate` |
+| 2 | stdout data | `Vwrite`, `Vdelegate` |
+| 3 | stdout ACK | `Vread`, `Vdelegate` |
+| 4 | stderr data | `Vwrite`, `Vdelegate` |
+| 5 | stderr ACK | `Vread`, `Vdelegate` |
+| other | executable volume | `Vexecute`, `Vdelegate` |
+
+The supervisor grants Vdelegate only on these newly created streams and its
+explicit executable capability, allowing Unix children to delegate them again.
+The kernel console grants remain nondelegable. Attenuated streams without
+Vdelegate still bind for I/O but cannot cross a later fork.
 
 No inherited regions means *standalone* Newlib startup: its pre-existing
 explicit stdin-ring API and authorized native console probes remain usable.
@@ -64,6 +69,6 @@ exit(0)/exit(7) Process Handle tests still run independently.
 An initial successful real guest run:
 https://github.com/plan2001-kernel/userland/actions/runs/43615955994
 
-**Not claimed:** POSIX terminal/job control, full ash, general Unix
+**Not claimed:** POSIX terminal/job control, full ash, general persistent Unix
 file-service RPC between processes, multi-threaded Newlib, or physical
 hardware. The existing kernel ABI and capability model are unchanged.

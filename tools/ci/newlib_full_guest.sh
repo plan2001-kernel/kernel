@@ -2,14 +2,20 @@
 # Boot an unchanged-source newlib-full probe in the real Plan2001 AMD64 QEMU guest.
 # No existing GE/O volumes are touched.
 set -euo pipefail
-if [ "$#" -ne 3 ]; then
-  echo "usage: guest_newlib-full.sh KERNEL_SOURCE NATIVE_ELF REPORT_DIR" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+  echo "usage: guest_newlib-full.sh KERNEL_SOURCE NATIVE_ELF REPORT_DIR [full|process]" >&2
   exit 2
 fi
 KERNEL=$(cd "$1" && pwd)
 TARGET=$(realpath "$2")
 REPORTS=$(mkdir -p "$3" && cd "$3" && pwd)
-OUT="$REPORTS/qemu-newlib-full"
+MODE=${4:-full}
+case "$MODE" in
+  full) MARKER=PLAN2001-NEWLIB-FULL-PASS ;;
+  process) MARKER=PLAN2001-PROCESS-PASS ;;
+  *) echo "Unknown probe mode: $MODE" >&2; exit 2 ;;
+esac
+OUT="$REPORTS/qemu-newlib-$MODE"
 mkdir -p "$OUT"
 [ -r "$TARGET" ] || { echo "Missing native newlib-full ELF" >&2; exit 1; }
 export QEMU_O_BOOT_LIB=1
@@ -47,13 +53,25 @@ qob_make_esp "$OUT/plan9.ini" "$OUT/esp.img"
 qob_make_disk "$OUT/o.img" "$OUT/disk.img" "$OUT/esp.img" \
   "$puuid" "$OUT/disk.layout"
 if ! qob_boot_once "$OUT/disk.img" newlib-fullboot \
-      'PLAN2001-NEWLIB-FULL-PASS' norepl "" ""; then
+      "$MARKER" norepl "" ""; then
   echo "newlib-full QEMU guest FAILED: $QOB_BOOT_REASON" >&2
   tail -90 "$OUT/boot-newlib-fullboot.log" >&2 || true
   exit 1
 fi
 log="$OUT/boot-newlib-fullboot.log"
 grep -aqF 'o: OEXECUTE oid=0x4f45584543000003' "$log"
+if [ "$MODE" = process ]; then
+  grep -aqF 'PLAN2001-PROCESS-FORK-EXEC-WAIT-PASS' "$log"
+  grep -aqF 'PLAN2001-PROCESS-SIGNALS-PASS' "$log"
+  grep -aqF 'PLAN2001-PROCESS-STDIO-PASS' "$log"
+  grep -aqF 'PLAN2001-PROCESS-SIGLONGJMP-PASS' "$log"
+  grep -aqF 'PLAN2001-PROCESS-FILES-PASS' "$log"
+  if grep -aqF 'PLAN2001-PROCESS-FAIL' "$log"; then
+    echo 'Native process probe emitted failure marker' >&2; exit 1
+  fi
+  echo "Native Plan2001/QEMU fork, exec, wait and asynchronous signals PASS ($log)"
+  exit 0
+fi
 for op in PRINTF MALLOC LIBM TIME ERRNO STDIN FD UXPIPE UXFILE; do
   grep -aqF "PLAN2001-NEWLIB-FULL-$op-PASS" "$log"
 done

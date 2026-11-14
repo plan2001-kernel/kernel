@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include "process.h"
 
 extern int _read(int, char *, int);
 extern int _write(int, const char *, int);
@@ -135,16 +136,27 @@ int kill(pid_t pid, int sig)
  * during link; do not export it with the POSIX name and wrong units.
  */
 extern long p9_native_sleep_millis(long);
+extern unsigned long long _nsec(void);
 
 unsigned int sleep(unsigned int seconds)
 {
     unsigned int remaining = seconds;
+    (void)p9_process_interrupted();
     while(remaining != 0) {
         /* Bound the milliseconds argument and avoid overflow. */
         unsigned int chunk = remaining > 2147483u ? 2147483u : remaining;
-        if(p9_native_sleep_millis((long)chunk * 1000L) < 0) {
-            errno = EINTR;
-            return remaining;
+        unsigned long long start=_nsec();
+        unsigned long long duration=(unsigned long long)chunk*1000000000ULL;
+        for(;;) {
+            unsigned long long elapsed=_nsec()-start;
+            unsigned tick=p9_process_tick();
+            if(elapsed>=duration) break;
+            if(p9_native_sleep_millis((long)((duration-elapsed+999999)/1000000))>=0) break;
+            if(tick!=p9_process_tick() && !p9_process_has_interrupt()) continue;
+            elapsed=_nsec()-start;
+            errno=EINTR;
+            return remaining-chunk+(elapsed>=duration ? 0 :
+                (unsigned)((duration-elapsed+999999999ULL)/1000000000ULL));
         }
         remaining -= chunk;
     }

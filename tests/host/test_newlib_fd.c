@@ -7,7 +7,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <signal.h>
 #include "../../ports/newlib/full/fd_backend.h"
+#include "../../ports/newlib/full/process.h"
+#include "../../ports/unix/uxfd.h"
+#include "sysctl.h"
 
 extern int _open(const char *,int,...), _close(int);
 extern int _read(int,char *,int), _write(int,const char *,int);
@@ -16,6 +20,17 @@ extern int _fstat(int,struct stat *);
 extern void p9_full_close_descriptors(void);
 static int backend_used, closes, offset, region_count, fail_create, attempts;
 static void *regions[64];
+int p9_process_interrupted(void) { return 0; }
+void p9_process_enter(void) {}
+void p9_process_leave(void) {}
+UxFdTable *p9_backend_files(void) { return NULL; }
+int p9_backend_stream(int fd,int handles[2],int *role)
+{ (void)fd; (void)handles; (void)role; errno=ENOTSUP; return -1; }
+int p9_file_export(P9Plan *p) { (void)p; return -1; }
+int p9_file_import(int handle) { (void)handle; return -1; }
+int p9_file_ref(int fd,int delta) { (void)fd; (void)delta; return -1; }
+long sysctl(unsigned scope,unsigned operation,SysctlReq *req,long size)
+{ (void)scope; (void)operation; (void)req; (void)size; return -1; }
 int p9_backend_open(const char *path,int flags,...)
 {
     (void)path; (void)flags;
@@ -85,6 +100,7 @@ int main(void)
     int fd, alias, saved, p[2], copy, fds[32], n=0;
     char c, bytes[8];
     struct stat st;
+    assert(signal(SIGPIPE,SIG_IGN)!=SIG_ERR);
     fd=_open("file",O_RDWR);
     assert(fd==3);
     alias=fcntl(fd,F_DUPFD,8);

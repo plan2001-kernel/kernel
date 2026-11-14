@@ -214,10 +214,10 @@ int uxsupervisor_run(unsigned long long child_oid,
     for(i=0;i<6;++i) {
         launch.grant[i].handle=proxy.handles[i];
         launch.grant[i].rights=
-            i==0 || i==3 || i==5 ? Vread : Vwrite;
+            (i==0 || i==3 || i==5 ? Vread : Vwrite)|Vdelegate;
     }
     launch.grant[6].handle=exec;
-    launch.grant[6].rights=Vexecute;
+    launch.grant[6].rights=Vexecute|Vdelegate;
     launch.grant_count=7;
     if (storage>0) {
         launch.grant[7].handle=storage;

@@ -114,7 +114,7 @@ int main(int argc, char **argv)
         if (n<0 || n>16) exits("unix-child: missing inherited grants");
         for(i=0;i<(unsigned int)n;++i) {
             if(grants[i].kind!=VkindGeVolume) continue;
-            if(grants[i].rights==Vexecute) {
+            if((grants[i].rights&~Vdelegate)==Vexecute) {
                 ++exec_count;
                 storage.executable_volume=(int)grants[i].handle;
             }else if(grants[i].rights==

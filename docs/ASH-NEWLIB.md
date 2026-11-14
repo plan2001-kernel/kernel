@@ -1,8 +1,8 @@
 # BusyBox ash / Newlib POSIX compatibility on Plan2001
 
 This document distinguishes a reproducible **upstream ash source compilation**
-from a functional Unix shell. The former is tested; the latter still requires
-userspace process, descriptor and signal work. The kernel capability ABI is
+from a functional Unix shell. The former is tested; the latter also requires
+full multicall linkage and integration beyond these compilation checks. The kernel capability ABI is
 unchanged.
 
 ## Pinned sources and build
@@ -41,15 +41,14 @@ In `ports/newlib/full/plan2001_syscalls.c` and `posix_forward.c`:
   offsets while keeping descriptor flags independent. The lowest unused
   descriptor is reused, including 0/1/2 after close. `F_SETFL` rejects
   changes to append/nonblocking status with `ENOSYS`; opening a nonblocking
-  description is also unsupported. CLOEXEC is recorded for a future exec
-  adapter, not evidence that exec is implemented.
+  description is also unsupported. CLOEXEC is applied by the exec adapter.
 - `pipe` allocates two native regions and exposes UXPIPE reader/writer
   descriptions. The last writer close publishes EOF; duplicated writers
   retain the endpoint. The last reader close disconnects; the pair's maps
   and Handles are released after both endpoints close. Process exit closes
-  all descriptions. This covers local descriptors; exporting them through
-  RFORKEX/SPAWN with correct writer mapping ownership is still required.
-  A disconnected write reports `EPIPE`; SIGPIPE delivery remains pending.
+  all descriptions. RFORKEX/SPAWN inheritance uses explicit grants and
+  transient writer-mapping leases. A disconnected write raises SIGPIPE and
+  reports `EPIPE` if the signal disposition permits return.
 - `chdir`, `getcwd` and `mkdir` operate on the same PVD and UXFS instance.
   `getcwd(NULL,0)` allocates a copy using Newlib `malloc`.
 - `rename` is bounded to UXFS regular-file moves; `access(F_OK)` tests
@@ -88,21 +87,19 @@ allow shell code to corrupt descriptor state or infer false privileges.
 [newlib-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43625250523
 [geo-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43619613723
 
-## Still not implemented or validated
+## Process and signal adapter
 
-The source-level symbol audit in
-`ash-probe/ash-process-blockers.txt` lists
-`fork`, `execve`, `waitpid`, `pipe`, `dup2`, `fcntl`,
-`sigaction`, `sigprocmask`, and `sigsuspend`. This is an unresolved-reference
-inventory of the ash objects, not a current implementation-status list:
-the descriptor operations above now have target implementations.
-Native Plan2001 SPAWN and UXPIPE exist, but must be adapted to POSIX
-process tracking, descriptor inheritance/duplication and signal semantics
-without granting ambient authority. Newlib's current `_fork`, `_execve`
-and `_wait` stubs correctly return `ENOSYS`.
+The bounded [Unix process projection](UNIX-PROCESS.md) implements `fork`,
+`execve`, `waitpid`, descriptor delegation and signal delivery over RFORKEX,
+SPAWN, Process Handles and region capabilities. Its native probe exercises
+real fork/exec children, three-stream stdio, CLOEXEC, argv/environment, shared
+volatile files and offsets, asynchronous signals, stop/continue, and repeated
+signal-handler `siglongjmp` returns. The native alarm service must run in
+normal kernel boots; otherwise CPU-bound processes cannot receive its notes.
 
-The full upstream BusyBox `libbb` static link and a **real ash shell in
-QEMU** are **NOT RUN**. The F5 evaluator remains the bounded Plan2001
-userspace builtin shell, not upstream ash. Physical hardware and job control
-also remain untested. No source claim in this project should equate a
-successful `ash.c` compilation with a usable interactive Unix shell.
+The ash-object undefined-symbol report is an inventory of references before
+linking, not a list of currently unimplemented APIs. Full upstream BusyBox
+`libbb` static linking and a **real ash shell in QEMU** remain separate checks.
+The F5 evaluator is still the bounded native builtin shell. Persistent-service
+inheritance, process groups, terminal job control, ARM64 and hardware remain
+outside this process adapter's validated profile.

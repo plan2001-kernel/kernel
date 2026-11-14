@@ -106,7 +106,7 @@ int p2001_session_probe(void)
         for (i=0;i<6;++i) {
             unsigned int required =
                 i==0 || i==3 || i==5 ? Vread : Vwrite;
-            if (rights[i]!=required) goto broken;
+            if ((rights[i]&~Vdelegate)!=required) goto broken;
             mapped[i]=obj_region_map(regions[i],0);
             if (mapped[i]<0) goto broken;
         }

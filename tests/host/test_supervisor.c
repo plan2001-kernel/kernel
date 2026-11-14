@@ -80,9 +80,9 @@ long obj_ospawn(int exec,unsigned long long oid,char **argv,int argc,
     for(int i=0;i<6;++i) {
         assert(raw[4+i*2]==(unsigned long long)(101+i));
         assert(raw[5+i*2]==(unsigned long long)(
-                    i==0||i==3||i==5 ? Vread : Vwrite));
+                    (i==0||i==3||i==5 ? Vread : Vwrite)|Vdelegate));
     }
-    assert(raw[16]==21 && raw[17]==Vexecute);
+    assert(raw[16]==21 && raw[17]==(Vexecute|Vdelegate));
     if(expect_storage) {
         assert(raw[18]==22);
         assert(raw[19]==(Vread|Vwrite|Vcreate|Vcommit|Vmeta));

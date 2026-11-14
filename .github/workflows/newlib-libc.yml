@@ -44,9 +44,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test Unix descriptor lifetime and UXPIPE rollback on host
-        run: bash tools/ci/test_newlib_fd.sh
-
       - name: Install Newlib build tools and native Plan2001 QEMU dependencies
         run: |
           sudo apt-get update
@@ -66,6 +63,9 @@ jobs:
             --lock config/sources.json \
             --dest "$RUNNER_TEMP/plan2001-sources" \
             --reports "$RUNNER_TEMP/newlib-reports"
+
+      - name: Test Unix descriptor lifetime and UXPIPE rollback on host
+        run: bash tools/ci/test_newlib_fd.sh "$RUNNER_TEMP/plan2001-sources/kernel"
 
       - name: Build Plan2001 AMD64 kernel and UEFI loader for real QEMU
         env:
@@ -95,6 +95,13 @@ jobs:
             "$RUNNER_TEMP/plan2001-sources/kernel" \
             "$RUNNER_TEMP/newlib-reports/newlib-target/newlib-boot.elf" \
             "$RUNNER_TEMP/newlib-reports"
+
+      - name: Boot native fork, exec, inherited files and asynchronous signal test
+        run: |
+          bash tools/ci/newlib_full_guest.sh \
+            "$RUNNER_TEMP/plan2001-sources/kernel" \
+            "$RUNNER_TEMP/newlib-reports/newlib-target/newlib-process.elf" \
+            "$RUNNER_TEMP/newlib-reports" process
 
       - name: Build trusted F5 Unix supervisor for actual Newlib grant delegation
         run: |

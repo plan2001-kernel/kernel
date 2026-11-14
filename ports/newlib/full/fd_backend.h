@@ -10,4 +10,5 @@ int p9_backend_open(const char *, int, ...);
 int p9_backend_fstat(int, struct stat *);
 int p9_backend_isatty(int);
 off_t p9_backend_lseek(int, off_t, int);
+int p9_backend_stream(int,int [2],int *);
 #endif

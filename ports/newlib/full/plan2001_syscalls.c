@@ -27,6 +27,7 @@
 #include "../../unix/uxfd.h"
 #include "fd_backend.h"
 #include "plan2001_full.h"
+#include "process.h"
 
 extern long objcreate(unsigned long long, unsigned long long, void *,
                       unsigned long long, void *);
@@ -48,6 +49,7 @@ extern char end[];
  * Binding is opt-in and does not alter standalone Newlib console probes. */
 static UxPipe proxy[3];
 static uintptr_t proxy_maps[6];
+static int proxy_handles[6];
 static int proxy_bound;
 static unsigned char proxy_closed[3];
 static uintptr_t read_base;
@@ -112,11 +114,17 @@ int p9_full_bind_files(UxService *service)
 }
 void p9_full_unbind_files(void)
 {
+    p9_file_detach();
     uxfd_init(&file_table,0);
     files_bound=0;
 }
+UxFdTable *p9_backend_files(void)
+{
+    return files_bound ? &file_table : NULL;
+}
 UxService *p9_full_file_service(void)
 {
+    p9_file_refresh();
     return files_bound ? file_table.service : 0;
 }
 static int translate_fs(int code)
@@ -142,7 +150,12 @@ static int fail_fs(int code)
 long region_wait(unsigned long long base, unsigned long long off,
                  unsigned long long expected, long long timeout_ms)
 {
-    return regionwait(base, off, expected, timeout_ms);
+    for(;;) {
+        unsigned tick=p9_process_tick();
+        long result=regionwait(base, off, expected, timeout_ms);
+        if(result<0 && tick!=p9_process_tick() && !p9_process_has_interrupt()) continue;
+        return result;
+    }
 }
 long region_wake(unsigned long long base, unsigned long long off,
                  unsigned long long count)
@@ -186,6 +199,7 @@ int p9_full_bind_uxpipe(const int handles[6])
         mapped = p9_full_region_map(handles[i], !writable);
         if(mapped <= 0) goto denied;
         proxy_maps[i] = (uintptr_t)mapped;
+        proxy_handles[i] = handles[i];
     }
     for(i = 0; i < 3; ++i) {
         int role = i == 0 ? UXPIPE_READER : UXPIPE_WRITER;
@@ -237,10 +251,12 @@ int p9_full_bind_inherited_uxpipe(void)
     for(i = 0; i < (unsigned)n; ++i) {
         const VobjListRec *r = &records[i];
         if(r->kind == VkindRegion) {
-            if(streams == 6 || r->rights != rights[streams] ||
+            if(streams == 6 || (r->rights != rights[streams] &&
+               r->rights != (rights[streams]|Vdelegate)) ||
                r->handle == 0) goto denied;
             handles[streams++] = (int)r->handle;
-        } else if(r->kind == VkindGeVolume && r->rights == Vexecute) {
+        } else if(r->kind == VkindGeVolume &&
+                  (r->rights == Vexecute || r->rights == (Vexecute|Vdelegate))) {
             if(++executable_volumes != 1) goto denied;
         } else {
             goto denied;
@@ -318,7 +334,7 @@ void p9_full_unbind_stdin(void)
 }
 
 /* Newlib's reentrant read wrapper calls this platform primitive. */
-int p9_backend_read(int fd, char *buf, int count)
+int p9_raw_read(int fd, char *buf, int count)
 {
     ObjRingHeader *h;
     unsigned n;
@@ -380,7 +396,7 @@ int p9_backend_read(int fd, char *buf, int count)
     return (int)n;
 }
 
-int p9_backend_write(int fd, const char *buf, int count)
+int p9_raw_write(int fd, const char *buf, int count)
 {
     ObjOpenConsoleReq req;
     unsigned sent = 0;
@@ -480,11 +496,11 @@ _Noreturn void _exit(int code)
         }
     }
     /* EXITS preserves success/failure, not the exact numeric Unix code. */
-    _exits(code == 0 ? "" : "error");
+    p9_process_exit(code);
     __builtin_unreachable();
 }
 
-int p9_backend_close(int fd)
+int p9_raw_close(int fd)
 {
     if(fd >= 3 && files_bound) {
         int code = uxfd_close(&file_table,fd);
@@ -510,7 +526,7 @@ int p9_backend_close(int fd)
     return -1;
 }
 
-int p9_backend_fstat(int fd, struct stat *st)
+int p9_raw_fstat(int fd, struct stat *st)
 {
     if(st == 0) { errno = EFAULT; return -1; }
     if(fd >= 3 && files_bound) {
@@ -543,7 +559,7 @@ int p9_backend_fstat(int fd, struct stat *st)
     return -1;
 }
 
-int p9_backend_isatty(int fd)
+int p9_raw_isatty(int fd)
 {
     if(fd>=3 && files_bound) {
         unsigned kind, length;
@@ -563,7 +579,7 @@ int p9_backend_isatty(int fd)
     return 0;
 }
 
-off_t p9_backend_lseek(int fd, off_t offset, int whence)
+off_t p9_raw_lseek(int fd, off_t offset, int whence)
 {
     if(fd >= 3 && files_bound) {
         long long pos = uxfd_seek(&file_table,fd,(long long)offset,whence);
@@ -584,7 +600,7 @@ off_t p9_backend_lseek(int fd, off_t offset, int whence)
     return (off_t)-1;
 }
 
-int _getpid(void)
+int p9_native_getpid(void)
 {
     SysctlReq req;
     SysctlProcInfo info;
@@ -600,14 +616,24 @@ int _getpid(void)
     return (int)info.pid;
 }
 
-int _kill(int pid, int sig)
+int p9_backend_stream(int fd,int handles[2],int *role)
 {
-    (void)pid; (void)sig;
-    errno = ENOSYS; /* PID does not grant process-control authority */
-    return -1;
+    unsigned i;
+    if(fd<0 || fd>2 || !proxy_bound || proxy_closed[fd]) {
+        errno=ENOTSUP; return -1;
+    }
+    for(i=0;i<2;++i) {
+        unsigned index=(unsigned)fd*2+i;
+        handles[i]=proxy_handles[index];
+        if(proxy_maps[index]) (void)p9_full_region_unmap(proxy_maps[index]);
+        proxy_maps[index]=0;
+    }
+    *role=fd ? UXPIPE_WRITER : UXPIPE_READER;
+    proxy_closed[fd]=1; /* ownership moved to fd_table, without EOF */
+    return 0;
 }
 
-int p9_backend_open(const char *path, int flags, ...)
+int p9_raw_open(const char *path, int flags, ...)
 {
     unsigned rights = 0;
     int acc, result;
@@ -627,7 +653,7 @@ int p9_backend_open(const char *path, int flags, ...)
     result = uxfd_open(&file_table,path,rights);
     return result >= 0 ? result : fail_fs(result);
 }
-int _unlink(const char *path)
+int p9_raw_unlink(const char *path)
 {
     int result;
     if(!files_bound) { errno = ENOSYS; return -1; }
@@ -635,11 +661,11 @@ int _unlink(const char *path)
     result = uxfd_unlink(&file_table,path);
     return result == PVD_OK ? 0 : fail_fs(result);
 }
-int _link(const char *existing, const char *newpath)
+int p9_raw_link(const char *existing, const char *newpath)
 {
     (void)existing; (void)newpath; errno = ENOSYS; return -1;
 }
-int _stat(const char *path, struct stat *st)
+int p9_raw_stat(const char *path, struct stat *st)
 {
     unsigned kind, length;
     int result;
@@ -664,7 +690,7 @@ static UxService *file_service(void)
     return files_bound ? file_table.service : 0;
 }
 
-int _chdir(const char *path)
+int p9_raw_chdir(const char *path)
 {
     UxService *s=file_service();
     int result;
@@ -674,7 +700,7 @@ int _chdir(const char *path)
     return result==PVD_OK ? 0 : fail_fs(result);
 }
 
-char *getcwd(char *buf, size_t size)
+char *p9_raw_getcwd(char *buf, size_t size)
 {
     UxService *s=file_service();
     char path[PVD_PATH_MAX];
@@ -685,7 +711,7 @@ char *getcwd(char *buf, size_t size)
     if(result!=PVD_OK) { (void)fail_fs(result); return 0; }
     len=(unsigned int)strlen(path)+1;
     if(!buf) {
-        /* Newlib supports the commonly used getcwd(NULL, 0) allocation. */
+        /* Newlib supports the commonly used p9_raw_getcwd(NULL, 0) allocation. */
         if(size==0) size=len;
         if(size<len) { errno=ERANGE; return 0; }
         buf=(char *)malloc(size);
@@ -697,7 +723,7 @@ char *getcwd(char *buf, size_t size)
     return buf;
 }
 
-int _mkdir(const char *path, mode_t mode)
+int p9_raw_mkdir(const char *path, mode_t mode)
 {
     UxService *s=file_service();
     int result;
@@ -710,7 +736,7 @@ int _mkdir(const char *path, mode_t mode)
     return result==PVD_OK ? 0 : fail_fs(result);
 }
 
-int _rename(const char *src, const char *dst)
+int p9_raw_rename(const char *src, const char *dst)
 {
     UxService *s=file_service();
     int result;
@@ -723,7 +749,7 @@ int _rename(const char *src, const char *dst)
     return result==PVD_OK ? 0 : fail_fs(result);
 }
 
-int _access(const char *path, int mode)
+int p9_raw_access(const char *path, int mode)
 {
     UxService *s=file_service();
     unsigned int kind,length;
@@ -739,25 +765,12 @@ int _access(const char *path, int mode)
     return result==PVD_OK ? 0 : fail_fs(result);
 }
 
-int _lstat(const char *path, struct stat *st)
+int p9_raw_lstat(const char *path, struct stat *st)
 {
     /* UXFS has no symlinks; do not claim the existence of symlink metadata. */
-    return _stat(path,st);
+    return p9_raw_stat(path,st);
 }
 
-int _fork(void)
-{
-    errno = ENOSYS; return -1; /* native RFORKEX is not POSIX fork */
-}
-int _execve(const char *path, char *const argv[], char *const envp[])
-{
-    (void)path; (void)argv; (void)envp;
-    errno = ENOSYS; return -1;
-}
-int _wait(int *status)
-{
-    (void)status; errno = ENOSYS; return -1;
-}
 clock_t _times(struct tms *t)
 {
     /* Fail-closed, and never leak uninitialized tms fields to ash times. */

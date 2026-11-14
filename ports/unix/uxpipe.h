@@ -10,7 +10,7 @@
 #define UXPIPE_PAGE 4096u
 #define UXPIPE_CAPACITY 2048u
 #define UXPIPE_MAX_IO 65536u
-#define UXPIPE_VERSION 1ULL
+#define UXPIPE_VERSION 2ULL
 #define UXPIPE_DATA_MAGIC 0x3154414450505855ULL
 #define UXPIPE_ACK_MAGIC  0x314b434150505855ULL
 #define UXPIPE_PUB_OFFSET 16ULL
@@ -28,6 +28,7 @@ typedef struct {
     unsigned long long closed;         /* 1 means producer sent EOF */
     unsigned long long ready;          /* producer mapped data writer */
     unsigned char payload[UXPIPE_CAPACITY];
+    unsigned long long users;          /* serialized process endpoint refs */
 } UxPipeData;
 
 typedef struct {
@@ -36,6 +37,7 @@ typedef struct {
     unsigned long long consumed;       /* published with release ordering */
     unsigned long long closed;         /* 1 means consumer disconnected */
     unsigned long long ready;          /* consumer mapped ACK writer */
+    unsigned long long users;
 } UxPipeAck;
 
 typedef struct {
@@ -44,6 +46,7 @@ typedef struct {
     UxPipeData *data;
     UxPipeAck *ack;
     int role;
+    int transient;                    /* reacquired writer mapping leases */
 } UxPipe;
 
 int uxpipe_format(UxPipeData *data, UxPipeAck *ack);

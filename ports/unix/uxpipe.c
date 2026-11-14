@@ -42,11 +42,13 @@ int uxpipe_format(UxPipeData *data, UxPipeAck *ack)
     publish(&data->produced,0);
     publish(&data->closed,0);
     publish(&data->ready,0);
+    publish(&data->users,1);
     ack->magic = UXPIPE_ACK_MAGIC;
     ack->version = UXPIPE_VERSION;
     publish(&ack->consumed,0);
     publish(&ack->closed,0);
     publish(&ack->ready,0);
+    publish(&ack->users,1);
     return 0;
 }
 static int valid(UxPipe *pipe)
@@ -76,6 +78,7 @@ int uxpipe_bind(UxPipe *pipe, UxPipeData *data, UxPipeAck *ack,
     pipe->data_base = data_base;
     pipe->ack_base = ack_base;
     pipe->role = role;
+    pipe->transient = 0;
     if (!valid(pipe)) return -1;
     if (role == UXPIPE_READER) {
         publish(&ack->ready,1);
@@ -133,6 +136,7 @@ long uxpipe_write(UxPipe *pipe, const void *bytes,
         if (wr-rd == UXPIPE_CAPACITY) {
             rc=region_wait(pipe->ack_base, UXPIPE_ACK_OFFSET, rd,
                            timeout_ms);
+            if (rc==3 && pipe->transient && timeout_ms!=0) { uxpipe_pause(); continue; }
             if (rc < 0 || rc==2 || rc==3)
                 return done ? (long)done : -1;
             continue; /* wake has no payload, recheck cursor */
@@ -168,6 +172,7 @@ long uxpipe_read(UxPipe *pipe, void *bytes,
         if (wr!=rd) break;
         if (load(&pipe->data->closed)) return 0; /* explicit EOF */
         rc=region_wait(pipe->data_base, UXPIPE_PUB_OFFSET,wr,timeout_ms);
+        if (rc==3 && pipe->transient && timeout_ms!=0) { uxpipe_pause(); continue; }
         if (rc < 0 || rc==2 || rc==3) return -1;
     }
     offset=(unsigned int)(rd % UXPIPE_CAPACITY);

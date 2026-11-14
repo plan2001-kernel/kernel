@@ -77,6 +77,9 @@ def main():
         "syscalls": PORT / "plan2001_syscalls.c",
         "posix": PORT / "posix_forward.c",
         "fd_table": PORT / "fd_table.c",
+        "process": PORT / "process.c",
+        "inherit": PORT / "inherit.c",
+        "file_state": PORT / "file_state.c",
         "dirent": ROOT / "ports/newlib/ash/dirent.c",
         "ash_posix": ROOT / "ports/newlib/ash/ash_posix.c",
         "pipe": ROOT / "ports/unix/uxpipe.c",
@@ -89,6 +92,7 @@ def main():
         "boot": PORT / "newlib_stdio_probe.c",
         "child": PORT / "newlib_exit_child.c",
         "supervised": PORT / "newlib_supervised_child.c",
+        "process_probe": PORT / "newlib_process_probe.c",
     }
     inputs = [libc, libm, include / "stdio.h", startup, stubs, *sources.values(),
               PORT / "user-newlib.ld"]
@@ -106,6 +110,7 @@ def main():
         "-Wall", "-Wextra", "-Werror",
         "-I", str(ROOT / "ports/newlib/ash/include"),
         "-I", str(PORT), "-I", str(args.kernel / "runtime/abi"),
+        "-I", str(args.kernel / "include/amd64"),
         "-isystem", str(include), "-isystem", gcc_includes,
     ]
     try:
@@ -124,7 +129,7 @@ def main():
              str(stubs), str(native_stubs)], log)
         audits = []
         for kind, program in (("boot", "boot"), ("exit", "child"),
-                              ("supervised", "supervised")):
+                              ("supervised", "supervised"), ("process", "process_probe")):
             elf = build / ("newlib-" + kind + ".elf")
             link = [
                 args.cc, "-m64", "-nostdlib", "-nostartfiles",
@@ -132,8 +137,9 @@ def main():
                 "-Wl,-e,_start", "-Wl,--no-dynamic-linker",
                 "-Wl,-z,noexecstack", "-Wl,--gc-sections",
                 "-Wl,--build-id=none", "-o", str(elf),
+                "-Wl,--wrap=longjmp",
                 str(startup), str(objects["startup"]), str(objects[program]),
-                str(objects["syscalls"]), str(objects["fd_table"]), str(objects["posix"]), str(objects["dirent"]),
+                str(objects["syscalls"]), str(objects["process"]), str(objects["inherit"]), str(objects["file_state"]), str(objects["fd_table"]), str(objects["posix"]), str(objects["dirent"]),
                 str(objects["ash_posix"]), str(objects["pipe"]),
                 *(str(objects[key]) for key in ("pvd", "uxfs", "uxshell", "uxservice", "uxfd")),
                 str(native_stubs),
@@ -151,11 +157,17 @@ def main():
             if kind == "supervised":
                 required += ["p9_full_bind_inherited_uxpipe", "read", "write",
                              "close", "fstat", "uxpipe_read", "uxpipe_write"]
+            if kind == "process":
+                required += ["fork", "execve", "waitpid", "sigaction", "sigprocmask",
+                             "sigsuspend", "kill", "siglongjmp", "__wrap_longjmp",
+                             "p9_fd_export", "p9_fd_import"]
             audits.append(audit(elf, build, required))
         (build / "result.json").write_text(
             json.dumps({
                 "kernel_commit": captured("git", "-C", str(args.kernel),
                                           "rev-parse", "HEAD").strip(),
+                "kernel_worktree_dirty": bool(captured("git", "-C", str(args.kernel),
+                                                       "status", "--porcelain").strip()),
                 "upstream_newlib_commit": "8ba4275b83ec27529f67e0d477611fa6d8d6e6bd",
                 "newlib_libc_sha256": hashlib.sha256(libc.read_bytes()).hexdigest(),
                 "plan2001_libc_user_linked": False,
@@ -167,7 +179,7 @@ def main():
             }, indent=2) + "\n")
         report.write_text(
             "### Genuine Newlib libc target link\n\n"
-            "- PASS: three static Plan2001 native AMD64 ELFs linked with "
+            "- PASS: four static Plan2001 native AMD64 ELFs linked with "
             "full upstream Newlib libc.a/libm.a.\n"
             "- PASS: NO Plan2001 libc-user.a; Newlib malloc/stdio/reentrancy "
             "resolved, no unresolved symbols or dynamic loader.\n"
