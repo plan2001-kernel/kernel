@@ -38,7 +38,8 @@ p=Path(sys.argv[1])
 s=p.read_text()
 for setting in ("ASH_JOB_CONTROL", "ASH_BASH_COMPAT",
                 "FEATURE_SH_STANDALONE", "FEATURE_SH_NOFORK",
-                "ASH_MAIL", "ASH_IDLE_TIMEOUT"):
+                "ASH_MAIL", "ASH_IDLE_TIMEOUT",
+                "FEATURE_UTMP", "FEATURE_WTMP"):
     s=s.replace(f"CONFIG_{setting}=y",f"# CONFIG_{setting} is not set")
 p.write_text(s)
 PY
