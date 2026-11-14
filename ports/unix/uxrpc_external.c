@@ -110,7 +110,7 @@ cleanup:
     if(status!=0) {
         char marker[]="PLAN2001-UXRPC-FAIL-STAGE-0\n";
         for(i=0;i<sizeof(marker)-1;++i)
-            if(marker[i]==\'0\') marker[i]=(char)(\'0\'+stage);
+            if(marker[i]=='0') marker[i]=(char)('0'+stage);
         (void)p2001_session_write(1,marker,sizeof(marker)-1);
     }
     if(process>0) {
