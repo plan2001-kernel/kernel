@@ -69,31 +69,52 @@ test -d "$GCCHDR" || exit 1
 test -f "$BB/include/autoconf.h" || {
   echo "BusyBox include/autoconf.h not generated" >&2; exit 1;
 }
-echo '$ compile ORIGINAL upstream ash.c using Newlib target headers' >> "$LOG"
-set +e
-"$CC" -m64 -std=gnu11 -O1 -ffreestanding -nostdinc \
-  -fno-pie -fno-pic -fno-builtin -fno-stack-protector \
-  -Wno-unused-function -Wno-unused-variable \
-  -I"$ROOT/ports/newlib/ash/include" \
-  -I"$BB/include" -I"$BB/shell" \
-  -isystem "$INC" -isystem "$GCCHDR" \
-  -include "$BB/include/autoconf.h" \
-  -c "$BB/shell/ash.c" -o "$OUT/ash-newlib.o" \
-  >> "$LOG" 2>&1
-rc=$?
-set -e
+echo '$ compile original ash.c, ash_ptr_hack.c, shell_common.c using Newlib' >> "$LOG"
+flags=(
+  -m64 -std=gnu11 -O1 -ffreestanding -nostdinc
+  -fno-pie -fno-pic -fno-builtin -fno-stack-protector
+  -Werror=implicit-function-declaration -Werror=int-conversion
+  -Wno-unused-function -Wno-unused-variable
+  -I"$ROOT/ports/newlib/ash/include"
+  -I"$BB/include" -I"$BB/shell"
+  -isystem "$INC" -isystem "$GCCHDR"
+  -include "$BB/include/autoconf.h"
+)
+rc=0
+for unit in ash ash_ptr_hack shell_common; do
+  if ! "$CC" "${flags[@]}" \
+      -c "$BB/shell/$unit.c" -o "$OUT/$unit-newlib.o" \
+      >> "$LOG" 2>&1; then
+    rc=1
+    break
+  fi
+done
 {
   echo "### Upstream BusyBox ash 1.36.1 / Newlib 4.6.0 target compile"
   echo
   echo "- Original pinned ash.c, real upstream BusyBox generated headers."
   echo "- Real Newlib x86_64-unknown-elf installed headers, not Debian glibc."
   echo "- Newlib sys/times.h present: **PASS**."
-  echo "- Original ash.c compiler exit: **$rc**."
+  echo "- Original ash.c + two upstream companion modules compiler exit: **$rc**."
   if [ "$rc" -eq 0 ]; then
-    echo "- ash.c object compiler: **PASS**."
-    nm -u "$OUT/ash-newlib.o" | awk '{print $2}' | sort -u \
+    echo "- ash.c, ash_ptr_hack.c and shell_common.c: **PASS**."
+    nm -u "$OUT/"*-newlib.o | awk '{print $2}' | sort -u \
       >"$OUT/ash-undefined-symbols.txt"
     echo "- Static ash/libbb link: **NOT RUN**; no claimed full shell yet."
+    {
+      echo "# Still unresolved process/descriptor interface requirements"
+      grep -E '^(fork|execve|waitpid|pipe|dup2|fcntl|sigaction|sigprocmask|sigsuspend)
+  else
+    echo "- Compilation: **FAIL**; inspect attached exact diagnostics."
+    echo "- Static ash/libbb link / real QEMU ash: **NOT RUN**."
+  fi
+} > "$SUMMARY"
+tail -80 "$LOG"
+exit "$rc"
+ \
+        "$OUT/ash-undefined-symbols.txt" || true
+    } >"$OUT/ash-process-blockers.txt"
+    echo "- Missing native process semantics (fork/execve/waitpid/pipe/dup2): see ash-process-blockers.txt."
   else
     echo "- Compilation: **FAIL**; inspect attached exact diagnostics."
     echo "- Static ash/libbb link / real QEMU ash: **NOT RUN**."
