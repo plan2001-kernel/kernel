@@ -1,0 +1,92 @@
+# BusyBox ash / Newlib POSIX compatibility on Plan2001
+
+This document distinguishes a reproducible **upstream ash source compilation**
+from a functional Unix shell. The former is tested; the latter still requires
+userspace process, descriptor and signal work. The kernel capability ABI is
+unchanged.
+
+## Pinned sources and build
+
+- BusyBox **1.36.1**, pinned in config/sources.json at
+  \`1a64f6a20aaf6ea4dbba68bbfa8cc1ab7e5c57c4\`.
+- Genuine upstream **Newlib 4.6.0**,
+  \`8ba4275b83ec27529f67e0d477611fa6d8d6e6bd\`.
+- Current kernel \`main\` is fetched afresh in Actions, as required by source
+  policy. Nothing from Debian glibc, the Linux startup files, or the
+  Plan2001 legacy \`libc-user.a\` is linked into the Newlib target.
+
+\`tools/ci/probe_busybox_ash_newlib.sh\` generates the original BusyBox
+\`include/autoconf.h\` with its own Kconfig tooling. It disables unsupported
+job control, Bash compatibility, Linux utmp/wtmp and glibc-only feature
+probes *in the disposable CI checkout*, keeping upstream \`shell/ash.c\`,
+\`shell/shell_common.c\` and \`shell/ash_ptr_hack.c\` unchanged. The original
+three C files are compiled with \`-ffreestanding -nostdinc\`, the genuine
+installed Newlib headers, target-only overlays, and
+\`-Werror=implicit-function-declaration -Werror=int-conversion\`.
+
+The old stage-5 test failed at \`sys/times.h\` simply because it did **not**
+use Newlib's sysroot. Genuine Newlib already ships this header; the replacement
+CI checks it, rather than inventing a dummy \`struct tms\`.
+
+## POSIX implementations that work
+
+In \`ports/newlib/full/plan2001_syscalls.c\` and \`posix_forward.c\`:
+
+- \`open\`, \`read\`, \`write\`, \`close\`, \`lseek\`, \`stat\`, \`fstat\`, \`lstat\`,
+  \`unlink\` use the **explicitly attached** \`UxService\` and per-process
+  \`UxFdTable\` (fd 3+). Standard fds 0, 1, 2 continue using
+  supervisor-delegated UXPIPE.
+- \`chdir\`, \`getcwd\` and \`mkdir\` operate on the same PVD and UXFS instance.
+  \`getcwd(NULL,0)\` allocates a copy using Newlib \`malloc\`.
+- \`rename\` is bounded to UXFS regular-file moves; \`access(F_OK)\` tests
+  existence. Permission queries that would infer rights from synthetic Unix
+  modes fail with \`ENOSYS\`.
+- \`opendir\`, \`readdir\`, \`closedir\`, \`rewinddir\`, \`telldir\` and
+  \`seekdir\` enumerate a bounded snapshot through the authorized UXFS view.
+  \`dirfd\` fails with \`ENOSYS\`: no kernel pathname/FD authority is minted.
+- \`mempcpy\` and \`strchrnul\` are implemented as genuine byte/string
+  operations. The target headers resolve BusyBox's incompatible
+  \`itoa\`/\`utoa\` names without editing upstream ash.
+- \`uname\` describes the native Plan2001 userland target.
+  \`getrlimit(RLIMIT_NOFILE)\` exposes its actual 3+16 descriptor-slot bound;
+  unsupported budget queries and \`setrlimit\` fail with \`ENOSYS\`, never
+  silently changing SPAWN budgets.
+
+Newlib is a C library, **not a substitute for kernel-owned POSIX services**.
+Target headers for sockets, poll, termios and mmap only make the types visible.
+No socket or tty service is conjured into existence. \`poll\`, \`mmap\`, and
+terminal control requests fail with \`ENOSYS\`/\`ENOTTY\`; fake success would
+allow shell code to corrupt descriptor state or infer false privileges.
+
+## CI evidence
+
+- [Stage 5 upstream ash source, strict Newlib compile PASS][ash-ci]:
+  the three original upstream ash modules compile to AMD64 objects.
+  Stages 4/6/7 of the same workflow also PASS.
+- [Native Plan2001 Newlib QEMU PASS][newlib-ci]: stdout/stderr/stdin,
+  metadata and PVD paths, directory snapshot operations, and the
+  fail-closed resource/tty/poll adapters.
+- [Shared GE/O service and same-disk QEMU cold reboot PASS][geo-ci]
+  is an independent userland service result, **not** evidence that
+  ash itself has been launched.
+
+[ash-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43625250507
+[newlib-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43625250523
+[geo-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43619613723
+
+## Still not implemented or validated
+
+The source-level symbol audit in
+\`ash-probe/ash-process-blockers.txt\` lists
+\`fork\`, \`execve\`, \`waitpid\`, \`pipe\`, \`dup2\`, \`fcntl\`,
+\`sigaction\`, \`sigprocmask\`, and \`sigsuspend\`.
+Native Plan2001 SPAWN and UXPIPE exist, but must be adapted to POSIX
+process tracking, descriptor inheritance/duplication and signal semantics
+without granting ambient authority. Newlib's current \`_fork\`, \`_execve\`
+and \`_wait\` stubs correctly return \`ENOSYS\`.
+
+The full upstream BusyBox \`libbb\` static link and a **real ash shell in
+QEMU** are **NOT RUN**. The F5 evaluator remains the bounded Plan2001
+userspace builtin shell, not upstream ash. Physical hardware and job control
+also remain untested. No source claim in this project should equate a
+successful \`ash.c\` compilation with a usable interactive Unix shell.

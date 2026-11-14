@@ -54,6 +54,7 @@ The native diagnostic workflow links the upstream BusyBox `true.c` applet agains
 - [Architecture](docs/ARCHITECTURE.md)
 - [Minimal POSIX profile](docs/POSIX-PROFILE.md)
 - [BusyBox porting plan](docs/PORTING.md)
+- [BusyBox ash compilation and Newlib POSIX integration](docs/ASH-NEWLIB.md)
 - [Shared GE/O UXFS service over capability-only UXPIPE RPC](docs/UXFS-SHARED-GEO.md)
 - [Development instructions](AGENTS.md)
 
