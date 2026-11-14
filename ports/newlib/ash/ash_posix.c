@@ -10,6 +10,8 @@
 #include <sys/mman.h>
 #include <sys/termios.h>
 #include <poll.h>
+#include <sys/resource.h>
+#include "../../unix/uxfd.h"
 
 void *mempcpy(void *restrict dest,const void *restrict src,size_t n)
 {
@@ -21,6 +23,32 @@ char *strchrnul(const char *s,int ch)
     unsigned char target=(unsigned char)ch;
     while(*s && (unsigned char)*s!=target) ++s;
     return (char *)s;
+}
+
+int getrlimit(int resource,struct rlimit *limit)
+{
+    if(!limit) { errno=EFAULT; return -1; }
+    /* The one real POSIX-relevant bound exposed in this initial profile is
+     * the per-process userland descriptor slot limit. 3 streams + 16 files.
+     * Kernel budgets are controlled by SPAWN capabilities, not RLIMIT_DATA.
+     */
+    limit->rlim_cur=0;
+    limit->rlim_max=0;
+    if(resource==RLIMIT_NOFILE) {
+        limit->rlim_cur=3+UXFD_SLOTS;
+        limit->rlim_max=3+UXFD_SLOTS;
+        return 0;
+    }
+    errno=ENOSYS;
+    return -1;
+}
+int setrlimit(int resource,const struct rlimit *limit)
+{
+    (void)resource;
+    if(!limit) { errno=EFAULT; return -1; }
+    /* Untrusted POSIX limits cannot override native process budgets. */
+    errno=ENOSYS;
+    return -1;
 }
 
 int uname(struct utsname *name)

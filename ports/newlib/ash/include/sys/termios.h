@@ -19,6 +19,8 @@ struct termios {
 #define TCSAFLUSH 2
 #define ICANON 0x0002
 #define ECHO 0x0008
+#define ECHOK 0x0020
+#define ECHONL 0x0040
 #define ISIG 0x0001
 #define VINTR 0
 #define VQUIT 1
