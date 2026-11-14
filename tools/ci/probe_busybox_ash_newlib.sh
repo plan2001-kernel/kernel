@@ -92,32 +92,22 @@ done
 {
   echo "### Upstream BusyBox ash 1.36.1 / Newlib 4.6.0 target compile"
   echo
-  echo "- Original pinned ash.c, real upstream BusyBox generated headers."
-  echo "- Real Newlib x86_64-unknown-elf installed headers, not Debian glibc."
-  echo "- Newlib sys/times.h present: **PASS**."
-  echo "- Original ash.c + two upstream companion modules compiler exit: **$rc**."
+  echo "- Original pinned ash.c and companion modules, real BusyBox generated headers."
+  echo "- Genuine Newlib x86_64-unknown-elf headers; no Debian glibc or startup."
+  echo "- Upstream sys/times.h present: **PASS**."
+  echo "- ash.c, ash_ptr_hack.c, shell_common.c compiler exit: **$rc**."
   if [ "$rc" -eq 0 ]; then
-    echo "- ash.c, ash_ptr_hack.c and shell_common.c: **PASS**."
-    nm -u "$OUT/"*-newlib.o | awk '{print $2}' | sort -u \
-      >"$OUT/ash-undefined-symbols.txt"
-    echo "- Static ash/libbb link: **NOT RUN**; no claimed full shell yet."
+    echo "- Original ash source and both companion objects: **PASS**."
+    nm -u "$OUT/"*-newlib.o | awk '{print $2}' | sort -u > "$OUT/ash-undefined-symbols.txt"
     {
-      echo "# Still unresolved process/descriptor interface requirements"
-      grep -E '^(fork|execve|waitpid|pipe|dup2|fcntl|sigaction|sigprocmask|sigsuspend)
+      echo "# Process and descriptor ABI that still needs real POSIX semantics"
+      grep -E '^(fork|execve|waitpid|pipe|dup2|fcntl|sigaction|sigprocmask|sigsuspend)$' "$OUT/ash-undefined-symbols.txt" || true
+    } > "$OUT/ash-process-blockers.txt"
+    echo "- Static ash/libbb link and full ash QEMU: **NOT RUN**."
+    echo "- Blocker audit: ash-process-blockers.txt and ash-undefined-symbols.txt."
   else
-    echo "- Compilation: **FAIL**; inspect attached exact diagnostics."
-    echo "- Static ash/libbb link / real QEMU ash: **NOT RUN**."
-  fi
-} > "$SUMMARY"
-tail -80 "$LOG"
-exit "$rc"
- \
-        "$OUT/ash-undefined-symbols.txt" || true
-    } >"$OUT/ash-process-blockers.txt"
-    echo "- Missing native process semantics (fork/execve/waitpid/pipe/dup2): see ash-process-blockers.txt."
-  else
-    echo "- Compilation: **FAIL**; inspect attached exact diagnostics."
-    echo "- Static ash/libbb link / real QEMU ash: **NOT RUN**."
+    echo "- Compilation: **FAIL**; consult exact compiler diagnostics."
+    echo "- Static ash/libbb link / full ash QEMU: **NOT RUN**."
   fi
 } > "$SUMMARY"
 tail -80 "$LOG"
