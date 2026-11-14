@@ -34,8 +34,22 @@ In `ports/newlib/full/plan2001_syscalls.c` and `posix_forward.c`:
 
 - `open`, `read`, `write`, `close`, `lseek`, `stat`, `fstat`, `lstat`,
   `unlink` use the **explicitly attached** `UxService` and per-process
-  `UxFdTable` (fd 3+). Standard fds 0, 1, 2 continue using
-  supervisor-delegated UXPIPE.
+  `UxFdTable` through private backend identifiers. `fd_table.c` maps public
+  descriptors to reference-counted open descriptions; standard descriptors
+  initially refer to supervisor-delegated UXPIPE.
+- `dup`, `dup2`, `F_DUPFD`, `F_GETFD`, `F_SETFD` and `F_GETFL` share backend
+  offsets while keeping descriptor flags independent. The lowest unused
+  descriptor is reused, including 0/1/2 after close. `F_SETFL` rejects
+  changes to append/nonblocking status with `ENOSYS`; opening a nonblocking
+  description is also unsupported. CLOEXEC is recorded for a future exec
+  adapter, not evidence that exec is implemented.
+- `pipe` allocates two native regions and exposes UXPIPE reader/writer
+  descriptions. The last writer close publishes EOF; duplicated writers
+  retain the endpoint. The last reader close disconnects; the pair's maps
+  and Handles are released after both endpoints close. Process exit closes
+  all descriptions. This covers local descriptors; exporting them through
+  RFORKEX/SPAWN with correct writer mapping ownership is still required.
+  A disconnected write reports `EPIPE`; SIGPIPE delivery remains pending.
 - `chdir`, `getcwd` and `mkdir` operate on the same PVD and UXFS instance.
   `getcwd(NULL,0)` allocates a copy using Newlib `malloc`.
 - `rename` is bounded to UXFS regular-file moves; `access(F_OK)` tests
@@ -79,7 +93,9 @@ allow shell code to corrupt descriptor state or infer false privileges.
 The source-level symbol audit in
 `ash-probe/ash-process-blockers.txt` lists
 `fork`, `execve`, `waitpid`, `pipe`, `dup2`, `fcntl`,
-`sigaction`, `sigprocmask`, and `sigsuspend`.
+`sigaction`, `sigprocmask`, and `sigsuspend`. This is an unresolved-reference
+inventory of the ash objects, not a current implementation-status list:
+the descriptor operations above now have target implementations.
 Native Plan2001 SPAWN and UXPIPE exist, but must be adapted to POSIX
 process tracking, descriptor inheritance/duplication and signal semantics
 without granting ambient authority. Newlib's current `_fork`, `_execve`

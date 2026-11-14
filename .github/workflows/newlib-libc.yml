@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/newlib-libc.yml'
       - 'ports/newlib/**'
+      - 'tests/host/test_newlib_fd.c'
+      - 'tools/ci/test_newlib_fd.sh'
       - 'tools/ci/build_newlib_libc.sh'
       - 'tools/ci/newlib_full_*.py'
       - 'tools/ci/seed_busybox_spawn.py'
@@ -18,6 +20,8 @@ on:
     paths:
       - '.github/workflows/newlib-libc.yml'
       - 'ports/newlib/**'
+      - 'tests/host/test_newlib_fd.c'
+      - 'tools/ci/test_newlib_fd.sh'
       - 'tools/ci/build_newlib_libc.sh'
       - 'tools/ci/newlib_full_*.py'
       - 'tools/ci/newlib_full_*.sh'
@@ -39,6 +43,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test Unix descriptor lifetime and UXPIPE rollback on host
+        run: bash tools/ci/test_newlib_fd.sh
 
       - name: Install Newlib build tools and native Plan2001 QEMU dependencies
         run: |

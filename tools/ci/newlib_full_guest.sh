@@ -54,7 +54,7 @@ if ! qob_boot_once "$OUT/disk.img" newlib-fullboot \
 fi
 log="$OUT/boot-newlib-fullboot.log"
 grep -aqF 'o: OEXECUTE oid=0x4f45584543000003' "$log"
-for op in PRINTF MALLOC LIBM TIME ERRNO STDIN UXPIPE UXFILE; do
+for op in PRINTF MALLOC LIBM TIME ERRNO STDIN FD UXPIPE UXFILE; do
   grep -aqF "PLAN2001-NEWLIB-FULL-$op-PASS" "$log"
 done
 grep -aqF 'PLAN2001-NEWLIB-FULL-PASS' "$log"

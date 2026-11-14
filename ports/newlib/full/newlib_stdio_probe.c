@@ -119,6 +119,16 @@ static void check_uxfiles(void)
     check(lseek(fd,0,SEEK_SET)==0,"Newlib lseek file");
     check(read(fd,buffer,sizeof(buffer))==16,"Newlib read file");
     check(memcmp(buffer,"newlib-file-test",16)==0,"Newlib file contents");
+    {
+        int alias=dup(fd);
+        check(alias>=3,"duplicate regular file description");
+        check(lseek(alias,0,SEEK_SET)==0,"duplicate shares file offset");
+        check(read(fd,buffer,3)==3 && !memcmp(buffer,"new",3),
+              "original reads from duplicate seek");
+        check(read(alias,buffer,3)==3 && !memcmp(buffer,"lib",3),
+              "duplicate observes original offset update");
+        check(close(alias)==0,"close duplicate regular file");
+    }
     check(_fstat(fd,&st)==0 && S_ISREG(st.st_mode) && st.st_size==16,
           "Newlib fstat regular file");
     check(close(fd)==0,"Newlib close regular file");
@@ -184,9 +194,10 @@ static void check_uxpipe(void)
           "write Newlib stdout UXPIPE");
     check(write(2,output,sizeof(output))==sizeof(output),
           "write Newlib stderr UXPIPE");
-    check(close(1)==0,"publish Newlib stdout EOF");
-    check(close(2)==0,"publish Newlib stderr EOF");
     check(_lseek(0,0,0)==-1 && errno==ESPIPE,"UXPIPE is not seekable");
+    /* End this explicit test session without closing the process's Unix
+     * stdout/stderr descriptors; the subsequent probes still use them. */
+    p9_full_unbind_uxpipe();
     /* Read-only observers are permitted while the producer has RW. */
     for(i=1;i<3;++i) {
         long mapped=p9_full_region_map(handles[2*i],1);
@@ -198,10 +209,37 @@ static void check_uxpipe(void)
               "Newlib output bytes reached delegated regions");
         check(p9_full_region_unmap((uintptr_t)mapped)==0,"unmap observer");
     }
-    p9_full_unbind_uxpipe();
     for(i=0;i<6;++i)
         check(p9_full_region_close(handles[i])==0,"close UXPIPE handle");
     printf("PLAN2001-NEWLIB-FULL-UXPIPE-PASS\n");
+    fflush(stdout);
+}
+
+static void check_descriptors(void)
+{
+    int streams[2], alias, saved;
+    char bytes[8];
+    struct stat st;
+    check(pipe(streams)==0,"POSIX pipe creates native UXPIPE regions");
+    alias=dup(streams[1]);
+    check(alias>=3,"duplicate pipe writer");
+    check(fcntl(alias,F_SETFD,FD_CLOEXEC)==0,"set descriptor CLOEXEC");
+    check(fcntl(streams[1],F_GETFD)==0,"descriptor flags are independent");
+    saved=dup(1);
+    check(saved>=3,"save stdout descriptor");
+    fflush(stdout);
+    check(dup2(streams[1],1)==1,"redirect stdout to UXPIPE");
+    check(write(1,"ash",3)==3,"write through redirected stdout");
+    check(dup2(saved,1)==1 && close(saved)==0,"restore stdout");
+    check(close(streams[1])==0,"close original writer");
+    check(write(alias,"!",1)==1,"duplicate keeps writer alive");
+    check(close(alias)==0,"last close publishes EOF");
+    check(read(streams[0],bytes,sizeof(bytes))==4 && !memcmp(bytes,"ash!",4),
+          "pipe data survives writer close");
+    check(read(streams[0],bytes,sizeof(bytes))==0,"POSIX pipe EOF");
+    check(fstat(streams[0],&st)==0 && S_ISFIFO(st.st_mode),"POSIX pipe metadata");
+    check(close(streams[0])==0,"last reader releases regions");
+    printf("PLAN2001-NEWLIB-FULL-FD-PASS\n");
     fflush(stdout);
 }
 
@@ -321,6 +359,7 @@ int main(int argc, char **argv)
     printf("PLAN2001-NEWLIB-FULL-STDIN-PASS\n");
     fflush(stdout);
 
+    check_descriptors();
     check_uxpipe();
     check_uxfiles();
     printf("PLAN2001-NEWLIB-FULL-PASS\n");

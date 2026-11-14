@@ -25,6 +25,8 @@
 #include "vobj.h"
 #include "../../unix/uxpipe.h"
 #include "../../unix/uxfd.h"
+#include "fd_backend.h"
+#include "plan2001_full.h"
 
 extern long objcreate(unsigned long long, unsigned long long, void *,
                       unsigned long long, void *);
@@ -316,7 +318,7 @@ void p9_full_unbind_stdin(void)
 }
 
 /* Newlib's reentrant read wrapper calls this platform primitive. */
-int _read(int fd, char *buf, int count)
+int p9_backend_read(int fd, char *buf, int count)
 {
     ObjRingHeader *h;
     unsigned n;
@@ -378,7 +380,7 @@ int _read(int fd, char *buf, int count)
     return (int)n;
 }
 
-int _write(int fd, const char *buf, int count)
+int p9_backend_write(int fd, const char *buf, int count)
 {
     ObjOpenConsoleReq req;
     unsigned sent = 0;
@@ -465,6 +467,7 @@ void *_sbrk(ptrdiff_t increment)
 _Noreturn void _exit(int code)
 {
     unsigned i;
+    p9_full_close_descriptors();
     /* Newlib exit() flushes stdio before entering this native primitive.
      * Publish explicit UXPIPE close for any still-open descriptor so a
      * successful process exit never looks like a broken region writer. */
@@ -481,7 +484,7 @@ _Noreturn void _exit(int code)
     __builtin_unreachable();
 }
 
-int _close(int fd)
+int p9_backend_close(int fd)
 {
     if(fd >= 3 && files_bound) {
         int code = uxfd_close(&file_table,fd);
@@ -507,7 +510,7 @@ int _close(int fd)
     return -1;
 }
 
-int _fstat(int fd, struct stat *st)
+int p9_backend_fstat(int fd, struct stat *st)
 {
     if(st == 0) { errno = EFAULT; return -1; }
     if(fd >= 3 && files_bound) {
@@ -540,7 +543,7 @@ int _fstat(int fd, struct stat *st)
     return -1;
 }
 
-int _isatty(int fd)
+int p9_backend_isatty(int fd)
 {
     if(fd>=3 && files_bound) {
         unsigned kind, length;
@@ -560,7 +563,7 @@ int _isatty(int fd)
     return 0;
 }
 
-off_t _lseek(int fd, off_t offset, int whence)
+off_t p9_backend_lseek(int fd, off_t offset, int whence)
 {
     if(fd >= 3 && files_bound) {
         long long pos = uxfd_seek(&file_table,fd,(long long)offset,whence);
@@ -604,7 +607,7 @@ int _kill(int pid, int sig)
     return -1;
 }
 
-int _open(const char *path, int flags, ...)
+int p9_backend_open(const char *path, int flags, ...)
 {
     unsigned rights = 0;
     int acc, result;

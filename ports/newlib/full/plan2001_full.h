@@ -6,6 +6,8 @@ long p9_full_region_create(uint64_t size);
 long p9_full_region_map(int handle, int readonly);
 long p9_full_region_unmap(uintptr_t base);
 long p9_full_region_close(int handle);
+/* Process exit releases each open description once, publishing pipe EOF. */
+void p9_full_close_descriptors(void);
 /* Explicit six-grant UXPIPE supervisor session; never guesses console rights. */
 #include "../../unix/uxservice.h"
 int p9_full_bind_files(UxService *service);

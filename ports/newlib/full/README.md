@@ -58,7 +58,9 @@ because they take milliseconds, unlike POSIX sleep(seconds).
 | exit | Native EXITS: empty on success, nonempty on failure |
 | gettimeofday | Native _NSEC nanosecond real-time clock |
 | sleep | Seconds converted to bounded native milliseconds |
-| fstat/isatty/close | Restricted console and Region semantics |
+| fstat/isatty/close | Dispatch through userspace open descriptions |
+| dup/dup2/fcntl | Shared offsets, independent descriptor flags, bounded allocation |
+| pipe | Two native-region UXPIPE endpoints; reference-counted close and EOF |
 | lseek | ESPIPE for streams |
 | getpid | Own-process SYSCTL process info |
 | pathname/process/signal POSIX calls | Explicit errors, not fake success |
@@ -69,8 +71,10 @@ This is a **real full libc port**, not a claim of complete POSIX support.
 The library is configured single-threaded; TLS, concurrency and all
 optional APIs are not certified. stdin needs an explicit granted Region
 and stdout/stderr native console authority; children do not inherit
-rights automatically. No general pathname/FD table or Unix pipe/TTY
-layer is present. Native EXITS preserves success versus failure but not
+rights automatically. Explicitly attached UXFS services supply file backends;
+the bounded descriptor table supports local redirection and UXPIPEs. Child
+descriptor delegation and Unix TTY semantics remain unimplemented.
+Native EXITS preserves success versus failure but not
 the exact numeric POSIX exit code. sbrk does not shrink. POSIX alarm,
 fork/exec, signals and arbitrary files are not implemented.
 

@@ -73,8 +73,9 @@ cp "$LIBC" "$REPORTS/newlib-full/libc.a"
 cp "$LIBM" "$REPORTS/newlib-full/libm.a"
 # Link may need the actual generated target headers; copy whole public include.
 cp -a "$INC_DIR" "$REPORTS/newlib-full/include"
+nm --defined-only "$LIBC" > "$REPORTS/newlib-full/libc.symbols"
 for sym in ' printf$' ' malloc$' ' free$' ' _impure_ptr$' ' snprintf$'; do
-  if ! nm --defined-only "$LIBC" | grep -Eq "$sym"; then
+  if ! grep -Eq "$sym" "$REPORTS/newlib-full/libc.symbols"; then
     echo "Newlib libc.a missing required symbol: $sym" >&2
     exit 1
   fi
