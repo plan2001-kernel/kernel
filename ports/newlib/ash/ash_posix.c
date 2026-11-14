@@ -5,10 +5,23 @@
  */
 #include <errno.h>
 #include <string.h>
+#include <stddef.h>
 #include <sys/utsname.h>
 #include <sys/mman.h>
 #include <sys/termios.h>
 #include <poll.h>
+
+void *mempcpy(void *restrict dest,const void *restrict src,size_t n)
+{
+    /* Copy even when the source has no NUL; return the tail pointer. */
+    return (unsigned char *)memcpy(dest,src,n)+n;
+}
+char *strchrnul(const char *s,int ch)
+{
+    unsigned char target=(unsigned char)ch;
+    while(*s && (unsigned char)*s!=target) ++s;
+    return (char *)s;
+}
 
 int uname(struct utsname *name)
 {
