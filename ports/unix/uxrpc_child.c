@@ -64,23 +64,20 @@ int p2001_uxrpc_child_main(int argc,char **argv)
     static const unsigned rights[4]={Vwrite,Vread,Vread,Vwrite};
     UxPipe request,response;
     UxRpcClient client;
-    int h[4]={0,0,0,0},volume_count=0;
+    int h[4]={0,0,0,0};
     unsigned long long map[4]={0,0,0,0};
     int region_count=0,ok=-1;
     long n=obj_list(records,16);
     if(argc<3 || argc>4 || !argv || !same(argv[0],"uxrpc-client") ||
-       n!=5) return 1;
+       n!=4) return 1;
     for(int i=0;i<n;++i) {
         if(records[i].kind==VkindRegion) {
             if(region_count==4 ||
                records[i].rights!=rights[region_count]) goto cleanup;
             h[region_count++]=(int)records[i].handle;
-        } else if(records[i].kind==VkindGeVolume &&
-                  records[i].rights==Vexecute) {
-            if(++volume_count!=1) goto cleanup;
         } else goto cleanup;
     }
-    if(region_count!=4 || volume_count!=1) goto cleanup;
+    if(region_count!=4) goto cleanup;
     for(int i=0;i<4;++i) {
         long m=(i==1 || i==2) ?
             obj_region_map_flags(h[i],0,ObjRegionMapReadonly) :

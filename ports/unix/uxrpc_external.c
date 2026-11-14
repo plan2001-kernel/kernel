@@ -84,12 +84,11 @@ int uxrpc_external_run(UxService *service,int volume,UxOid oid,
         goto cleanup;
     launch.executable_volume=volume;
     launch.oid=oid;
-    launch.grant_count=5;
+    launch.grant_count=4;
     launch.grant[0].handle=h[0];launch.grant[0].rights=Vwrite;
     launch.grant[1].handle=h[1];launch.grant[1].rights=Vread;
     launch.grant[2].handle=h[2];launch.grant[2].rights=Vread;
     launch.grant[3].handle=h[3];launch.grant[3].rights=Vwrite;
-    launch.grant[4].handle=volume;launch.grant[4].rights=Vexecute;
     stage=7;
     process=uxspawn_start(&launch,args,(int)argc);
     if(process<=0) goto cleanup;
