@@ -10,6 +10,8 @@ long p9_full_region_close(int handle);
 #include "../../unix/uxservice.h"
 int p9_full_bind_files(UxService *service);
 void p9_full_unbind_files(void);
+/* Returns only an explicitly attached userspace service; never a Handle. */
+UxService *p9_full_file_service(void);
 int p9_full_bind_uxpipe(const int region_handles[6]);
 /* Enumerate and validate six exact Oinheritv stream grants + Vexecute.
  * No implicit console, OID, or arbitrary writable-region fallback. */

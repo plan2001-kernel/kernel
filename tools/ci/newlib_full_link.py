@@ -76,6 +76,7 @@ def main():
     sources = {
         "syscalls": PORT / "plan2001_syscalls.c",
         "posix": PORT / "posix_forward.c",
+        "dirent": ROOT / "ports/newlib/ash/dirent.c",
         "pipe": ROOT / "ports/unix/uxpipe.c",
         "pvd": ROOT / "ports/unix/pvd.c",
         "uxfs": ROOT / "ports/unix/uxfs.c",
@@ -130,7 +131,7 @@ def main():
                 "-Wl,-z,noexecstack", "-Wl,--gc-sections",
                 "-Wl,--build-id=none", "-o", str(elf),
                 str(startup), str(objects["startup"]), str(objects[program]),
-                str(objects["syscalls"]), str(objects["posix"]), str(objects["pipe"]),
+                str(objects["syscalls"]), str(objects["posix"]), str(objects["dirent"]), str(objects["pipe"]),
                 *(str(objects[key]) for key in ("pvd", "uxfs", "uxshell", "uxservice", "uxfd")),
                 str(native_stubs),
                 "-Wl,--start-group", str(libc), str(libm),

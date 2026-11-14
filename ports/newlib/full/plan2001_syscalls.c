@@ -113,6 +113,10 @@ void p9_full_unbind_files(void)
     uxfd_init(&file_table,0);
     files_bound=0;
 }
+UxService *p9_full_file_service(void)
+{
+    return files_bound ? file_table.service : 0;
+}
 static int translate_fs(int code)
 {
     switch(code) {
