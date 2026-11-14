@@ -8,6 +8,9 @@
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -22,6 +25,63 @@ extern int _fstat(int, struct stat *);
 extern int _isatty(int);
 extern int _getpid(void);
 extern int _kill(int, int);
+extern int _open(const char *, int, ...);
+extern int _stat(const char *, struct stat *);
+extern int _lstat(const char *, struct stat *);
+extern int _unlink(const char *);
+extern int _link(const char *, const char *);
+extern int _chdir(const char *);
+extern int _mkdir(const char *, mode_t);
+extern int _rename(const char *, const char *);
+extern int _access(const char *, int);
+
+/* Newlib's _open_r/_stat_r wrappers are not public open/stat when
+ * --disable-newlib-supplied-syscalls is selected. Provide real POSIX
+ * forwarders so ash does not accidentally resolve host-Linux functions.
+ */
+int open(const char *path, int flags, ...)
+{
+    mode_t mode=0;
+    if(flags & O_CREAT) {
+        va_list ap;
+        va_start(ap,flags);
+        mode=(mode_t)va_arg(ap,int);
+        va_end(ap);
+    }
+    return _open(path,flags,mode);
+}
+int stat(const char *path, struct stat *st)
+{
+    return _stat(path,st);
+}
+int lstat(const char *path, struct stat *st)
+{
+    return _lstat(path,st);
+}
+int unlink(const char *path)
+{
+    return _unlink(path);
+}
+int link(const char *src, const char *dst)
+{
+    return _link(src,dst);
+}
+int chdir(const char *path)
+{
+    return _chdir(path);
+}
+int mkdir(const char *path, mode_t mode)
+{
+    return _mkdir(path,mode);
+}
+int rename(const char *src, const char *dst)
+{
+    return _rename(src,dst);
+}
+int access(const char *path, int mode)
+{
+    return _access(path,mode);
+}
 
 int read(int fd, void *buf, size_t count)
 {

@@ -13,6 +13,8 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -645,6 +647,97 @@ int _stat(const char *path, struct stat *st)
     st->st_blksize=UXFS_DATA_MAX;
     return 0;
 }
+/* The POSIX cwd is a userland PVD projection, not kernel state.
+ * Every pathname operation requires an explicitly attached trusted service.
+ * Names/OIDs never create capabilities. A child with only UXPIPE stdio has
+ * no pathname authority until a service is attached or RPC is delegated.
+ */
+static UxService *file_service(void)
+{
+    return files_bound ? file_table.service : 0;
+}
+
+int _chdir(const char *path)
+{
+    UxService *s=file_service();
+    int result;
+    if(!s) { errno=ENOSYS; return -1; }
+    if(!path) { errno=EFAULT; return -1; }
+    result=pvd_chdir(s->fs.view,path);
+    return result==PVD_OK ? 0 : fail_fs(result);
+}
+
+char *getcwd(char *buf, size_t size)
+{
+    UxService *s=file_service();
+    char path[PVD_PATH_MAX];
+    unsigned int len;
+    int result;
+    if(!s) { errno=ENOSYS; return 0; }
+    result=pvd_getcwd(s->fs.view,path,sizeof path);
+    if(result!=PVD_OK) { (void)fail_fs(result); return 0; }
+    len=(unsigned int)strlen(path)+1;
+    if(!buf) {
+        /* Newlib supports the commonly used getcwd(NULL, 0) allocation. */
+        if(size==0) size=len;
+        if(size<len) { errno=ERANGE; return 0; }
+        buf=(char *)malloc(size);
+        if(!buf) { errno=ENOMEM; return 0; }
+    } else if(size<len || size==0) {
+        errno=ERANGE; return 0;
+    }
+    memcpy(buf,path,len);
+    return buf;
+}
+
+int _mkdir(const char *path, mode_t mode)
+{
+    UxService *s=file_service();
+    int result;
+    (void)mode; /* v1 PVD records no Unix mode: no capability is minted. */
+    if(!s) { errno=ENOSYS; return -1; }
+    if(!path) { errno=EFAULT; return -1; }
+    result=uxfs_mkdir(&s->fs,path);
+    if(result!=PVD_OK) return fail_fs(result);
+    result=uxservice_sync(s);
+    return result==PVD_OK ? 0 : fail_fs(result);
+}
+
+int _rename(const char *src, const char *dst)
+{
+    UxService *s=file_service();
+    int result;
+    if(!s) { errno=ENOSYS; return -1; }
+    if(!src || !dst) { errno=EFAULT; return -1; }
+    /* v1 UXFS supports regular-file moves only, not directory rename. */
+    result=uxfs_move(&s->fs,src,dst);
+    if(result!=PVD_OK) return fail_fs(result);
+    result=uxservice_sync(s);
+    return result==PVD_OK ? 0 : fail_fs(result);
+}
+
+int _access(const char *path, int mode)
+{
+    UxService *s=file_service();
+    unsigned int kind,length;
+    int result;
+    if(!s) { errno=ENOSYS; return -1; }
+    if(!path) { errno=EFAULT; return -1; }
+    if(mode & ~(F_OK|R_OK|W_OK|X_OK)) { errno=EINVAL; return -1; }
+    /* Existence is queryable with the service's explicit authority.
+     * Unix rwx bits cannot authorize ObjectSpace operations, so deny
+     * nontrivial synthetic permission queries instead of returning 0. */
+    if(mode!=F_OK) { errno=ENOSYS; return -1; }
+    result=uxfs_info(&s->fs,path,&kind,&length);
+    return result==PVD_OK ? 0 : fail_fs(result);
+}
+
+int _lstat(const char *path, struct stat *st)
+{
+    /* UXFS has no symlinks; do not claim the existence of symlink metadata. */
+    return _stat(path,st);
+}
+
 int _fork(void)
 {
     errno = ENOSYS; return -1; /* native RFORKEX is not POSIX fork */

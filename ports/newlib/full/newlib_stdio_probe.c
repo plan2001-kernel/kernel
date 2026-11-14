@@ -49,6 +49,46 @@ static void check_uxfiles(void)
     check(pvd_bootstrap(&view)==PVD_OK,"bootstrap PVD file view");
     uxservice_init(&service,&view);
     check(p9_full_bind_files(&service)==0,"bind explicit Unix file service");
+    /* Ash-relevant POSIX entrypoints must share this single PVD/UXFS
+     * authority and correctly deny absent paths. No kernel cwd/VFS. */
+    {
+        char cwd[PVD_PATH_MAX];
+        char *allocated;
+        struct stat info;
+        check(getcwd(cwd,sizeof cwd)==cwd && strcmp(cwd,"/")==0,
+              "Newlib getcwd PVD root");
+        check(mkdir("/tmp/ash",0700)==0,"Newlib mkdir PVD directory");
+        check(chdir("/tmp/ash")==0,"Newlib chdir PVD directory");
+        check(getcwd(cwd,sizeof cwd)==cwd &&
+              strcmp(cwd,"/tmp/ash")==0,"Newlib getcwd changed PVD");
+        errno=0;
+        check(getcwd(cwd,1)==NULL && errno==ERANGE,
+              "Newlib getcwd checks buffer length");
+        allocated=getcwd(NULL,0);
+        check(allocated!=NULL && strcmp(allocated,"/tmp/ash")==0,
+              "Newlib allocated getcwd");
+        free(allocated);
+        fd=open("input",O_CREAT|O_RDWR|O_TRUNC,0600);
+        check(fd>=3,"public POSIX open relative cwd");
+        check(write(fd,"ash",3)==3,"public POSIX write");
+        check(close(fd)==0,"public POSIX close");
+        check(rename("input","renamed")==0,"POSIX rename through UXFS");
+        check(stat("renamed",&info)==0 && info.st_size==3,
+              "POSIX stat renamed file");
+        check(lstat("renamed",&info)==0 && S_ISREG(info.st_mode),
+              "POSIX lstat ordinary file");
+        check(access("renamed",F_OK)==0,"POSIX access F_OK");
+        errno=0;
+        check(access("renamed",X_OK)==-1 && errno==ENOSYS,
+              "Do not forge executable permissions from path");
+        check(unlink("renamed")==0,"public POSIX unlink");
+        errno=0;
+        check(access("renamed",F_OK)==-1 && errno==ENOENT,
+              "POSIX access no longer exists");
+        check(chdir("/")==0,"Newlib chdir root");
+    }
+    printf("PLAN2001-NEWLIB-ASH-PATH-PASS\\n");
+    fflush(stdout);
     fd=_open(filename,O_CREAT|O_RDWR|O_TRUNC,0600);
     check(fd>=3,"Newlib _open via delegated Unix file view");
     check(write(fd,"newlib-file-test",16)==16,"Newlib write file");
@@ -65,6 +105,9 @@ static void check_uxfiles(void)
     check(_open(filename,O_RDONLY)==-1 && errno==ENOENT,
           "Newlib file path no longer exists");
     p9_full_unbind_files();
+    errno=0;
+    check(getcwd(buffer,sizeof(buffer))==NULL && errno==ENOSYS,
+          "without file service Newlib has no implicit cwd authority");
     printf("PLAN2001-NEWLIB-FULL-UXFILE-PASS\n");
     fflush(stdout);
 }
