@@ -1,5 +1,6 @@
 /* One authoritative UXFS/PVD instance shared by the shell evaluator and
- * in-process Newlib descriptor tables. Every durable mutation uses the
+ * in-process Newlib FD tables and the separate uxrpc child processes.
+ * Every durable mutation uses the
  * checked GE/O manifest + commit; no raw OID ever grants authority.
  */
 #include "uxservice.h"

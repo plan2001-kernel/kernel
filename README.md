@@ -54,6 +54,7 @@ The native diagnostic workflow links the upstream BusyBox `true.c` applet agains
 - [Architecture](docs/ARCHITECTURE.md)
 - [Minimal POSIX profile](docs/POSIX-PROFILE.md)
 - [BusyBox porting plan](docs/PORTING.md)
+- [Shared GE/O UXFS service over capability-only UXPIPE RPC](docs/UXFS-SHARED-GEO.md)
 - [Development instructions](AGENTS.md)
 
 The authoritative native definitions are in the [kernel ObjectSpace architecture](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECTSPACE.md) and [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md).

@@ -1,7 +1,8 @@
 /* Single-owner trusted Unix file service. No ambient GE/O authority:
  * durable operations are enabled only with a caller-provided UxStore whose
  * context holds an authorized native volume capability. A UxService is
- * process-local; cross-process RPC is NOT implemented by this header.
+ * process-local, but ports/unix/uxrpc.[ch] exposes its single authoritative
+ * instance to untrusted processes via bounded capability-only UXPIPE RPC.
  */
 #ifndef PLAN2001_UXSERVICE_H
 #define PLAN2001_UXSERVICE_H
