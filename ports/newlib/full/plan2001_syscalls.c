@@ -757,7 +757,9 @@ int _wait(int *status)
 }
 clock_t _times(struct tms *t)
 {
-    (void)t; errno = ENOSYS; return (clock_t)-1;
+    /* Fail-closed, and never leak uninitialized tms fields to ash times. */
+    if(t) memset(t,0,sizeof(*t));
+    errno = ENOSYS; return (clock_t)-1;
 }
 int _gettimeofday(struct timeval *tv, void *tz)
 {
