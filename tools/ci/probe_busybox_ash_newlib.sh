@@ -44,6 +44,23 @@ p.write_text(s)
 PY
 yes "" | make -C "$BB" oldconfig >> "$LOG" 2>&1 || true
 make -C "$BB" prepare >> "$LOG" 2>&1
+# BusyBox's generic platform.h defaults to glibc-like optional APIs,
+# including /etc/mtab and statfs, that this freestanding Newlib target
+# truly does not have. Edit only the THROWAWAY BusyBox checkout's
+# platform-feature assumptions; the original shell/ash.c stays immutable.
+python3 - "$BB/include/platform.h" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1])
+s=p.read_text()
+for name in ("HAVE_MNTENT_H", "HAVE_SYS_STATFS_H",
+             "HAVE_NET_ETHERNET_H", "HAVE_DEV_FD"):
+    old=f"#define {name} 1"
+    if old not in s:
+        raise SystemExit(f"unexpected BusyBox upstream platform.h: {name}")
+    s=s.replace(old,f"/* Plan2001/Newlib: {name} unavailable */")
+p.write_text(s)
+PY
 CC=${CC:-gcc-14}
 GCCHDR=$("$CC" -print-file-name=include)
 test -d "$GCCHDR" || exit 1
