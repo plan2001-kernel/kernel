@@ -19,6 +19,7 @@
 #include <sys/utsname.h>
 #include <poll.h>
 #include <termios.h>
+#include <sys/resource.h>
 
 extern int _fstat(int fd, struct stat *st);
 extern int _open(const char *path, int flags, ...);
@@ -109,7 +110,7 @@ static void check_uxfiles(void)
               "POSIX access no longer exists");
         check(chdir("/")==0,"Newlib chdir root");
     }
-    printf("PLAN2001-NEWLIB-ASH-PATH-PASS\\n");
+    printf("PLAN2001-NEWLIB-ASH-PATH-PASS\n");
     fflush(stdout);
     fd=_open(filename,O_CREAT|O_RDWR|O_TRUNC,0600);
     check(fd>=3,"Newlib _open via delegated Unix file view");
@@ -227,6 +228,7 @@ int main(int argc, char **argv)
     {
         struct utsname uts;
         struct termios attr;
+        struct rlimit limits;
         check(uname(&uts)==0 &&
               strcmp(uts.sysname,"Plan2001")==0 &&
               strcmp(uts.machine,"x86_64")==0,
@@ -237,7 +239,17 @@ int main(int argc, char **argv)
         errno=0;
         check(tcgetattr(1,&attr)==-1 && errno==ENOTTY,
               "ash must not claim tty control on native console");
-        printf("PLAN2001-NEWLIB-ASH-POSIX-PASS\\n");
+        check(getrlimit(RLIMIT_NOFILE,&limits)==0 &&
+              limits.rlim_cur==3+UXFD_SLOTS &&
+              limits.rlim_max==3+UXFD_SLOTS,
+              "ash getrlimit reports actual bounded UXFD capacity");
+        errno=0;
+        check(setrlimit(RLIMIT_NOFILE,&limits)==-1 && errno==ENOSYS,
+              "ash setrlimit must not bypass native capability budgets");
+        errno=0;
+        check(getrlimit(RLIMIT_DATA,&limits)==-1 && errno==ENOSYS,
+              "ash cannot infer kernel memory budget from POSIX RLIMIT");
+        printf("PLAN2001-NEWLIB-ASH-POSIX-PASS\n");
         fflush(stdout);
     }
     check(snprintf(tmp, sizeof tmp, "answer:%d:%s", 42, "newlib") == 16,
