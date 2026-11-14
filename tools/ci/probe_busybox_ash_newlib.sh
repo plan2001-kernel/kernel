@@ -75,6 +75,7 @@ set +e
   -I"$ROOT/ports/newlib/ash/include" \
   -I"$BB/include" -I"$BB/shell" \
   -isystem "$INC" -isystem "$GCCHDR" \
+  -include "$BB/include/autoconf.h" \
   -c "$BB/shell/ash.c" -o "$OUT/ash-newlib.o" \
   >> "$LOG" 2>&1
 rc=$?
