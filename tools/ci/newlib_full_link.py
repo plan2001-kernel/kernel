@@ -101,6 +101,7 @@ def main():
         "-fno-unwind-tables", "-fno-omit-frame-pointer",
         "-ffunction-sections", "-fdata-sections",
         "-Wall", "-Wextra", "-Werror",
+        "-I", str(ROOT / "ports/newlib/ash/include"),
         "-I", str(PORT), "-I", str(args.kernel / "runtime/abi"),
         "-isystem", str(include), "-isystem", gcc_includes,
     ]
