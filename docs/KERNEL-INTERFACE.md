@@ -92,8 +92,16 @@ path; the loader's in-place `OEXECUTE` remains the autostart action.
 Unregistered names and non-boot registration are rejected. Cross-owner
 termination requires an explicitly delegated process `Vcontrol` Handle;
 `Vobserve` alone never authorizes it. The optional
-`Ospawn`/`Oinherit`/`Oinheritv` layout is unchanged and describes
-explicitly delegated capability rights, CPU placement and budgets.
+`Ospawn`/`Oinherit`/`Oinheritv` records describe explicitly delegated
+capability rights, CPU placement and budgets. SPAWN and RFORKEX accept up to
+1024 explicit grants, the full process-local native Handle capacity. This
+uses Linux's initial RLIMIT_NOFILE soft limit as the default capacity; it
+does not implement Linux rlimits or their adjustable hard limit. There is
+no separate smaller per-launch grant limit. Both calls snapshot the count
+once, validate it before allocating, and read only that many entries.
+Inheritance plans and Handle-list snapshots use heap memory, not arrays
+proportional to this limit on the kernel stack. Handle slot projections use
+`VhandleSlotMask`; a Handle number alone never authorizes access.
 
 The named-owner and registered-program tables are volatile RAM. Stored object
 OwnerIDs survive restart, but the names and program records do not. Trusted
@@ -313,7 +321,7 @@ MicroPython attaches by enumerating its process-local region grants.
 No new IPC primitive or syscall is introduced. A process may not write to
 the framebuffer or kernel `kmesg` through these console grants.
 
-`Ctrl+Alt+F1` selects the kernel SystemConsole; `Ctrl+Alt+F2` through
+`Win+F1` selects the kernel SystemConsole; `Win+F2` through
 `F9` select a live process session. The kernel retains off-screen output
 history independently of user process lifetime. A session exit releases
 its input and does not terminate other processes. Kernel diagnostics
@@ -325,7 +333,7 @@ implemented.
 Physical PS/2 set-1 input is translated once by the kernel. `keymap=fi`
 (the default) and `keymap=us` select built-in Unicode tables in plan9.ini.
 Fi accent keys emit their literal characters immediately. Navigation emits
-the escape sequences understood by MicroPython readline; Ctrl+Alt+F1–F9
+the escape sequences understood by MicroPython readline; Win+F1–F9
 are consumed by kernel focus handling. USB keyboard input is not implemented.
 
 `ObjOpConsoleInfo=59` requires Vmeta on a console input region and returns

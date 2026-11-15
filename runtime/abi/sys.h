@@ -314,9 +314,12 @@ struct Oinherit {
  * This is explicit delegation, never implicit inheritance.  Child Handle
  * numbers are allocated in list order to the lowest free child slots; they
  * are not the parent's numbers. */
+enum { OINHERIT_MAXHANDLES = 1024 };
+
+/* Only nhandles entries are read; callers may allocate a counted tail. */
 struct Oinheritv {
 	uvlong nhandles;
-	struct { uvlong handle; uvlong rights; } h[8];
+	struct { uvlong handle; uvlong rights; } h[OINHERIT_MAXHANDLES];
 };
 
 /* RFORKEX(143): the one canonical direct fork boundary, with explicit object
@@ -344,7 +347,7 @@ struct Oinheritv {
 #define RFORKEX			143
 enum {
 	RFORKEX_VERSION		= 1,
-	RFORKEX_MAXHANDLES	= 16,
+	RFORKEX_MAXHANDLES	= OINHERIT_MAXHANDLES,
 };
 
 struct Rforkex {

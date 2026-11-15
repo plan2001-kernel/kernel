@@ -267,9 +267,9 @@ keyboardproc(void *arg)
             tsleep(&up->sleep, return0, nil, 10);
             continue;
         }
-        if(!kbd_e0 && kbd_skip == 0 && kbd_alt &&
-           (kbd_ctll || kbd_ctlr) && sc >= 0x3b && sc <= 0x43){
-            requestedview = sc - 0x3b;
+        target = consoleviewkey(sc);
+        if(target >= 0){
+            requestedview = target;
             coherence();
             while(requestedview >= 0)
                 tsleep(&up->sleep, return0, nil, 1);
@@ -282,7 +282,7 @@ keyboardproc(void *arg)
         while(ipend < npend) bytes[count++] = pend[ipend++];
         target = current;
         if(target == 0){
-            if(!kbd_ctll && !kbd_ctlr && !kbd_alt)
+            if(!kbd_ctll && !kbd_ctlr && !kbd_alt && !kbd_metal && !kbd_metar)
                 for(n=0; n<count; n++) kconskey(bytes[n]);
             continue;
         }

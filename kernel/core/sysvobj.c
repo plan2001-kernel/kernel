@@ -50,7 +50,7 @@ enum {
 	Vobjbytesmax	= 32*1024*1024,
 	Venvmax		= 64,
 	Vregionmax	= 16*1024*1024,
-	Vgenmax		= 0x7fffff,
+	Vgenmax		= 0x7fffffff >> VhandleSlotBits,
 	Vnamemax	= 32,
 	/* Native-family compatibility limits, now enforced over the one
 	 * process-local Vhand table instead of separate tables. */
@@ -1774,7 +1774,7 @@ vinstall(Vhtab *t, Vhand *h)
 	t->s[i].h = h;
 	t->s[i].gen = g;
 	unlock(&t->lk);
-	return (int)((g << 8) | (i + 1));
+	return (int)((g << VhandleSlotBits) | (i + 1));
 }
 
 static Vhand*
@@ -1788,8 +1788,8 @@ vlookupin(Proc *p, int handle, int need)
 
 	if(handle <= 0)
 		error(Ebadarg);
-	i = (handle & 0xff) - 1;
-	gen = (ulong)handle >> 8;
+	i = (handle & VhandleSlotMask) - 1;
+	gen = (ulong)handle >> VhandleSlotBits;
 	if(i < 0 || i >= Vhandmax || gen == 0)
 		error(Ebadarg);
 	if(p == nil || (t = p->vobjhandles) == nil)
@@ -1831,20 +1831,18 @@ void
 vobjprocexit(Proc *p)
 {
 	Vhtab *t;
-	Vhand *h[Vhandmax];
+	Vhand *h;
 	int i;
 
 	if((t = p->vobjhandles) == nil)
 		return;
 	p->vobjhandles = nil;
-	lock(&t->lk);
+	/* Detached table is private to exit; provider cleanup may sleep. */
 	for(i = 0; i < Vhandmax; i++){
-		h[i] = t->s[i].h;
+		h = t->s[i].h;
 		t->s[i].h = nil;
+		vhandput(h);
 	}
-	unlock(&t->lk);
-	for(i = 0; i < Vhandmax; i++)
-		vhandput(h[i]);
 	free(t);
 }
 
@@ -1864,14 +1862,15 @@ vobjprocexec(Proc *p)
 int
 vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 {
-	int i, slot, used[Vhandmax];
+	int i, slot;
+	uchar *used;
 	uvlong rights;
 	Vhand *h;
 
 	if(vi == nil || n < 0 || n > Vhandmax || (n > 0 && list == nil))
 		error(Ebadarg);
 	memset(vi, 0, sizeof *vi);
-	memset(used, 0, sizeof used);
+	used = nil;
 	/*
 	 * One function-wide cleanup path.  H holds at most the Handle currently
 	 * being validated; ownership moves to VI (and H is cleared) only after
@@ -1884,7 +1883,15 @@ vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 		if(h != nil)
 			vhandput(h);
 		vobjinheritrelease(vi);
+		free(used);
 		nexterror();
+	}
+	if(n > 0){
+		vi->e = malloc(n * sizeof vi->e[0]);
+		used = malloc(Vhandmax);
+		if(vi->e == nil || used == nil)
+			error(Enomem);
+		memset(used, 0, Vhandmax);
 	}
 	for(i = 0; i < n; i++){
 		h = vlookup(list[i].handle, Vdelegate);
@@ -1915,6 +1922,7 @@ vobjinheritprepare(Vinherit *vi, Vinhand *list, int n)
 		h = nil;		/* VI owns the reference from here */
 	}
 	poperror();
+	free(used);
 	return vi->n;
 }
 
@@ -2032,7 +2040,7 @@ vobjinheritchildhandle(Vinherit *vi, int index)
 {
 	if(vi == nil || index < 0 || index >= vi->n)
 		return 0;
-	return (int)((vi->e[index].gen << 8) | (vi->e[index].slot + 1));
+	return (int)((vi->e[index].gen << VhandleSlotBits) | (vi->e[index].slot + 1));
 }
 
 /* Resolve a named parent Handle to its unique plan destination.  Returns the
@@ -2054,7 +2062,7 @@ vobjinheritsrchandle(Vinherit *vi, int srchandle)
 	}
 	if(found < 0)
 		return 0;
-	return (int)((vi->e[found].gen << 8) | (vi->e[found].slot + 1));
+	return (int)((vi->e[found].gen << VhandleSlotBits) | (vi->e[found].slot + 1));
 }
 
 void
@@ -2066,6 +2074,7 @@ vobjinheritrelease(Vinherit *vi)
 		return;
 	for(i = 0; i < vi->n; i++)
 		vhandput(vi->e[i].src);
+	free(vi->e);
 	memset(vi, 0, sizeof *vi);
 }
 
@@ -2373,8 +2382,8 @@ vobjclosehandle(int handle)
 
 	if(handle <= 0)
 		error(Ebadarg);
-	i = (handle & 0xff) - 1;
-	gen = (ulong)handle >> 8;
+	i = (handle & VhandleSlotMask) - 1;
+	gen = (ulong)handle >> VhandleSlotBits;
 	if(i < 0 || i >= Vhandmax || gen == 0)
 		error(Ebadarg);
 	t = vgettab(0);
@@ -2448,8 +2457,8 @@ vobjclosekind(int handle, int kind)
 
 	if(handle <= 0)
 		error(Ebadarg);
-	i = (handle & 0xff) - 1;
-	gen = (ulong)handle >> 8;
+	i = (handle & VhandleSlotMask) - 1;
+	gen = (ulong)handle >> VhandleSlotBits;
 	if(i < 0 || i >= Vhandmax || gen == 0)
 		error(Ebadarg);
 	if((t = vgettab(0)) == nil)
@@ -4007,12 +4016,22 @@ vobjlist(void *buf, long n)
 {
 	long count, i;
 	Vhtab *t;
-	VobjListRec rec[Vhandmax];
+	VobjListRec *rec;
 
 	if(n < 0 || n > Vhandmax || (n > 0 && buf == nil))
 		error(Ebadarg);
 	if(n > 0)
 		validaddr((uintptr)buf, n * sizeof(VobjListRec), 1);
+	rec = nil;
+	if(waserror()){
+		free(rec);
+		nexterror();
+	}
+	if(n > 0){
+		rec = malloc(n * sizeof *rec);
+		if(rec == nil)
+			error(Enomem);
+	}
 	count = 0;
 	if((t = vgettab(0)) != nil){
 		lock(&t->lk);
@@ -4020,9 +4039,9 @@ vobjlist(void *buf, long n)
 			Vhand *h = t->s[i].h;
 			if(h == nil)
 				continue;
-			if(count < Vhandmax){
+			if(count < n){
 				memset(&rec[count], 0, sizeof rec[count]);
-				rec[count].handle = (unsigned int)((t->s[i].gen << 8) | (i + 1));
+				rec[count].handle = (unsigned int)((t->s[i].gen << VhandleSlotBits) | (i + 1));
 				rec[count].kind = (unsigned int)h->obj->kind;
 				rec[count].rights = (unsigned int)h->rights;
 				rec[count].incarnation = h->obj->incarnation;
@@ -4037,6 +4056,8 @@ vobjlist(void *buf, long n)
 		long k = count < n ? count : n;
 		memmove(buf, rec, k * sizeof rec[0]);
 	}
+	free(rec);
+	poperror();
 	return count;
 }
 
