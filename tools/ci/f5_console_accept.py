@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials"):
+                "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -155,7 +155,20 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode == "multicall-essentials":
+    if mode == "multicall-pipeline":
+        waitscreen("pipeline-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("pipeline-prompt", "ash$", 45)
+        enter("echo pipe-line > koe.txt")
+        enter("cat koe.txt | awk '{print $0}'; echo PIPE-END")
+        result=waitscreen("pipeline-exact", "PIPE-END", occurrences=2)
+        assert "\npipe-line\nPIPE-END\n" in result, result
+        enter("cat koe.txt | sed s/pipe/second/ | awk '{print $0}'; echo THREE-END")
+        result=waitscreen("pipeline-three", "THREE-END", occurrences=2)
+        assert "\nsecond-line\nTHREE-END\n" in result, result
+        enter("rm koe.txt; echo PIPE-CLEAN")
+        waitscreen("pipeline-clean", "PIPE-CLEAN", occurrences=2)
+        print("PASS: exact cat FILE | awk and three external stages with inherited console descriptors")
+    elif mode == "multicall-essentials":
         waitscreen("essentials-ready", "PLAN2001-MULTICALL-READY")
         waitscreen("essentials-prompt", "ash$", 45)
         enter("echo banana > /tmp/text; echo apple >> /tmp/text; echo banana >> /tmp/text")

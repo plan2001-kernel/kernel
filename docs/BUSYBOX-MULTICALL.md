@@ -50,7 +50,9 @@ bash tools/ci/guest_busybox_multicall.sh ../deps/kernel ../reports/busybox-multi
 
 Use Finnish `keymap=fi` and QEMU `-k fi` when testing with a Finnish keyboard.
 Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. This shortcut
-requires kernel PR #66 (tested commit `20775a7`); the kernel ABI is unchanged.
+requires kernel PR #66 for Win console shortcuts and the stacked SPAWN
+capacity change for native 1024-Handle inheritance. This integration gate
+uses that kernel branch; moving-main compatibility is not yet established.
 The console acceptance test uses the new shortcut, so that PR must be integrated
 before the moving-main interactive CI gate can pass.
 
@@ -113,11 +115,15 @@ failure leaves the original content intact. Stream editing and redirection
 remain usable. Directory moves and Unix permission/ownership preservation are
 also unsupported.
 
-The 64-node, 1 KiB-per-file volatile UXFS bound remains. Native SPAWN allows
-eight grants, so complex external pipelines or awk command streams can exceed
-the limit and fail. Input redirection releases unused console-input grants;
-`2>&1` can share output/error endpoints when appropriate. No descriptor is
-silently dropped to make a process launch succeed.
+The 64-node, 1 KiB-per-file volatile UXFS bound remains. SPAWN and RFORKEX
+share the native 1024-Handle capacity, based on Linux's initial RLIMIT_NOFILE
+soft limit. The C inheritance plan has the same capacity. External pipelines
+preserve stdin, stdout, stderr and other open descriptors without requiring
+input redirection or merging stderr. The console regression runs
+`cat koe.txt | awk '{print $0}'` and a three-external-command pipeline. A
+separate native test leaves fourteen pipe descriptors open across fork/exec,
+exercising more than sixteen native grants. This does not raise the separate
+19-entry Unix fd table or the volatile file/node limits.
 
 ## Evidence and limits
 

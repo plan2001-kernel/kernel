@@ -3,7 +3,7 @@
 #define PLAN2001_NEWLIB_PROCESS_H
 #include <stdint.h>
 #include <sys/types.h>
-#define P9_GRANTS 16
+#define P9_GRANTS 1024
 #define P9_FDS 19
 #define P9_EXECUTABLES 4
 #define P9_CHILDREN 8

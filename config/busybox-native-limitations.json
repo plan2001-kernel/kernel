@@ -28,6 +28,6 @@
   },
   "awk": {
     "missing_interfaces": [],
-    "reason": "Fields, regex, arithmetic/libm, system and command streams use native adapters. Commands remain subject to native argument, child, fd and eight-grant limits."
+    "reason": "Fields, regex, arithmetic/libm, system and command streams use native adapters. Commands remain subject to native argument, child and fd limits; SPAWN uses the shared 1024-Handle capacity."
   }
 }

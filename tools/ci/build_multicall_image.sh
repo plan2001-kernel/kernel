@@ -26,6 +26,8 @@ mkdir -p "$OUT/eof-console"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/eof-console" multicall-eof
 mkdir -p "$OUT/essentials-console"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/essentials-console" multicall-essentials
+mkdir -p "$OUT/pipeline-console"
+bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/pipeline-console" multicall-pipeline
 AHCI_STATUS=PASS
 if ! UX_HW_CONTROLLER=ahci bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT" multicall; then
   AHCI_STATUS=FAIL

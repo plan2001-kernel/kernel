@@ -31,7 +31,7 @@ int p9_plan_resolve(int *handles,unsigned count)
     for(i=0;i<count;++i) {
         /* RFORKEX destinations and SPAWN list order are explicit slots.
          * SYSCTL supplies the generation-tagged Handle, never a guess. */
-        j=(records[i].handle&255u)-1u;
+        j=(records[i].handle&VhandleSlotMask)-1u;
         if(j>=count || handles[j]) { errno=EACCES; return -1; }
         handles[j]=(int)records[i].handle;
     }

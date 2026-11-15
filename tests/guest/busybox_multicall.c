@@ -196,6 +196,17 @@ int main(void)
     }
     /* Native diagnostic console cannot delegate. Commands inherit pipe fds. */
     (void)close(0); (void)close(1); (void)close(2);
+    /* Leave fourteen unrelated pipe descriptors open across real exec.
+     * This needs more than sixteen native grants, not just the old eight. */
+    {
+        int extra[7][2];
+        for(unsigned i=0;i<7;++i) check(pipe(extra[i])==0,"open inherited pipe descriptors");
+        RUN(0,"many-grants\n","/bin/echo","many-grants");
+        for(unsigned i=0;i<7;++i) {
+            check(close(extra[i][0])==0 && close(extra[i][1])==0,"close inherited pipe descriptors");
+        }
+        emit("PASS: real fork/exec with more than sixteen native grants\n");
+    }
     RUN(0, EXPECTED_APPLETS, "busybox", "--list");
     RUN(0, EXPECTED_APPLETS_FULL, "busybox", "--list-full");
     RUN(0, "hello\n", "busybox", "echo", "hello");
