@@ -14,7 +14,7 @@
 #define UXFS_DIR 1u
 #define UXFS_FILE 2u
 #define UXFS_MAGIC 0x3153465855323030ULL /* "002UXFS1" ABI-local marker */
-#define UXFS_VERSION 3u
+#define UXFS_VERSION 4u
 
 typedef unsigned long long UxOid;
 typedef struct {

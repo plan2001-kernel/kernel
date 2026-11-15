@@ -181,7 +181,7 @@ executable span and reject unframed/corrupt input explicitly. The host
 `object_format.py inspect` command and native `space.ometa(oid)` read metadata;
 `space.oraw(oid)` reads only raw content under the same volume capability.
 
-UXFS v3 publishes raw file bytes, profile CBOR and footer in one version.
+UXFS v4 publishes raw file bytes, profile CBOR and footer in one version.
 Its framed manifest includes directory metadata and is committed after
 successor files are staged. Object-owned names and known creation instants
 survive namespace rename. Different OIDs may share the same object name.

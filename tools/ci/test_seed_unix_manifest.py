@@ -20,11 +20,13 @@ class ManifestTest(unittest.TestCase):
         data,metadata=unpack(initial_manifest(self.kernel))
         self.assertTrue(metadata)
         self.assertEqual(len(data), MANIFEST_BYTES)
-        self.assertEqual(struct.unpack_from("<QII", data), (0x3153465855323030, 3, 0))
+        self.assertEqual(struct.unpack_from("<QII", data), (0x3153465855323030, 4, len(BOOT_DIRS)))
         self.assertEqual(struct.unpack_from("<Q", data, len(data)-8)[0],
                          fnv1a(data[:-8]))
         for slot, directory in enumerate(BOOT_DIRS):
-            offset = 16 + slot * 272
+            offset = 16 + slot * (4+272+376)
+            self.assertEqual(struct.unpack_from("<I",data,offset)[0],slot)
+            offset += 4
             self.assertEqual(data[offset:offset+256].split(b"\0", 1)[0],
                              directory.encode())
             self.assertEqual(struct.unpack_from("<QII", data, offset+256), (0, 0, 1))

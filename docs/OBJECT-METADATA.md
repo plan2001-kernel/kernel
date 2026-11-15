@@ -82,8 +82,13 @@ For metadata-bearing files, a persisted UXFS implementation needs to:
   No guessed OID or copied OwnerID authorizes access.
 
 **Implementation:** native ELF/MPY provisioning and loading use validated
-footers. UXFS v3 publishes each file as raw bytes, CBOR metadata and footer
-in one GE/O version, and publishes its framed manifest only after staging
+footers. UXFS v4 publishes each file as raw bytes, CBOR metadata and footer
+in one GE/O version. Its sparse manifest stores only live slot-indexed node
+and metadata records, keeping inode slots stable without writing empty
+capacity on every access-time update. The checked raw layout is a 16-byte
+magic/version/count header, ascending `(uint32 slot, UxNode, UxMeta)` records,
+and an 8-byte FNV-1a checksum in the native AMD64 little-endian profile.
+It publishes its framed manifest only after staging
 all successor files. Original name, known creation time, media type,
 mode/uid/gid/rdev and known atime/mtime/ctime/birthtime are restored. Unknown
 metadata keys, including producer-specific ACL/xattr values, survive rewrites;

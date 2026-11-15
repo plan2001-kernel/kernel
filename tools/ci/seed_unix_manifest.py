@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision a *fresh* GE/O seed with a checked framed UXFS v3 root manifest.
+"""Provision a *fresh* GE/O seed with a checked framed UXFS v4 root manifest.
 
 The formatter's existing optional seed/bad + seed/badoid object slot holds an
 ordinary, correctly formatted UXFS manifest. No kernel or GE/O format changes.
@@ -17,7 +17,7 @@ BOOT_DIRS = ("/", "/bin", "/dev", "/etc", "/home", "/tmp",
 NODES = 2048
 NODE_SIZE = 272
 META_SIZE = 376
-MANIFEST_BYTES = 16 + NODES * NODE_SIZE + NODES * META_SIZE + 8
+MANIFEST_BYTES = 24 + len(BOOT_DIRS)*(4+NODE_SIZE+META_SIZE)
 
 
 def fnv1a(data: bytes) -> int:
@@ -28,22 +28,13 @@ def fnv1a(data: bytes) -> int:
 
 
 def initial_manifest(kernel: Path) -> bytes:
-    header = struct.pack("<QII", UXFS_MAGIC, 3, 0)
-    nodes = bytearray(NODES * NODE_SIZE)
-    for slot, path in enumerate(BOOT_DIRS):
-        label = path.encode("ascii")
-        assert len(label) < 256
-        offset = slot * NODE_SIZE
-        nodes[offset:offset + len(label)] = label
-        struct.pack_into("<QII", nodes, offset + 256, 0, 0, 1)
-    metadata=bytearray(NODES*META_SIZE)
+    payload=bytearray(struct.pack("<QII",UXFS_MAGIC,4,len(BOOT_DIRS)))
     for slot,path in enumerate(BOOT_DIRS):
         name=path.rsplit('/',1)[-1] or '/'
-        entry=struct.pack('<256s64sqqqqQIIII',name.encode(),b'inode/directory',0,0,0,0,0,0o40700,0,0,0)
-        metadata[slot*META_SIZE:(slot+1)*META_SIZE]=entry
-    payload = header + bytes(nodes)+bytes(metadata)
-    result = payload + struct.pack("<Q", fnv1a(payload))
-    assert len(result) == MANIFEST_BYTES
+        payload.extend(struct.pack('<I256sQII',slot,path.encode(),0,0,1))
+        payload.extend(struct.pack('<256s64sqqqqQIIII',name.encode(),b'inode/directory',0,0,0,0,0,0o40700,0,0,0))
+    result=bytes(payload)+struct.pack('<Q',fnv1a(payload))
+    assert len(result)==MANIFEST_BYTES
     import sys
     sys.path.insert(0,str(kernel/'tools/host'))
     from object_format import pack,cbor
@@ -66,4 +57,4 @@ if __name__ == "__main__":
     parser.add_argument("--kernel",type=Path,required=True)
     args=parser.parse_args()
     provision(args.seed,args.kernel)
-    print(f"Provisioned framed UXFS v3 GE/O manifest at 0x{MANIFEST_OID:016x}")
+    print(f"Provisioned framed UXFS v4 GE/O manifest at 0x{MANIFEST_OID:016x}")

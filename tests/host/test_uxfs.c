@@ -109,6 +109,8 @@ int main(void)
     assert(create(&disk, &((UxOid){0})) == 0);
     assert(uxfs_save(&fs, &store, 101) == 0);
     assert(disk.commits == 1 && !fs.dirty);
+    /* Empty inode capacity must not consume storage on every metadata update. */
+    assert(disk.committed[1].n < 32u*1024u);
     previous_oid = fs.nodes[11].oid;
     disk.denied = 1;
     assert(uxfs_save(&fs, &store, 101) == PVD_OK);

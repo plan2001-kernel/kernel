@@ -397,10 +397,8 @@ int uxfs_list(UxFs *fs, const char *path, UxEmit emit, void *ctx)
 typedef struct {
     UxOid magic;
     unsigned int version;
-    unsigned int reserved;
     UxNode nodes[UXFS_NODES];
     UxMeta metadata[UXFS_NODES];
-    UxOid checksum;
 } UxManifest;
 static UxOid hash(const void *data, unsigned long n)
 {
@@ -408,6 +406,38 @@ static UxOid hash(const void *data, unsigned long n)
     UxOid h = 14695981039346656037ULL;
     while (n--) { h ^= *p++; h *= 1099511628211ULL; }
     return h;
+}
+/* Sparse native manifest: header, (slot,node,metadata) records, checksum.
+ * Empty capacity is never written. Slot numbers preserve local inode identity. */
+#define MANIFEST_RECORD (4u+sizeof(UxNode)+sizeof(UxMeta))
+#define MANIFEST_MAX (24u+UXFS_NODES*MANIFEST_RECORD)
+static unsigned manifest_pack(UxManifest *d,unsigned char *out)
+{
+    unsigned count=0,off=16;
+    for(unsigned i=0;i<UXFS_NODES;i++)if(d->nodes[i].kind){
+        bytes(out+off,&i,4);off+=4;
+        bytes(out+off,&d->nodes[i],sizeof(UxNode));off+=sizeof(UxNode);
+        bytes(out+off,&d->metadata[i],sizeof(UxMeta));off+=sizeof(UxMeta);count++;
+    }
+    bytes(out,&d->magic,8);bytes(out+8,&d->version,4);bytes(out+12,&count,4);
+    UxOid sum=hash(out,off);bytes(out+off,&sum,8);return off+8;
+}
+static int manifest_unpack(UxManifest *d,const unsigned char *in,unsigned size)
+{
+    unsigned count,off=16,previous=0;UxOid sum;
+    if(size<24)return -1;
+    zero(d,sizeof *d);bytes(&d->magic,in,8);bytes(&d->version,in+8,4);bytes(&count,in+12,4);
+    if(d->magic!=UXFS_MAGIC || d->version!=UXFS_VERSION || count>UXFS_NODES ||
+       size!=24+count*MANIFEST_RECORD)return -1;
+    bytes(&sum,in+size-8,8);if(sum!=hash(in,size-8))return -1;
+    for(unsigned i=0;i<count;i++){
+        unsigned slot;bytes(&slot,in+off,4);off+=4;
+        if(slot>=UXFS_NODES || (i && slot<=previous))return -1;
+        previous=slot;bytes(&d->nodes[slot],in+off,sizeof(UxNode));off+=sizeof(UxNode);
+        bytes(&d->metadata[slot],in+off,sizeof(UxMeta));off+=sizeof(UxMeta);
+        if(!d->nodes[slot].kind)return -1;
+    }
+    return 0;
 }
 /* Copy-on-write persistence: never replace the object named by a published
  * manifest until its successor has committed. GE/O create may commit an
@@ -449,16 +479,15 @@ int uxfs_save(UxFs *fs, const UxStore *s, UxOid manifest)
                s->put(s->context,fresh,framed,n->length+meta+32))return PVD_EIO;
         }
     }
-    disk.checksum = hash(&disk, sizeof(disk)-sizeof(disk.checksum));
-    static unsigned char envelope[sizeof(UxManifest)+512];
+    static unsigned char envelope[MANIFEST_MAX+512];
+    unsigned raw=manifest_pack(&disk,envelope);
     UxMeta manifestmeta;unsigned msize;
     uxmeta_init(&manifestmeta,"uxfs-manifest",UXFS_FILE,0);
     const char *mt="application/vnd.plan2001.uxfs-manifest";
     bytes(manifestmeta.media_type,mt,length(mt)+1);
-    if(uxobject_metadata(&manifestmeta,0,0,envelope+sizeof(disk),480,&msize))return PVD_EIO;
-    bytes(envelope,&disk,sizeof(disk));
-    if(uxobject_footer(envelope+sizeof(disk)+msize,sizeof(disk),msize))return PVD_EIO;
-    if (s->put(s->context, manifest, envelope, sizeof(disk)+msize+32) ||
+    if(uxobject_metadata(&manifestmeta,0,0,envelope+raw,480,&msize))return PVD_EIO;
+    if(uxobject_footer(envelope+raw+msize,raw,msize))return PVD_EIO;
+    if (s->put(s->context, manifest, envelope, raw+msize+32) ||
         s->commit(s->context))
         return PVD_EIO;
     for (i = 0; i < UXFS_NODES; ++i) {
@@ -489,13 +518,11 @@ int uxfs_restore(UxFs *fs, const UxStore *s, UxOid manifest)
     int rc;
     if (!fs || !fs->view || !s || !s->get || !manifest)
         return PVD_EINVAL;
-    static unsigned char envelope[sizeof(UxManifest)+UXMETA_ARENA+32];
+    static unsigned char envelope[MANIFEST_MAX+UXMETA_ARENA+32];
     unsigned rawsize,metasize;
     if(s->get(s->context,manifest,envelope,sizeof envelope,&n) ||
-       uxobject_split(envelope,n,&rawsize,&metasize) || rawsize!=sizeof(disk))return PVD_EIO;
-    bytes(&disk,envelope,rawsize);
-    if(disk.magic!=UXFS_MAGIC || disk.version!=UXFS_VERSION || disk.reserved!=0 ||
-       disk.checksum!=hash(&disk,sizeof(disk)-sizeof(disk.checksum)))return PVD_EIO;
+       uxobject_split(envelope,n,&rawsize,&metasize) ||
+       manifest_unpack(&disk,envelope,rawsize))return PVD_EIO;
     if (disk.nodes[0].kind != UXFS_DIR ||
         !same(disk.nodes[0].path, "/")) return PVD_EIO;
     if (pvd_bootstrap(&staged_view) != PVD_OK) return PVD_EIO;
