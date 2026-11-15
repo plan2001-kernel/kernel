@@ -49,8 +49,10 @@ CBOR key names, a metadata schema or even nonempty metadata. Unknown
 metadata must remain opaque so future codecs and applications can coexist.
 
 For durable understanding decades after creation, producers SHOULD retain:
-* **Original descriptive filename**, e.g. kernel_trap.c, separately from
-  any current Unix pathname or ObjectSpace label. Preserve it after rename.
+* **One object-owned descriptive name per durable OID**, e.g.
+  kernel_trap.c, independent of all namespace bindings. Preserve this name
+  when the object is bound, renamed or aliased in a Unix/ObjectSpace view.
+  Different OIDs may have the **same** object-owned name.
 * **Original creation instant**, including timezone or UTC, when honestly
   known. Never silently synthesize an origin creation time.
 * **Media/data type** and any format/schema version needed for decoding.
@@ -58,8 +60,14 @@ For durable understanding decades after creation, producers SHOULD retain:
 * Digest of the **raw** bytes, provenance, and optionally other identifiers,
   relationships and origin observations.
 
-The suggested existing O-Envelope fields are name, created, media_type and
-metadata; application-specific fields or nested maps are unrestricted.
+The recommended object-name cardinality is **one descriptive name per
+OID when a name is recorded**, not one unique name globally. This is the
+object's own metadata, not an ObjectSpace binding label: a single OID can
+be bound under many unrelated labels, including randomly selected ones,
+and several different OIDs can carry the same object name. Binding or
+rebinding must not rewrite the object's own name. The suggested existing
+O-Envelope fields are name, created, media_type and metadata;
+application-specific fields or nested maps are unrestricted.
 An O-Envelope sha256 covers canonical CBOR with its own hash field omitted;
 raw content outside CBOR requires its *own* digest. When a Unix name cannot
 be represented losslessly as UTF-8 CBOR text, preserve the original byte
