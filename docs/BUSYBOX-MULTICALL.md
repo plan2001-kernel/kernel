@@ -146,8 +146,9 @@ marker because voluntarily exiting the kernel's boot process causes a panic.
 
 The image builder requires interactive PS/2/VGA F5 tests on virtio and separately
 attempts AHCI compatibility. `verification.json` records AHCI PASS or FAIL; an AHCI
-failure is not a virtio or hardware pass. The local kernel main tested here reports
-`sdE0: bad disk` on AHCI before shell startup. No kernel changes are included. Static checks require AMD64 ET_EXEC, native startup, exactly two PT_LOADs,
+failure is not a virtio or hardware pass. AHCI acceptance requires a kernel whose
+SATA retry loop yields to its asynchronous recovery worker. Record the exact
+kernel SHA for each integration run. Static checks require AMD64 ET_EXEC, native startup, exactly two PT_LOADs,
 no PT_INTERP/PT_DYNAMIC and no unresolved symbols. Reports distinguish PASS, FAIL
 and NOT RUN. Physical hardware and ARM64 remain NOT RUN.
 
