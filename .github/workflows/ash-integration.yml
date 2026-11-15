@@ -171,37 +171,6 @@ jobs:
             tail -n 160 "$RUNNER_TEMP/newlib-reports/ash-native/build.log" >&2 || true
             exit 1
           fi
-      - name: Build trusted F5 supervisor executable
-        run: |
-          python3 tools/ci/build_busybox_target.py \
-            --kernel "$RUNNER_TEMP/kernel" \
-            --busybox "$RUNNER_TEMP/busybox" \
-            --reports "$RUNNER_TEMP/newlib-reports" --cc gcc-14
-      - name: Seed GE/O with actual ash and trusted supervisor
-        run: |
-          python3 tools/ci/seed_busybox_spawn.py \
-            --kernel "$RUNNER_TEMP/kernel" \
-            --elf "$RUNNER_TEMP/newlib-reports/busybox-target/unix-supervisor-f5-plan2001.elf" \
-            --extra-elf "$RUNNER_TEMP/newlib-reports/ash-native/ash.elf" \
-            --init tests/guest/busybox_spawn_init.py \
-            --image "$RUNNER_TEMP/newlib-reports/ash-o.img" \
-            --reports "$RUNNER_TEMP/newlib-reports"
-      - name: Real QEMU keyboard/VGA acceptance for upstream ash on virtio
-        env:
-          UX_HW_CONTROLLER: virtio
-        run: |
-          bash tools/ci/guest_busybox_f5.sh \
-            "$RUNNER_TEMP/kernel" \
-            "$RUNNER_TEMP/newlib-reports/ash-o.img" \
-            "$RUNNER_TEMP/newlib-reports" ash
-      - name: Real QEMU keyboard/VGA acceptance for upstream ash on AHCI
-        env:
-          UX_HW_CONTROLLER: ahci
-        run: |
-          bash tools/ci/guest_busybox_f5.sh \
-            "$RUNNER_TEMP/kernel" \
-            "$RUNNER_TEMP/newlib-reports/ash-o.img" \
-            "$RUNNER_TEMP/newlib-reports" ash
       - name: Build distributable GPT UEFI ash image and verify bundle checksums
         run: |
           bash tools/ci/build_hw_boot.sh \
@@ -224,7 +193,7 @@ jobs:
               echo "NOT COMPLETED: $f" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
-          echo 'Full upstream ash QEMU: virtio and emulated AHCI are required to pass in separate steps.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Hardware-image builder requires genuine ash interactive QEMU acceptance on virtio and AHCI before publication.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Kernel dependency remains PR #64 exact SHA until merged into kernel main; ordinary source policy remains live kernel main.' >> "$GITHUB_STEP_SUMMARY"
           echo 'NOT RUN: physical hardware, ARM64, full BusyBox applet distribution, concurrent persistent Unix file service.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload reproducible QEMU evidence (without disk images)
@@ -241,6 +210,10 @@ jobs:
             ${{ runner.temp }}/newlib-reports/ash-native/build.log
             ${{ runner.temp }}/newlib-reports/qemu-busybox-f5/*.log
             ${{ runner.temp }}/newlib-reports/qemu-busybox-f5/screens/**/*.txt
+            ${{ runner.temp }}/ash-hw-image/SHA256SUMS
+            ${{ runner.temp }}/ash-hw-image/ash-build.json
+            ${{ runner.temp }}/ash-hw-image/qemu-busybox-f5/*.log
+            ${{ runner.temp }}/ash-hw-image/qemu-busybox-f5/screens/**/*.txt
             ${{ runner.temp }}/newlib-reports/qemu-newlib-full/*.log
             ${{ runner.temp }}/newlib-reports/qemu-newlib-full/*.json
           if-no-files-found: warn
