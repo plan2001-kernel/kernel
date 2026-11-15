@@ -35,7 +35,10 @@ trap qob_cleanup EXIT
 
 puuid=$(python3 -c 'import uuid; print(uuid.uuid4())')
 qob_write_ini "$OUT/plan9.ini" "$puuid" /9pc64.elf 0
-printf 'bootmanifest=/processes.conf\n' >> "$OUT/plan9.ini"
+# The guest keyboard injector deliberately uses the US physical keymap.
+# Set it explicitly for kernels supporting selectable layouts; older builds
+# already use US scancode decoding for manifest console sessions.
+printf 'keymap=us\nbootmanifest=/processes.conf\n' >> "$OUT/plan9.ini"
 cat > "$OUT/processes.conf" <<EOF
 version=1
 [process.replA]
