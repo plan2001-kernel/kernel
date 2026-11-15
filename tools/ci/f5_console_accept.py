@@ -4,6 +4,7 @@
 Reads kernel's canonical framebuffer bitmap font; no serial echo assertion,
 simulated userland terminal, or fake kernel output. Fails closed on timeouts.
 """
+import os
 import re
 import socket
 import sys
@@ -71,6 +72,7 @@ def command(line):
     r = reply()
     if b"Error" in r or b"error:" in r or b"unknown key" in r.lower():
         raise RuntimeError(f"QEMU monitor {line!r}: {r!r}")
+    return r
 
 
 def key(name):
@@ -139,6 +141,16 @@ def waitscreen(label, expected, timeout=100, occurrences=1):
 
 try:
     reply()  # QEMU monitor greeting.
+    # Check the live QEMU device tree, not merely the intended command array.
+    controller = os.environ.get("UX_HW_CONTROLLER", "virtio")
+    expected_devices = {"virtio": ("virtio-blk-pci",),
+                        "ahci": ("ich9-ahci", "ide-hd")}
+    if controller not in expected_devices:
+        raise AssertionError(f"unsupported QEMU controller: {controller}")
+    device_tree = command("info qtree").decode("utf-8", errors="replace").lower()
+    for device in expected_devices[controller]:
+        if device not in device_tree:
+            raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
     if mode == "ash":
