@@ -28,7 +28,7 @@ int main(int argc,char **argv)
         char *args[]={"sh","-i",NULL};
         puts("PLAN2001-ASH-READY (volatile files; builtin commands)");
         fflush(stdout);
-        
+
         return ash_main(2,args);
     }
     return ash_main(argc,argv);
