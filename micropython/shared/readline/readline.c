@@ -557,11 +557,15 @@ redraw:
 #endif
 
 #ifdef MICROPY_REPL_HORIZONTAL
-    rl.cursor_pos -= redraw_step_back;
-    rl.cursor_pos += redraw_step_forward;
-    horizontal_redraw();
-#else
-    // redraw command prompt, efficiently
+    if (terminal_columns >= 8) {
+        rl.cursor_pos -= redraw_step_back;
+        rl.cursor_pos += redraw_step_forward;
+        horizontal_redraw();
+    } else
+#endif
+    {
+    // No console geometry in a standalone -I boot: retain ordinary REPL
+    // echo, cursor movement and input over its explicit keyboard Handle.
     if (redraw_step_back > 0) {
         mp_hal_move_cursor_back(cells(rl.cursor_pos - redraw_step_back, rl.cursor_pos));
         rl.cursor_pos -= redraw_step_back;
@@ -581,8 +585,7 @@ redraw:
         mp_hal_stdout_tx_strn(rl.line->buf + rl.cursor_pos, redraw_step_forward);
         rl.cursor_pos += redraw_step_forward;
     }
-
-#endif
+    }
     #if MICROPY_REPL_AUTO_INDENT
     rl.auto_indent_state &= ~AUTO_INDENT_JUST_ADDED;
     #endif
