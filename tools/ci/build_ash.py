@@ -26,6 +26,20 @@ c.write_text(s)
 nl=reports/'newlib-full';rt=reports/'newlib-target'
 flags=['gcc-14','-m64','-Os','-std=gnu11','-ffreestanding','-nostdinc','-fno-builtin','-fno-pie','-fno-pic','-fno-stack-protector','-ffunction-sections','-fdata-sections','-D_GNU_SOURCE','-DSA_RESTART=2','-DBB_VER="1.36.1"','-DBB_EXTRA_VERSION=""','-Werror=implicit-function-declaration','-Werror=int-conversion','-I'+str(ROOT/'ports/newlib/ash/include'),'-I'+str(b/'include'),'-I'+str(b/'shell'),'-isystem',str(nl/'include'),'-isystem',subprocess.check_output(['gcc-14','-print-file-name=include'],text=True).strip(),'-include',str(b/'include/autoconf.h')]
 units=[b/x for x in json.loads((ROOT/'config/ash-sources.json').read_text())]+[ROOT/'ports/newlib/ash/libbb_compat.c',ROOT/'ports/unix/fnmatch.c']
+ash_source=o/'ash.c'
+ash_text=(b/'shell/ash.c').read_text()
+needle='/* Keep these in proper order since it is searched via bsearch() */'
+if ash_text.count(needle)!=1: raise SystemExit('BusyBox ash builtin table layout changed')
+ash_text=ash_text.replace(needle,
+    'extern int p9_ash_ls_builtin(int,char **);\n'+needle)
+needle='\t{ BUILTIN_REGULAR       "printf"  , printfcmd  },'
+if ash_text.count(needle)!=1: raise SystemExit('BusyBox ash printf builtin layout changed')
+ash_text=ash_text.replace(needle,
+    '\t{ BUILTIN_REGULAR       "ls"      , p9_ash_ls_builtin },\n'+needle)
+ash_source.write_text(ash_text)
+ash_index=units.index(b/'shell/ash.c')
+units[ash_index]=ash_source
+units.append(ROOT/'ports/newlib/ash/ls_builtin.c')
 objects=[]
 for i,source in enumerate(units):
  obj=o/(str(i)+'.o');run(flags+['-c',source,'-o',obj]);objects.append(obj)

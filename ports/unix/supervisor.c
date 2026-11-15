@@ -125,27 +125,55 @@ int uxsupervisor_prepare(UxSupervisor *s)
             return -1;
         }
     s->pending_len=s->pending_pos=0;
+    s->edit_len=0;
     return 0;
 }
 int uxsupervisor_pump(UxSupervisor *s)
 {
     unsigned char output[256];
+    unsigned char ch;
     long n;
     unsigned int channel, repeat;
     if (!s) return -1;
-    if (s->pending_pos==s->pending_len) {
-        n=p2001_session_try_read(0,s->pending,sizeof(s->pending));
-        if (n<0) return -1;
-        s->pending_pos=0;
-        s->pending_len=(unsigned int)n;
-        /* Keyboard Enter is CR; the Unix console projects a text LF. */
-        for(unsigned int i=0;i<s->pending_len;++i)
-            if(s->pending[i]=='\r') s->pending[i]='\n';
-    }
     if (s->pending_pos < s->pending_len) {
         n=uxpipe_write(&s->streams[0],s->pending+s->pending_pos,
                        s->pending_len-s->pending_pos,0);
-        if (n>0) s->pending_pos+=(unsigned int)n;
+        if (n>0) {
+            s->pending_pos+=(unsigned int)n;
+            if (s->pending_pos==s->pending_len)
+                s->pending_pos=s->pending_len=0;
+        }
+    } else {
+        /* This is a text console, not a terminal emulator. Provide the
+         * visible input echo and a small canonical line editor before
+         * forwarding complete lines to ash over its explicit UXPIPE. */
+        n=p2001_session_try_read(0,&ch,1);
+        if (n<0) return -1;
+        if (n==1) {
+            static const char erase[]="\b \b";
+            static const char newline='\n';
+            if (ch=='\r' || ch=='\n') {
+                if (p2001_session_write(1,&newline,1)!=1) return -1;
+                if (s->edit_len) {
+                    for (unsigned int i=0;i<s->edit_len;++i)
+                        s->pending[i]=s->edit[i];
+                }
+                s->pending[s->edit_len]='\n';
+                s->pending_len=s->edit_len+1;
+                s->pending_pos=0;
+                s->edit_len=0;
+            } else if (ch==8 || ch==127) {
+                if (s->edit_len) {
+                    --s->edit_len;
+                    if (p2001_session_write(1,erase,sizeof(erase)-1)
+                        !=(long)(sizeof(erase)-1)) return -1;
+                }
+            } else if (ch>=32 && ch<127 &&
+                       s->edit_len<sizeof(s->edit)-1) {
+                s->edit[s->edit_len++]=ch;
+                if (p2001_session_write(1,&ch,1)!=1) return -1;
+            }
+        }
     }
     for (channel=1;channel<=2;++channel) {
         for (repeat=0;repeat<32;++repeat) {

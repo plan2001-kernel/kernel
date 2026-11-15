@@ -11,6 +11,8 @@ typedef struct {
     UxPipe streams[3];       /* producer(stdin), consumer(stdout,stderr) */
     unsigned char pending[128];
     unsigned int pending_len, pending_pos;
+    unsigned char edit[128];
+    unsigned int edit_len;
 } UxSupervisor;
 
 int uxsupervisor_parse_oid(const char *arg, unsigned long long *oid);

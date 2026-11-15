@@ -25,6 +25,9 @@ int main(int argc,char **argv)
         P9Plan plan={0}; P9FdImage image;
         if(p9_fd_export(&image,&plan,0)<0) return 125;
         p9_fd_export_undo(&image);
+        /* Ash writes interactive prompts to stderr. F5 is one text console,
+         * so merge both output descriptors to preserve prompt/output order. */
+        if(dup2(STDOUT_FILENO,STDERR_FILENO)<0) return 125;
         char *args[]={"sh","-i",NULL};
         puts("PLAN2001-ASH-READY (volatile files; builtin commands)");
         fflush(stdout);

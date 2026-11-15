@@ -86,7 +86,7 @@ for phase in "${phases[@]}"; do
     -drive "if=pflash,format=raw,readonly=on,file=$QOB_OVMF_CODE" \
     -drive "if=pflash,format=raw,file=$vars" \
     -drive "file=$OUT/disk.img,format=raw,if=none,id=d0" \
-    -device "virtio-blk-pci-non-transitional,drive=d0,bootindex=0" \
+    "${disk_device[@]}" \
     -device VGA -nic none -display none \
     -serial "file:$serial" -monitor "unix:$mon,server=on,wait=off" \
     -no-reboot > "$OUT/qemu-$phase.log" 2>&1 &

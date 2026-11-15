@@ -16,7 +16,10 @@ bash tools/ci/build_hw_boot.sh KERNEL_SOURCE BUSYBOX_SOURCE NEWLIB_REPORTS FRESH
 
 The builder refuses an existing output directory and publishes
 `plan2001-ash-amd64.img`, its gzip copy, source archives and `SHA256SUMS` only after the interactive QEMU test
-passes on virtio and emulated SATA/AHCI. Physical hardware remains untested.
+passes on virtio and emulated SATA/AHCI. `kernel-worktree.patch` contains any
+tracked local kernel edits applied on top of `kernel-source.tar.gz`; apply it
+from the extracted kernel root to reproduce the tested image. Physical hardware
+remains untested by the builder.
 BusyBox is GPLv2: the bundle includes its license and exact source
 commit; use `config/sources.json` and the recorded config to obtain/rebuild
 corresponding source. See `docs/BUILD.md` for dependency preparation.
@@ -41,7 +44,12 @@ Try `echo hello`, `pwd`, `cd /tmp`, `echo data > /tmp/a`,
 `echo piped | while read x; do echo $x; done`.
 Ctrl+Alt+F1 returns to the separate kernel console. `exit` ends the F5 session.
 
-Input currently has no terminal echo or line editor; type commands and press Enter.
+The F5 supervisor visibly echoes typed ASCII and provides a bounded line editor:
+Backspace removes the last typed character, and Enter submits the line to ash.
+It does not provide cursor movement, history, termios, or a full POSIX terminal.
+The linked `ls` builtin lists the process-local PVD directories one name per
+line, including the projected `/`, `/bin`, `/dev`, `/etc`, `/home`, `/tmp`,
+`/usr`, `/usr/bin`, and `/var` tree.
 
 This is an ash/builtin test profile, not a full Unix distribution. External
 coreutils, networking, POSIX PTYs/job control, Unix identity/permissions and

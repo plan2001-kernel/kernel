@@ -22,13 +22,18 @@ monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
 
 source = fontfile.read_text(encoding="utf-8")
-table = source.split("static const ushort fbconsolefont[101][24] = {", 1)[1]
+match = re.search(
+    r"static const ushort fbconsolefont\[(\d+)\]\[24\] = \{(.*?)\n\};",
+    source, re.S)
+assert match, "kernel VGA font table not found"
+font_count = int(match.group(1))
+table = match.group(2)
 font = []
 for row in re.findall(r"\{([^{}]+)\}", table):
     values = re.findall(r"0x[0-9a-fA-F]+", row)
     if len(values) == 24:
         font.append(tuple(int(value, 16) for value in values))
-assert len(font) == 101, "unexpected kernel VGA font"
+assert len(font) == font_count, "unexpected kernel VGA font geometry"
 glyphs = {bits: chr(32+i) for i, bits in enumerate(font[:95])}
 glyphs.update({bits: chr(128+i) for i, bits in enumerate(font[95:])})
 
@@ -78,13 +83,20 @@ def focus(number):
     time.sleep(0.4)
 
 
-def enter(line):
-    specials = {" ": "spc", "/": "slash", ".": "dot",
-                ">": "shift-dot", "<":"shift-comma", "|": "shift-backslash", "$":"shift-4",
-                "(":"shift-9", ")":"shift-0", ":":"shift-semicolon",
-                ";":"semicolon", "=":"equal", "+":"shift-equal"}
+def type_text(line):
+    # The kernel's active PS/2 map is Finnish PC QWERTY. QEMU key names
+    # identify physical key positions, so punctuation must use Finnish
+    # positions and modifiers rather than US character names.
+    specials = {" ": "spc", "/": "shift-7", ".": "dot", "-": "slash",
+                ">": "shift-less", "<":"less", "|": "alt_r-less", "$":"alt_r-4",
+                "(":"shift-8", ")":"shift-9", ":":"shift-dot",
+                ";":"shift-comma", "+":"minus"}
     for letter in line:
         key("shift-"+letter.lower() if letter.isupper() else specials.get(letter, letter))
+
+
+def enter(line):
+    type_text(line)
     key("ret")
 
 
@@ -113,12 +125,12 @@ def screen(label):
     return text
 
 
-def waitscreen(label, expected, timeout=100):
+def waitscreen(label, expected, timeout=100, occurrences=1):
     end = time.monotonic() + timeout
     last = ""
     while time.monotonic() < end:
         last = screen(label)
-        if expected in last:
+        if last.count(expected) >= occurrences:
             return last
         if "panic:" in serial.read_text(errors="replace"):
             raise AssertionError("kernel panic: " + serial.read_text(errors="replace")[-1800:])
@@ -131,17 +143,67 @@ try:
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
     if mode == "ash":
-        waitscreen("ash-ready", "PLAN2001-ASH-READY")
-        enter("echo sum$((2+3))")
-        waitscreen("ash-arithmetic", "sum5")
-        enter("echo data > /tmp/hw; read x < /tmp/hw; echo FILE:$x")
-        waitscreen("ash-file", "FILE:data")
-        enter("echo piped | while read x; do echo PIPE:$x; done")
-        waitscreen("ash-pipeline", "PIPE:piped")
+        ready = waitscreen("ash-ready", "PLAN2001-ASH-READY")
+        assert "ash$ " in ready
+        enter("echo visible")
+        typed = waitscreen("ash-input-echo", "visible")
+        assert "echo visible" in typed, "typed command was not echoed"
+        enter("test 5 -eq 5; echo test-pass")
+        typed = waitscreen("ash-test", "\ntest-pass\n")
+        assert "test 5 -eq 5; echo test-pass" in typed
+        enter("printf print-pass")
+        printf_result = waitscreen("ash-printf", "print-pass",occurrences=2)
+        assert "printf print-pass" in printf_result
+        enter("true; echo true-pass")
+        waitscreen("ash-true", "true-pass",occurrences=2)
+        enter("false; echo false-pass")
+        waitscreen("ash-false", "false-pass",occurrences=2)
+        # Backspace edits the visible, buffered input before Enter submits it.
+        type_text("echo editedx")
+        key("backspace")
+        key("ret")
+        edited = waitscreen("ash-line-edit", "edited")
+        assert "echo edited" in edited and "editedx" not in edited
+        enter("echo data > /tmp/hw; read x < /tmp/hw; set")
+        file_result = waitscreen("ash-file", "\nx='data'\n")
+        assert "echo data > /tmp/hw; read x < /tmp/hw; set" in file_result
+        enter("echo piped | while read x; do echo PIPE; done")
+        pipeline = waitscreen("ash-pipeline", "PIPE", occurrences=2)
+        assert "echo piped | while read x; do echo PIPE; done" in pipeline
+        enter("ls; echo TREE-cwd")
+        cwd_listing=waitscreen("ash-ls-cwd","TREE-cwd",occurrences=2)
+        for name in ("bin", "dev", "etc", "home", "tmp", "usr", "var"):
+            assert f"\n{name}\n" in cwd_listing, f"ls missing {name}"
+        enter("ls /; echo TREE-root")
+        root = waitscreen("ash-ls-root", "TREE-root", occurrences=2)
+        for name in ("bin", "dev", "etc", "home", "tmp", "usr", "var"):
+            assert f"\n{name}\n" in root, f"ls / missing {name}"
+        assert "\n.\n" not in root and "\n..\n" not in root
+        enter("ls -a /; echo TREE-all")
+        all_entries=waitscreen("ash-ls-all","TREE-all",occurrences=2)
+        assert ".\n" in all_entries and "..\n" in all_entries
+        enter("ls /usr; echo TREE-usr")
+        usr = waitscreen("ash-ls-usr", "TREE-usr", occurrences=2)
+        assert "\nbin\n" in usr
+        for path in ("/bin", "/dev", "/etc", "/home", "/tmp", "/var", "/usr/bin"):
+            label=path.strip("/").replace("/","-") or "root"
+            enter("ls " + path + "; echo TREE-" + label)
+            listing=waitscreen("ash-ls-"+label,"TREE-"+label,occurrences=2)
+            assert "ls:" not in listing, "ls failed for " + path
+            if path=="/tmp":
+                assert "\nhw\n" in listing, "ls /tmp missed the created file"
+        enter("ls /missing; echo MISSING-pass")
+        missing = waitscreen("ash-ls-missing", "MISSING-pass",occurrences=2)
+        assert "ls: /missing: no such file or directory" in missing
+        enter("pwd")
+        waitscreen("ash-pwd-root", "\n/\nash$ ")
+        enter("cd /usr/bin; pwd; cd ..; pwd; cd /; echo TREE-cd")
+        cwd = waitscreen("ash-cd-paths", "TREE-cd",occurrences=2)
+        assert cwd.count("/usr/bin") >= 2 and cwd.count("/usr") >= 2
         focus(1)
         text=waitscreen("ash-isolation", "kernel>")
         assert "PIPE:piped" not in text
-        print("PASS: upstream ash interactive F5, arithmetic, files, forked pipeline, isolation")
+        print("PASS: ash input echo/editing, Enter, echo/printf/test/true/false, ls/PVD paths, files, pipeline, isolation")
     elif mode == "newlib-supervised":
         ready = waitscreen("newlib-supervised-boot",
                            "PLAN2001-NEWLIB-SUPERVISED-READY")

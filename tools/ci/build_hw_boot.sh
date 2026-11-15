@@ -29,7 +29,8 @@ cp "$REPORTS/ash-native/manifest.json" "$OUT/ash-build.json"
 cp "$ROOT/docs/HARDWARE-BOOT.md" "$OUT/README.md"
 git -C "$BUSYBOX" archive --format=tar.gz --output="$OUT/busybox-source.tar.gz" HEAD
 git -C "$KERNEL" archive --format=tar.gz --output="$OUT/kernel-source.tar.gz" HEAD
+git -C "$KERNEL" diff --binary HEAD > "$OUT/kernel-worktree.patch"
 tar --exclude=__pycache__ -czf "$OUT/userland-port-source.tar.gz" -C "$ROOT" ports config tools/ci docs AGENTS.md README.md
 gzip -c "$OUT/plan2001-ash-amd64.img" > "$OUT/plan2001-ash-amd64.img.gz"
-(cd "$OUT" && sha256sum plan2001-ash-amd64.img plan2001-ash-amd64.img.gz ash.elf *source.tar.gz > SHA256SUMS)
+(cd "$OUT" && sha256sum plan2001-ash-amd64.img plan2001-ash-amd64.img.gz ash.elf *source.tar.gz kernel-worktree.patch > SHA256SUMS)
 echo "QEMU-tested hardware candidate: $OUT/plan2001-ash-amd64.img"
