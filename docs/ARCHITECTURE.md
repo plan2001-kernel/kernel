@@ -44,9 +44,11 @@ OwnerID is provenance, not ambient authorization. Unix uid/gid and rwx metadata 
 
 The binary layout of framed GE/O payloads is specified by the kernel's
 portable-object footer contract. The userspace [Unix metadata profile]
-(OBJECT-METADATA.md) recommends preserving the original filename,
+(OBJECT-METADATA.md) recommends one object-owned descriptive name per OID,
 creation instant, media type, ordinary stat attributes, optional ACLs and
-extended attributes. Only the raw-first / metadata-last / fixed-footer
+extended attributes. Multiple distinct OIDs may share the same object
+name; ObjectSpace labels and Unix pathnames remain unrelated and may be
+changed independently of that name. Only the raw-first / metadata-last / fixed-footer
 byte layout is normative; the CBOR metadata schema is a de facto
 recommendation. UXFS v1 does not yet persist or expose that full profile.
 Names and metadata never mint kernel capabilities.
