@@ -22,6 +22,8 @@ python3 "$ROOT/tools/ci/seed_busybox_spawn.py" --kernel "$KERNEL" \
   --extra-elf "$REPORTS/busybox-multicall/busybox.elf" \
   --init "$ROOT/tests/guest/busybox_spawn_init.py" --reports "$OUT" --image "$OUT/multicall-o.img"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT" multicall
+mkdir -p "$OUT/eof-console"
+bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/eof-console" multicall-eof
 AHCI_STATUS=PASS
 if ! UX_HW_CONTROLLER=ahci bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT" multicall; then
   AHCI_STATUS=FAIL

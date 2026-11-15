@@ -43,7 +43,16 @@ observable independently of this Unix registry.
 ## Descriptors and shared files
 
 Duplicates share an open description and keep descriptor flags separate.
-UXPIPE version 2 adds process endpoint reference counts. Fork/exec increments
+UXPIPE version 3 retains process endpoint reference counts and adds ordered,
+one-read canonical EOF tokens. Tokens occupy cursor slots with a separate bit
+map, so all 256 byte values remain ordinary data and REGIONWAIT observes their
+publication. The F5 supervisor publishes a token for Ctrl+D on an empty edit
+buffer; a nonempty buffer is flushed without a newline or EOF. Consuming a token
+returns 0 once without closing the channel, allowing ash to resume input after
+cat exits. All endpoints must be rebuilt together for this userspace protocol
+version; no kernel ABI changes are involved.
+
+The endpoint reference counts work as follows. Fork/exec increments
 one reference per inherited open description, rather than per duplicated fd;
 the final process reference publishes EOF or reader disconnect.
 

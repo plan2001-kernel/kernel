@@ -12,7 +12,7 @@ promise that the next `main` will work.
 ## Native session transport
 
 The kernel creates a permanent SystemConsole on F1, and boot manifest slots
-1..8 correspond to Ctrl+Alt+F2..F9. In this fixture, three MicroPython REPLs
+1..8 correspond to Win+F2..F9. In this fixture, three MicroPython REPLs
 occupy F2, F3, F4; the native unix-init F5 ELF is manifest slot 4. The console
 regions are installed **after OEXECUTE**, and the C adapter discovers them
 by `obj_list` rather than raw OIDs or ambient I/O grants.
@@ -58,7 +58,7 @@ native libc and GE/O tools. It installs MicroPython at OID
 `0x4f45584543000005` into a **disposable regular-file image**, checking
 both ELFs' SHA-256 via the kernel's GE/O inspector. A boot manifest
 installs four independent process consoles. QEMU's monitor sends
-`Ctrl+Alt+F5` and actual emulated PS/2 key events; the acceptance
+`Win+F5` and actual emulated PS/2 key events; the acceptance
 checker decodes the real framebuffer using the kernel's bitmap font,
 verifies F5 output, checks F1 isolation and returns to F5 to verify history.
 

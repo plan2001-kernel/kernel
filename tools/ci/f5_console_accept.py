@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised", "ash", "multicall"):
+                "newlib-supervised", "ash", "multicall", "multicall-eof"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ def key(name):
 
 
 def focus(number):
-    key(f"ctrl-alt-f{number}")
+    key(f"meta_l-f{number}")
     time.sleep(0.4)
 
 
@@ -153,7 +153,40 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode in ("ash", "multicall"):
+    if mode == "multicall-eof":
+        waitscreen("eof-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("eof-prompt", "ash$", 45)
+        key("ctrl-alt-f1") # old Linux VT chord no longer selects a guest view
+        assert "PLAN2001-MULTICALL-READY" in screen("old-chord-ignored")
+        focus(1)
+        waitscreen("win-left-system", "kernel>")
+        key("meta_r-f5")
+        waitscreen("win-right-shell", "ash$")
+        enter("cat > /tmp/eof")
+        enter("EOF-line")
+        key("ctrl-d")
+        enter("echo EOF-RETURN")
+        waitscreen("eof-return", "EOF-RETURN", occurrences=2)
+        enter("cat /tmp/eof; echo EOF-CONTENT")
+        content=waitscreen("eof-content", "EOF-CONTENT", occurrences=2)
+        assert "\nEOF-line\nEOF-CONTENT\n" in content
+        enter("cat > /tmp/partial")
+        type_text("part")
+        key("ctrl-d") # nonempty: flush without closing the read
+        type_text("ial")
+        key("ctrl-d") # second nonempty flush
+        key("ctrl-d") # empty: one zero read, not permanent channel shutdown
+        enter("echo PARTIAL-RETURN")
+        waitscreen("eof-partial-return", "PARTIAL-RETURN", occurrences=2)
+        enter("cat /tmp/partial; echo PARTIAL-END")
+        partial=waitscreen("eof-partial-content", "PARTIAL-END", occurrences=2)
+        assert "\npartialPARTIAL-END\n" in partial
+        enter("cat")
+        key("ctrl-d")
+        enter("echo EOF-EMPTY")
+        waitscreen("eof-empty", "EOF-EMPTY", occurrences=2)
+        print("PASS: Win+F1/F5 (both Super keys), old VT chord ignored, canonical Ctrl+D, partial flush and live shell")
+    elif mode in ("ash", "multicall"):
         waitscreen("ash-ready", "PLAN2001-MULTICALL-READY" if mode == "multicall" else "PLAN2001-ASH-READY")
         # The ELF prints READY before ash_main enters its first read. Wait for
         # the actual shell prompt, not a framebuffer race with the marker.

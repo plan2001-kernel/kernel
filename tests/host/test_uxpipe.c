@@ -149,6 +149,39 @@ int main(void)
     reset();
     assert(uxpipe_finish(&reader)==0);
     assert(uxpipe_write(&writer,payload,1,0)==-1);
+    /* Canonical EOF is an ordered event, never a reserved byte or close. */
+    reset();
+    assert(sizeof(data)<=UXPIPE_PAGE && sizeof(ack)<=UXPIPE_PAGE);
+    assert(uxpipe_send_eof(&reader,0)==-1); /* RO producer capability */
+    assert(uxpipe_write(&writer,"a\004b",3,0)==3);
+    assert(uxpipe_send_eof(&writer,0)==0);
+    assert(uxpipe_write(&writer,"after",5,0)==5);
+    assert(uxpipe_read(&reader,a,sizeof a,0)==3 && !memcmp(a,"a\004b",3));
+    assert(uxpipe_read(&reader,a,0,0)==0); /* zero-size read leaves token */
+    assert(uxpipe_read(&reader,a,sizeof a,0)==0);
+    assert(!data.closed && !ack.closed);
+    assert(uxpipe_read(&reader,a,sizeof a,0)==5 && !memcmp(a,"after",5));
+    assert(uxpipe_read(&reader,a,sizeof a,0)==-1);
+    for(i=0;i<UXPIPE_CAPACITY+2u;++i) {
+        /* Wrap/reuse both EOF and normal data slots without stale marks. */
+        assert(uxpipe_send_eof(&writer,0)==0);
+        assert(uxpipe_read(&reader,one,1,0)==0);
+        assert(uxpipe_write(&writer,"x",1,0)==1);
+        assert(uxpipe_read(&reader,one,1,0)==1 && one[0]=='x');
+    }
+    reset();
+    assert(uxpipe_write(&writer,payload,UXPIPE_CAPACITY,0)==UXPIPE_CAPACITY);
+    assert(uxpipe_send_eof(&writer,0)==-1); /* backpressure loses no bytes */
+    assert(uxpipe_read(&reader,a,sizeof a,0)==UXPIPE_CAPACITY);
+    assert(uxpipe_send_eof(&writer,0)==0);
+    assert(uxpipe_read(&reader,a,sizeof a,0)==0);
+    reset();
+    startup_result=-99;
+    assert(pthread_create(&thread,0,early_reader,0)==0);
+    (void)sleep(5);
+    assert(uxpipe_send_eof(&writer,-1)==0);
+    assert(pthread_join(thread,0)==0 && startup_result==0);
+    assert(!data.closed && !ack.closed);
     reset();
     injected_gone=1;
     assert(uxpipe_read(&reader,one,1,-1)==-1);

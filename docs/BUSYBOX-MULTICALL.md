@@ -44,6 +44,19 @@ python3 tools/ci/build_busybox_multicall.py --kernel ../deps/kernel --busybox ..
 bash tools/ci/guest_busybox_multicall.sh ../deps/kernel ../reports/busybox-multicall ../fresh-guest-reports
 ```
 
+## Interactive console
+
+Use Finnish `keymap=fi` and QEMU `-k fi` when testing with a Finnish keyboard.
+Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. This shortcut
+requires kernel PR #66 (tested commit `20775a7`); the kernel ABI is unchanged.
+The console acceptance test uses the new shortcut, so that PR must be integrated
+before the moving-main interactive CI gate can pass.
+
+Ctrl+D on an empty input line produces one EOF read, allowing `cat` to finish
+and ash to read the next command. On a nonempty line it flushes the pending text
+without adding a newline; press Ctrl+D again on the now-empty line to finish.
+This is userland canonical input handling, not complete termios or job control.
+
 ## Executable projection and authorization
 
 One canonical `/bin/busybox` registration holds the delegated executable volume

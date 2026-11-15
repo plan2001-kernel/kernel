@@ -15,12 +15,26 @@ static unsigned char regions[6][4096] __attribute__((aligned(4096)));
 static int created, opened_exec, opened_store, launches, closed, unmapped;
 static int allow_console=1, expect_storage=0, failed_child=0;
 static int received_grants, terminate_count;
+static const unsigned char *keyboard;
+static unsigned keyboard_pos;
+static char echoed[256];
+static unsigned echoed_len;
 
 int p2001_session_probe(void) {return allow_console ? 1 : -1;}
 long p2001_session_try_read(int fd, void *buf, unsigned long n)
-{(void)buf; (void)n;assert(fd==0);return 0;}
+{
+    assert(fd==0 && n==1);
+    if(!keyboard || !keyboard[keyboard_pos]) return 0;
+    *(unsigned char *)buf=keyboard[keyboard_pos++]; return 1;
+}
 long p2001_session_write(int fd,const void *bytes,unsigned long n)
-{(void)bytes;assert(fd==1 || fd==2);return (long)n;}
+{
+    assert(fd==1 || fd==2);
+    if(keyboard && echoed_len+n<=sizeof echoed) {
+        memcpy(echoed+echoed_len,bytes,n); echoed_len+=(unsigned)n;
+    }
+    return (long)n;
+}
 long obj_list(void *buf,unsigned long long capacity)
 {
     VobjListRec *records=(VobjListRec *)buf;
@@ -108,6 +122,49 @@ static void reset(void)
     created=opened_exec=opened_store=launches=closed=unmapped=0;
     terminate_count=received_grants=0;
 }
+static void type(UxSupervisor *s,const char *keys)
+{
+    keyboard=(const unsigned char *)keys; keyboard_pos=0;
+    for(unsigned i=0;i<strlen(keys)+3;++i) assert(uxsupervisor_pump(s)==0);
+    assert(keyboard_pos==strlen(keys));
+}
+static void canonical_input(void)
+{
+    UxSupervisor s;
+    UxPipe input;
+    char buf[UXPIPE_CAPACITY];
+    reset();
+    assert(uxsupervisor_prepare(&s)==0);
+    assert(uxpipe_bind(&input,s.streams[0].data,s.streams[0].ack,
+        s.maps[0],s.maps[1],UXPIPE_READER)==0);
+    echoed_len=0;
+    type(&s,"\004");
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==0);
+    assert(echoed_len==0 && !s.streams[0].data->closed);
+    type(&s,"next\n");
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==5 && !memcmp(buf,"next\n",5));
+    type(&s,"abc\004");
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==3 && !memcmp(buf,"abc",3));
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==-1); /* flush, not EOF */
+    type(&s,"\004");
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==0);
+    type(&s,"ok\n");
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==3 && !memcmp(buf,"ok\n",3));
+    memset(buf,'x',sizeof buf);
+    assert(uxpipe_write(&s.streams[0],buf,sizeof buf,0)==sizeof buf);
+    type(&s,"\004");
+    assert(s.pending_eof==1); /* preserve event while the ring is full */
+    unsigned drained=0;
+    while(drained<sizeof buf) {
+        long n=uxpipe_read(&input,buf+drained,sizeof buf-drained,0);
+        assert(n>0); drained+=(unsigned)n;
+    }
+    assert(uxsupervisor_pump(&s)==0 && !s.pending_eof);
+    assert(uxpipe_read(&input,buf,sizeof buf,0)==0);
+    keyboard=0;
+    uxsupervisor_release(&s);
+    puts("PASS: canonical Ctrl+D flush/one-read EOF, backpressure and subsequent input");
+}
 int main(void)
 {
     unsigned long long oid=0;
@@ -133,6 +190,7 @@ int main(void)
     reset();expect_storage=0;failed_child=1;
     assert(uxsupervisor_run(0x1234,0)<0);
     assert(terminate_count==1);
+    canonical_input();
     puts("PASS: supervisor never delegates kernel consoles, precisely attenuates six streams and executable/storage grants");
     return 0;
 }
