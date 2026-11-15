@@ -6,6 +6,11 @@
 #define PLAN2001_ASH_NEWLIB_STRING_H
 #include_next <string.h>
 #include <stddef.h>
+/* Newlib's fortified string header may macro-wrap mempcpy; a target
+ * prototype must declare the function, not expand the SSP wrapper. */
+#ifdef mempcpy
+#undef mempcpy
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
