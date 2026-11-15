@@ -46,7 +46,21 @@ static uchar keymap[2][KeymapSize] = {
 
 static int kbd_us, kbd_alt, kbd_capsdown, kbd_numdown;
 static int kbd_shiftl, kbd_shiftr, kbd_ctll, kbd_ctlr, kbd_caps, kbd_num, kbd_altgr;
-static int kbd_e0, kbd_skip;
+static int kbd_e0, kbd_skip, kbd_metal, kbd_metar;
+
+/* The host OS reserves Ctrl+Alt+Fn for virtual terminals. Keep session
+ * selection on Super/Windows+F1..F9; both Meta keys have independent state.
+ * Called before keydecode, so prefixes, Pause bytes and releases cannot
+ * accidentally select a session. No byte is forwarded for the chord. */
+static int
+consoleviewkey(int sc)
+{
+    if(!kbd_e0 && kbd_skip==0 && (kbd_metal || kbd_metar) &&
+       !kbd_ctll && !kbd_ctlr && !kbd_alt && !kbd_altgr &&
+       sc>=0x3b && sc<=0x43)
+        return sc-0x3b;
+    return -1;
+}
 
 static char *
 navseq(int sc, int *n)
@@ -94,6 +108,11 @@ keydecode(int c)
 
 	if(kbd_e0){
 		kbd_e0 = 0;
+		if(sc == 0x5b || sc == 0x5c){ /* left/right Super (Windows) */
+			if(sc == 0x5b) kbd_metal = down;
+			else kbd_metar = down;
+			return -1;
+		}
 		if(sc == 0x1d){		/* right Ctrl */
 			kbd_ctlr = down;
 			return -1;

@@ -194,13 +194,13 @@ because they would fail `--verify`.
 
 1. Select the new `Plan2001-O (<kernel build stamp>)` GRUB entry (or the
    corresponding UEFI chainload entry) and boot it.
-2. Press `Ctrl+Alt+F1`. The kernel-owned SystemConsole must show
+2. Press `Win+F1`. The kernel-owned SystemConsole must show
    `kernel> `. Run `help`, `status` and `sessions`. `sessions` must list three
    distinct live PIDs for `replA`, `replB` and `replC`.
-3. `Ctrl+Alt+F2`: REPL A accepts `print(111)` and prints `111`.
-4. `Ctrl+Alt+F3`: REPL B accepts `print(222)` and prints `222`, with no A
+3. `Win+F2`: REPL A accepts `print(111)` and prints `111`.
+4. `Win+F3`: REPL B accepts `print(222)` and prints `222`, with no A
    output.
-5. `Ctrl+Alt+F4`: REPL C accepts `print(333)` and prints `333`, with no A/B
+5. `Win+F4`: REPL C accepts `print(333)` and prints `333`, with no A/B
    output.
 6. Switch repeatedly between F2/F3/F4. Each REPL keeps its own history and
    input; switching must not merge output or change process lifetimes.

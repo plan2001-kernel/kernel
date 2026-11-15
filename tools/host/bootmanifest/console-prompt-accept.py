@@ -71,7 +71,7 @@ def send(key):
 
 
 def focus(n):
-    send(f"ctrl-alt-f{n}")
+    send(f"meta_l-f{n}")
     time.sleep(0.3)
 
 

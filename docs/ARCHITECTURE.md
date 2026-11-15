@@ -90,8 +90,8 @@ there is no new IPC mechanism, path/FD console or userspace framebuffer grant.
 The OEXECUTE boundary discards bootstrap Handles and installs each process's
 three console grants again after the exec commit.
 
-One framebuffer has one selected view. Ctrl+Alt+F1 selects SystemConsole;
-Ctrl+Alt+F2 through F9 select independent manifest slots 1 through 8.
+One framebuffer has one selected view. Win+F1 selects SystemConsole;
+Win+F2 through F9 select independent manifest slots 1 through 8.
 The kernel retains process output off-screen while other sessions continue
 running. Process exit cannot destroy the kernel console or another session.
 Kernel diagnostics remain in kmesg, separate from REPL output. The SystemConsole

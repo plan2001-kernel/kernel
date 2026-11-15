@@ -313,7 +313,7 @@ MicroPython attaches by enumerating its process-local region grants.
 No new IPC primitive or syscall is introduced. A process may not write to
 the framebuffer or kernel `kmesg` through these console grants.
 
-`Ctrl+Alt+F1` selects the kernel SystemConsole; `Ctrl+Alt+F2` through
+`Win+F1` selects the kernel SystemConsole; `Win+F2` through
 `F9` select a live process session. The kernel retains off-screen output
 history independently of user process lifetime. A session exit releases
 its input and does not terminate other processes. Kernel diagnostics
@@ -325,7 +325,7 @@ implemented.
 Physical PS/2 set-1 input is translated once by the kernel. `keymap=fi`
 (the default) and `keymap=us` select built-in Unicode tables in plan9.ini.
 Fi accent keys emit their literal characters immediately. Navigation emits
-the escape sequences understood by MicroPython readline; Ctrl+Alt+F1–F9
+the escape sequences understood by MicroPython readline; Win+F1–F9
 are consumed by kernel focus handling. USB keyboard input is not implemented.
 
 `ObjOpConsoleInfo=59` requires Vmeta on a console input region and returns

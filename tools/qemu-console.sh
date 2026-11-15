@@ -2,7 +2,7 @@
 # Boot a copy of the three-REPL console test disk with GTK and a local HMP socket.
 # Usage: tools/qemu-console.sh [SOURCE_DISK [RUN_DIRECTORY]]
 # QEMU monitor: socat -,echo=0 UNIX-CONNECT:<run-directory>/monitor.sock
-# Monitor commands: sendkey ctrl-alt-f1 (kernel), ctrl-alt-f2 (REPL), quit.
+# Monitor commands: sendkey meta_l-f1 (kernel), meta_l-f2 (REPL), quit.
 set -euo pipefail
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_disk=${1:-$root/build/console-prompt/run/disk.img}
