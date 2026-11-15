@@ -91,7 +91,7 @@ int main(void)
     char *root_args[]={"ls","/",0};
     char *tmp_args[]={"ls","/tmp/empty",0};
     char *bad_args[]={"ls","/missing",0};
-    unsigned char result[UXFS_DATA_MAX];
+    unsigned char result[UXFS_IO_CHUNK];
     unsigned int n=999;
     assert(pvd_bootstrap(&pvd)==PVD_OK);
     uxfs_init(&fs,&pvd);

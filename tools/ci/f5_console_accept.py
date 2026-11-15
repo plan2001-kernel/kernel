@@ -167,7 +167,12 @@ try:
         assert "\nsecond-line\nTHREE-END\n" in result, result
         enter("rm koe.txt; echo PIPE-CLEAN")
         waitscreen("pipeline-clean", "PIPE-CLEAN", occurrences=2)
-        print("PASS: exact cat FILE | awk and three external stages with inherited console descriptors")
+        enter("awk 'BEGIN {for (i=0;i<4096;i++) print \"big\"}' > /tmp/big")
+        enter("cat /tmp/big | awk 'END {print NR}'; echo LARGE-END")
+        result=waitscreen("pipeline-large", "LARGE-END", occurrences=2)
+        assert "\n4096\nLARGE-END\n" in result, result
+        enter("rm /tmp/big")
+        print("PASS: exact cat FILE | awk, three external stages and a 16 KiB file with 4096 lines")
     elif mode == "multicall-essentials":
         waitscreen("essentials-ready", "PLAN2001-MULTICALL-READY")
         waitscreen("essentials-prompt", "ash$", 45)

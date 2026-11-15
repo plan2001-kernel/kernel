@@ -51,7 +51,7 @@ long region_wake(unsigned long long base,unsigned long long off,
     return 1;
 }
 #define DISK_ITEMS 24u
-#define DISK_BYTES 20000u
+#define DISK_BYTES (1024u*1024u)
 typedef struct {
     UxOid oid;
     unsigned int length;

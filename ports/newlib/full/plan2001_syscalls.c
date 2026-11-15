@@ -548,7 +548,7 @@ int p9_raw_fstat(int fd, struct stat *st)
         st->st_mode=(kind==UXFS_DIR ? S_IFDIR : S_IFREG) | 0600;
         st->st_size=length;
         st->st_nlink=1;
-        st->st_blksize=UXFS_DATA_MAX;
+        st->st_blksize=UXFS_IO_CHUNK;
         return 0;
     }
     if(proxy_bound && fd >= 0 && fd <= 2 && !proxy_closed[fd]) {
@@ -709,7 +709,7 @@ int p9_raw_stat(const char *path, struct stat *st)
     st->st_mode=(kind == UXFS_DIR ? S_IFDIR : S_IFREG) | 0600;
     st->st_size=length;
     st->st_nlink=1;
-    st->st_blksize=UXFS_DATA_MAX;
+    st->st_blksize=UXFS_IO_CHUNK;
     return 0;
 }
 /* The POSIX cwd is a userland PVD projection, not kernel state.

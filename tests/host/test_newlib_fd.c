@@ -99,7 +99,7 @@ long p9_native_sleep_millis(long n) { (void)n; assert(0); return -1; }
 
 int main(void)
 {
-    int fd, alias, saved, p[2], copy, fds[32], n=0;
+    int fd, alias, saved, p[2], copy, fds[1024], n=0;
     char c, bytes[8];
     struct stat st;
     assert(signal(SIGPIPE,SIG_IGN)!=SIG_ERR);
@@ -156,7 +156,7 @@ int main(void)
     assert(pipe(p)==-1 && region_count==0 && p[0]==99 && p[1]==98);
     fail_create=0;
     while((fd=dup(1))>=0) fds[n++]=fd;
-    assert(errno==EMFILE && n==16);
+    assert(errno==EMFILE && n==1021);
     p[0]=99; p[1]=98;
     assert(pipe(p)==-1 && errno==EMFILE && !region_count);
     assert(p[0]==99 && p[1]==98);

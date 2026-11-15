@@ -56,6 +56,7 @@ static void command_input(char *const args[], int code, const char *expected,con
         if (dup2(stream[1], 1) < 0 || dup2(stream[1], 2) < 0) _exit(121);
         if (stream[1] != 1 && stream[1] != 2) (void)close(stream[1]);
         execve(strchr(args[0], '/') ? args[0] : "/bin/busybox", args, environment);
+        { char error[100]; int n=snprintf(error,sizeof error,"exec failed: errno=%d\n",errno); (void)write(2,error,n); }
         _exit(122);
     }
     check(close(stream[1]) == 0, "drop parent writer");
@@ -206,6 +207,28 @@ int main(void)
             check(close(extra[i][0])==0 && close(extra[i][1])==0,"close inherited pipe descriptors");
         }
         emit("PASS: real fork/exec with more than sixteen native grants\n");
+    }
+    {
+        char block[4096],path[64];int fd;struct stat st;
+        memset(block,'a',sizeof block);block[sizeof(block)-1]='\n';
+        fd=open("/tmp/large-file",O_CREAT|O_WRONLY|O_TRUNC,0600);
+        check(fd>=0,"create large file");
+        for(unsigned i=0;i<64;++i)check(write(fd,block,sizeof block)==sizeof block,"write beyond 1 KiB");
+        check(close(fd)==0 && stat("/tmp/large-file",&st)==0 && st.st_size==262144,"256 KiB file size");
+        for(unsigned i=0;i<100;i++){
+            snprintf(path,sizeof path,"/tmp/dir%u",i);check(mkdir(path,0700)==0,"more than 64 directories");
+            snprintf(path,sizeof path,"/tmp/file%u",i);fixture(path,"node\n");
+        }
+        RUN(0,"64\n","/usr/bin/awk","END {print NR}","/tmp/large-file");
+        RUN(0,"node\n","/bin/cat","/tmp/file99");
+        RUN(0,"100\n","/bin/sh","-c","ls /tmp | grep '^dir' | awk 'END {print NR}'");
+        RUN(0,"", "/bin/rm","-r","/tmp/dir99");
+        for(unsigned i=0;i<100;i++){
+            snprintf(path,sizeof path,"/tmp/file%u",i);check(unlink(path)==0,"remove many files");
+            if(i!=99){snprintf(path,sizeof path,"/tmp/dir%u",i);check(rmdir(path)==0,"remove many directories");}
+        }
+        check(unlink("/tmp/large-file")==0,"reclaim large file arena");
+        emit("PASS: 256 KiB file and 200 nodes across real fork/exec and pipelines\n");
     }
     RUN(0, EXPECTED_APPLETS, "busybox", "--list");
     RUN(0, EXPECTED_APPLETS_FULL, "busybox", "--list-full");

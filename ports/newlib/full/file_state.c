@@ -20,7 +20,8 @@ typedef struct {
     UxFdSlot slots[UXFD_SLOTS];
     unsigned refs[UXFD_SLOTS];
 } SharedFiles;
-#define FILE_MAGIC UINT64_C(0x3153464453583950)
+#define FILE_MAGIC UINT64_C(0x3253464453583950)
+_Static_assert(sizeof(SharedFiles)<16u*1024u*1024u,"shared file state fits native region");
 static int shared_handle;
 static SharedFiles *transaction;
 static UxService imported_service;
@@ -69,7 +70,7 @@ static int begin(void)
     /* Topology is shared; current-directory selection remains local. */
     memcpy(view->nodes,transaction->view.nodes,sizeof view->nodes);
     view->count=transaction->view.count;
-    table->service->fs=transaction->fs;
+    uxfs_snapshot(&table->service->fs,&transaction->fs);
     table->service->fs.view=view;
     memcpy(table->slots,transaction->slots,sizeof table->slots);
     return 0;
@@ -80,7 +81,7 @@ static void end(void)
     int saved=errno;
     if(!transaction) return;
     table=p9_backend_files();
-    transaction->fs=table->service->fs;
+    uxfs_snapshot(&transaction->fs,&table->service->fs);
     transaction->fs.view=NULL;
     memcpy(transaction->view.nodes,table->service->fs.view->nodes,sizeof transaction->view.nodes);
     transaction->view.count=table->service->fs.view->count;
@@ -109,7 +110,7 @@ int p9_file_export(P9Plan *plan)
         if(!state) { (void)p9_full_region_close(shared_handle); shared_handle=0; return -1; }
         memset(state,0,sizeof(*state));
         state->magic=FILE_MAGIC; state->view=*table->service->fs.view;
-        state->fs=table->service->fs; state->fs.view=NULL;
+        uxfs_snapshot(&state->fs,&table->service->fs); state->fs.view=NULL;
         memcpy(state->slots,table->slots,sizeof state->slots);
         for(i=0;i<UXFD_SLOTS;++i) state->refs[i]=table->slots[i].used ? 1 : 0;
         (void)p9_full_region_unmap((uintptr_t)state);

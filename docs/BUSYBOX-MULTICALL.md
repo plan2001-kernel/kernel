@@ -115,15 +115,22 @@ failure leaves the original content intact. Stream editing and redirection
 remain usable. Directory moves and Unix permission/ownership preservation are
 also unsupported.
 
-The 64-node, 1 KiB-per-file volatile UXFS bound remains. SPAWN and RFORKEX
+The volatile UXFS service supports 2048 metadata nodes and a shared 8 MiB
+content arena. Files grow into the available arena instead of reserving a
+fixed per-file buffer. Offset I/O and 4 KiB RPC transfers avoid whole-file
+stack buffers. Deleted/truncated content is compacted and reused. The
+pointer-free shared snapshot fits the native 16 MiB region ceiling. Manifest
+v2 uses the expanded inventory; the original 64-node v1 remains readable. SPAWN and RFORKEX
 share the native 1024-Handle capacity, based on Linux's initial RLIMIT_NOFILE
 soft limit. The C inheritance plan has the same capacity. External pipelines
 preserve stdin, stdout, stderr and other open descriptors without requiring
 input redirection or merging stderr. The console regression runs
 `cat koe.txt | awk '{print $0}'` and a three-external-command pipeline. A
 separate native test leaves fourteen pipe descriptors open across fork/exec,
-exercising more than sixteen native grants. This does not raise the separate
-19-entry Unix fd table or the volatile file/node limits.
+exercising more than sixteen native grants. The Unix fd and child tracking tables each have 1024 entries. Their actual
+use remains subject to native Handle and memory availability. The QEMU
+regression writes a 256 KiB file, creates 100 directories and 100 files,
+and reads/counts them through real fork/exec and a shell pipeline.
 
 ## Evidence and limits
 

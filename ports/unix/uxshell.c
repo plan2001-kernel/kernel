@@ -6,7 +6,7 @@
 #define SH_TOKENS 20u
 #define SH_LINE 256u
 typedef struct {
-    unsigned char buf[UXFS_DATA_MAX];
+    unsigned char buf[UXFS_IO_CHUNK];
     unsigned int used;
 } Output;
 
@@ -25,7 +25,7 @@ static int output(Output *o, const void *p, unsigned int n)
 {
     unsigned int i;
     const unsigned char *q = (const unsigned char *)p;
-    if (n > UXFS_DATA_MAX-o->used) return PVD_ENOSPC;
+    if (n > UXFS_IO_CHUNK-o->used) return PVD_ENOSPC;
     for (i = 0; i < n; ++i) o->buf[o->used+i] = q[i];
     o->used += n;
     return PVD_OK;
@@ -83,7 +83,7 @@ static int command(UxFs *fs, char **argv, unsigned int argc,
     if (eq(argv[0], "true")) return PVD_OK;
     if (eq(argv[0], "false")) return -1;
     if (eq(argv[0], "cat")) {
-        unsigned char buf[UXFS_DATA_MAX];
+        unsigned char buf[UXFS_IO_CHUNK];
         if (argc == 1)
             return input ? output(out, input, input_size) : PVD_EINVAL;
         if (argc != 2) return PVD_EINVAL;
@@ -93,10 +93,10 @@ static int command(UxFs *fs, char **argv, unsigned int argc,
     if (eq(argv[0], "ls")) {
         if (argc > 2) return PVD_EINVAL;
         if (io && io->external_ls && io->external) {
-            n = UXFS_DATA_MAX;
+            n = UXFS_IO_CHUNK;
             rc = io->external(io->context, argv[0], argv, argc,
                               out->buf, n, &n);
-            if (rc || n > UXFS_DATA_MAX) return PVD_EIO;
+            if (rc || n > UXFS_IO_CHUNK) return PVD_EIO;
             out->used = n;
             return PVD_OK;
         }
@@ -104,10 +104,10 @@ static int command(UxFs *fs, char **argv, unsigned int argc,
                          listing, out);
     }
     if (io && io->external) {
-        n = UXFS_DATA_MAX;
+        n = UXFS_IO_CHUNK;
         rc = io->external(io->context, argv[0], argv, argc,
                           out->buf, n, &n);
-        if (rc || n > UXFS_DATA_MAX) return PVD_EIO;
+        if (rc || n > UXFS_IO_CHUNK) return PVD_EIO;
         out->used = n;
         return PVD_OK;
     }
@@ -207,8 +207,8 @@ int uxshell_eval(UxFs *fs, const char *line, const UxShellIO *io)
         (redirect ? redirect : n)==split+2) {
         unsigned int result_size=0;
         rc=io->pipeline(io->context,args,split,args+split+1,1,
-                        right.buf,UXFS_DATA_MAX,&result_size);
-        if(rc || result_size>UXFS_DATA_MAX) return PVD_EIO;
+                        right.buf,UXFS_IO_CHUNK,&result_size);
+        if(rc || result_size>UXFS_IO_CHUNK) return PVD_EIO;
         right.used=result_size;
     } else if (split) {
         rc = command(fs, args, split, 0, 0, &left, io);

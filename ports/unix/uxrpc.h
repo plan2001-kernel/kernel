@@ -1,14 +1,14 @@
 /* A bounded, single-client Unix file-service RPC over TWO UXPIPE channels.
  * The trusted owner holds UxService + the GE/O volume capability. Clients
  * receive only the four attenuated region grants; raw OIDs and paths are
- * never kernel authority. All messages are fixed-size, versioned AMD64 v1.
+ * never kernel authority. All messages are fixed-size, versioned AMD64 v2.
  */
 #ifndef PLAN2001_UXRPC_H
 #define PLAN2001_UXRPC_H
 #include "uxfd.h"
 #include "uxpipe.h"
 #define UXRPC_MAGIC 0x3143505258465558ULL
-#define UXRPC_VERSION 1u
+#define UXRPC_VERSION 2u
 enum {
     UXRPC_OPEN=1, UXRPC_READ=2, UXRPC_WRITE=3, UXRPC_CLOSE=4,
     UXRPC_SEEK=5, UXRPC_STAT=6, UXRPC_UNLINK=7, UXRPC_EMIT=8,
@@ -20,14 +20,14 @@ typedef struct {
     long long offset;
     int whence;
     char path[PVD_PATH_MAX];
-    unsigned char data[UXFS_DATA_MAX];
+    unsigned char data[UXFS_IO_CHUNK];
 } UxRpcRequest;
 typedef struct {
     unsigned long long magic;
     unsigned int version, seq;
     long long result;
     unsigned int kind, length;
-    unsigned char data[UXFS_DATA_MAX];
+    unsigned char data[UXFS_IO_CHUNK];
 } UxRpcReply;
 typedef struct {
     UxService *service;
@@ -35,7 +35,7 @@ typedef struct {
     UxPipe request, response;
     char prefix[PVD_PATH_MAX];
     unsigned int next_seq;
-    unsigned char output[UXFS_DATA_MAX];
+    unsigned char output[UXFS_IO_CHUNK];
     unsigned int output_size;
 } UxRpcServer;
 typedef struct {

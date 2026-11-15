@@ -1,7 +1,7 @@
 /* Memory cache and explicit GE/O persistence transaction for Unix files.
  * The durable manifest is versioned and checksummed. Per-file data objects
  * use independent GE/O OIDs; metadata publishes only on final commit.
- * This is a bounded v1 (64 nodes, 1024-byte regular files), not POSIX VFS.
+ * Files share a packed content arena; node metadata remains pointer-free.
  */
 #include "uxfs.h"
 
@@ -15,6 +15,12 @@ static void bytes(void *v, const void *s, unsigned long n)
     unsigned char *p = (unsigned char *)v;
     const unsigned char *q = (const unsigned char *)s;
     while (n--) *p++ = *q++;
+}
+static void movebytes(void *dst,const void *src,unsigned long n)
+{
+    unsigned char *d=dst; const unsigned char *s=src;
+    if(d>s){while(n){--n;d[n]=s[n];}}
+    else {while(n--)*d++=*s++;}
 }
 static unsigned int length(const char *p)
 {
@@ -174,52 +180,85 @@ int uxfs_rmdir(UxFs *fs,const char *path)
     fs->dirty=1;
     return PVD_OK;
 }
-int uxfs_write(UxFs *fs, const char *path, const void *buf,
-               unsigned int size, int append)
+/* Resize atomically after checking capacity. Offsets, never pointers, cross
+ * the process snapshot boundary. memmove permits overlapping arena tails. */
+static int resize(UxFs *fs,unsigned id,unsigned size)
 {
-    char resolved[PVD_PATH_MAX];
-    UxNode *node;
-    unsigned int old;
-    int id, rc = uxfs_path(fs, path, resolved);
-    if (rc) return rc;
-    if (size && !buf) return PVD_EINVAL;
-    id = find(fs, resolved);
-    if (id < 0) {
-        rc = parent_ok(fs, resolved);
-        if (rc) return rc;
-        /* Check payload size before exposing a new entry. Failed writes
-         * cannot create a phantom zero-length file. */
-        if (size > UXFS_DATA_MAX) return PVD_ENOSPC;
-        id = free_node(fs);
-        if (id < 0) return PVD_ENOSPC;
-        bytes(fs->nodes[id].path, resolved, length(resolved)+1);
-        fs->nodes[id].kind = UXFS_FILE;
-    }
-    node = &fs->nodes[id];
-    if (node->kind != UXFS_FILE) return PVD_EINVAL;
-    old = append ? node->length : 0;
-    if (old > UXFS_DATA_MAX || size > UXFS_DATA_MAX-old)
-        return PVD_ENOSPC;
-    if (size) bytes(fs->data[id]+old, buf, size);
-    node->length = old + size;
-    fs->modified[id] = 1;
-    fs->dirty = 1;
-    return PVD_OK;
+    unsigned old=fs->nodes[id].length, off=fs->offsets[id], i;
+    if(size>old && size-old>UXFS_DATA_MAX-fs->used) return PVD_ENOSPC;
+    movebytes(fs->data+off+size,fs->data+off+old,fs->used-off-old);
+    for(i=0;i<UXFS_NODES;i++)
+        if(i!=id && fs->nodes[i].kind==UXFS_FILE &&
+           (fs->offsets[i]>off || (fs->offsets[i]==off && old==0)))
+            fs->offsets[i]=fs->offsets[i]-old+size;
+    if(size>old) zero(fs->data+off+old,size-old);
+    fs->used=fs->used-old+size;
+    fs->nodes[id].length=size;
+    return 0;
 }
-int uxfs_read(UxFs *fs, const char *path, void *buf,
-              unsigned int capacity, unsigned int *size)
+void uxfs_snapshot(UxFs *dst,const UxFs *src)
+{
+    bytes(dst,src,__builtin_offsetof(UxFs,data));
+    bytes(dst->data,src->data,src->used);
+}
+long uxfs_pwrite(UxFs *fs,const char *path,const void *buf,unsigned count,
+                 unsigned offset,int truncate)
 {
     char resolved[PVD_PATH_MAX];
-    int id, rc = uxfs_path(fs, path, resolved);
-    if (rc) return rc;
-    id = find(fs, resolved);
-    if (id < 0) return PVD_ENOENT;
-    if (fs->nodes[id].kind != UXFS_FILE || !size) return PVD_EINVAL;
-    if (capacity < fs->nodes[id].length || (!buf && fs->nodes[id].length))
+    int id,rc=uxfs_path(fs,path,resolved),fresh=0;
+    unsigned target;
+    if(rc)return rc;
+    if(count && !buf)return PVD_EINVAL;
+    if(offset>UXFS_DATA_MAX || count>UXFS_DATA_MAX-offset)return PVD_ENOSPC;
+    id=find(fs,resolved);
+    if(id<0){
+        if((rc=parent_ok(fs,resolved)))return rc;
+        id=free_node(fs);if(id<0)return PVD_ENOSPC;
+        fresh=1;
+    }else if(fs->nodes[id].kind!=UXFS_FILE)return PVD_EINVAL;
+    target=offset+count;
+    if(!truncate && target<fs->nodes[id].length)target=fs->nodes[id].length;
+    if(target>fs->nodes[id].length && target-fs->nodes[id].length>UXFS_DATA_MAX-fs->used)
         return PVD_ENOSPC;
-    bytes(buf, fs->data[id], fs->nodes[id].length);
-    *size = fs->nodes[id].length;
-    return PVD_OK;
+    if(fresh){
+        fs->offsets[id]=fs->used;
+        fs->nodes[id].kind=UXFS_FILE;
+        bytes(fs->nodes[id].path,resolved,length(resolved)+1);
+    }
+    rc=resize(fs,(unsigned)id,target);if(rc)return rc;
+    if(count)bytes(fs->data+fs->offsets[id]+offset,buf,count);
+    fs->modified[id]=1;fs->dirty=1;
+    return count;
+}
+int uxfs_write(UxFs *fs,const char *path,const void *buf,unsigned size,int append)
+{
+    unsigned offset=0,kind;
+    int rc;
+    if(append){rc=uxfs_info(fs,path,&kind,&offset);if(rc && rc!=PVD_ENOENT)return rc;}
+    long result=uxfs_pwrite(fs,path,buf,size,offset,!append);
+    return result<0 ? (int)result : 0;
+}
+long uxfs_pread(UxFs *fs,const char *path,void *buf,unsigned count,unsigned offset)
+{
+    char resolved[PVD_PATH_MAX];int id,rc=uxfs_path(fs,path,resolved);
+    if(rc)return rc;
+    if(count && !buf)return PVD_EINVAL;
+    id=find(fs,resolved);if(id<0)return PVD_ENOENT;
+    if(fs->nodes[id].kind!=UXFS_FILE)return PVD_EINVAL;
+    if(offset>=fs->nodes[id].length)return 0;
+    if(count>fs->nodes[id].length-offset)count=fs->nodes[id].length-offset;
+    if(count)bytes(buf,fs->data+fs->offsets[id]+offset,count);
+    return count;
+}
+int uxfs_read(UxFs *fs,const char *path,void *buf,unsigned capacity,unsigned *size)
+{
+    unsigned kind,n;int rc=uxfs_info(fs,path,&kind,&n);
+    if(rc)return rc;
+    if(!size || kind!=UXFS_FILE)return PVD_EINVAL;
+    if(capacity<n)return PVD_ENOSPC;
+    long got=uxfs_pread(fs,path,buf,n,0);
+    if(got<0)return (int)got;
+    *size=(unsigned)got;return 0;
 }
 int uxfs_info(UxFs *fs, const char *path,
               unsigned int *kind, unsigned int *size)
@@ -235,12 +274,21 @@ int uxfs_info(UxFs *fs, const char *path,
     *size=fs->nodes[id].length;
     return PVD_OK;
 }
-int uxfs_copy(UxFs *fs, const char *src, const char *dest)
+int uxfs_copy(UxFs *fs,const char *src,const char *dest)
 {
-    unsigned char tmp[UXFS_DATA_MAX];
-    unsigned int n = 0;
-    int rc = uxfs_read(fs, src, tmp, sizeof(tmp), &n);
-    return rc ? rc : uxfs_write(fs, dest, tmp, n, 0);
+    unsigned char chunk[UXFS_IO_CHUNK];unsigned off=0;char a[PVD_PATH_MAX],b[PVD_PATH_MAX];
+    int rc=uxfs_path(fs,src,a);if(rc)return rc;
+    rc=uxfs_path(fs,dest,b);if(rc)return rc;
+    unsigned kind,size;rc=uxfs_info(fs,a,&kind,&size);if(rc)return rc;
+    if(kind!=UXFS_FILE)return PVD_EINVAL;
+    if(same(a,b))return 0;
+    int destid=find(fs,b);
+    unsigned reclaim=destid>=0 && fs->nodes[destid].kind==UXFS_FILE ? fs->nodes[destid].length : 0;
+    if(size>UXFS_DATA_MAX-fs->used+reclaim)return PVD_ENOSPC;
+    rc=uxfs_write(fs,b,0,0,0);if(rc)return rc;
+    while(off<size){long n=uxfs_pread(fs,a,chunk,sizeof(chunk),off);if(n<=0)return PVD_EIO;
+        long put=uxfs_pwrite(fs,b,chunk,(unsigned)n,off,0);if(put<0)return (int)put;off+=(unsigned)n;}
+    return 0;
 }
 int uxfs_remove(UxFs *fs, const char *path)
 {
@@ -250,8 +298,9 @@ int uxfs_remove(UxFs *fs, const char *path)
     id = find(fs, resolved);
     if (id < 0) return PVD_ENOENT;
     if (fs->nodes[id].kind != UXFS_FILE) return PVD_EINVAL;
+    (void)resize(fs,(unsigned)id,0);
     zero(&fs->nodes[id], sizeof(UxNode));
-    zero(fs->data[id], UXFS_DATA_MAX);
+    fs->offsets[id]=0;
     fs->modified[id] = 0;
     fs->dirty = 1;
     return PVD_OK;
@@ -273,8 +322,9 @@ int uxfs_move(UxFs *fs, const char *src, const char *dest)
     if (other >= 0 && fs->nodes[other].kind != UXFS_FILE)
         return PVD_EINVAL;
     if (other >= 0) {
+        (void)resize(fs,(unsigned)other,0);
         zero(&fs->nodes[other], sizeof(UxNode));
-        zero(fs->data[other], UXFS_DATA_MAX);
+        fs->offsets[other]=0;
         fs->modified[other] = 0;
     }
     bytes(fs->nodes[id].path, b, length(b)+1);
@@ -336,7 +386,7 @@ static UxOid hash(const void *data, unsigned long n)
  */
 int uxfs_save(UxFs *fs, const UxStore *s, UxOid manifest)
 {
-    UxManifest disk;
+    static UxManifest disk;
     unsigned int i, j;
     if (!fs || !s || !manifest || !s->create || !s->put || !s->commit)
         return PVD_EINVAL;
@@ -359,7 +409,7 @@ int uxfs_save(UxFs *fs, const UxStore *s, UxOid manifest)
                     disk.nodes[j].oid == fresh)
                     return PVD_EIO;
             n->oid = fresh;
-            if (s->put(s->context, fresh, fs->data[i], n->length))
+            if (s->put(s->context, fresh, fs->data+fs->offsets[i], n->length))
                 return PVD_EIO;
         }
     }
@@ -389,17 +439,25 @@ int uxfs_restore(UxFs *fs, const UxStore *s, UxOid manifest)
         "/", "/bin", "/dev", "/etc", "/home", "/tmp",
         "/usr", "/usr/bin", "/var"
     };
-    UxManifest disk;
+    static UxManifest disk;
     char canonical[PVD_PATH_MAX];
     unsigned int n, i, j, round, built;
     int rc;
     if (!fs || !fs->view || !s || !s->get || !manifest)
         return PVD_EINVAL;
-    if (s->get(s->context, manifest, &disk, sizeof(disk), &n) ||
-        n != sizeof(disk) || disk.magic != UXFS_MAGIC ||
-        disk.version != UXFS_VERSION || disk.reserved != 0 ||
-        disk.checksum != hash(&disk, sizeof(disk)-sizeof(disk.checksum)))
-        return PVD_EIO;
+    /* Version 1 held 64 fixed metadata records. Its payload checksum must
+     * be verified before zero-extending into the current metadata table. */
+    zero(&disk,sizeof(disk));
+    if(s->get(s->context,manifest,&disk,sizeof(disk),&n) || n<24 ||
+       disk.magic!=UXFS_MAGIC || disk.reserved!=0)return PVD_EIO;
+    if(disk.version==1){
+        UxOid stored;unsigned legacy=16+64*sizeof(UxNode)+sizeof(UxOid);
+        if(n!=legacy)return PVD_EIO;
+        bytes(&stored,(unsigned char*)&disk+n-sizeof(UxOid),sizeof stored);
+        if(stored!=hash(&disk,n-sizeof(UxOid)))return PVD_EIO;
+        zero((unsigned char*)&disk+16+64*sizeof(UxNode),sizeof(disk)-16-64*sizeof(UxNode));
+    }else if(disk.version!=UXFS_VERSION || n!=sizeof(disk) ||
+       disk.checksum!=hash(&disk,sizeof(disk)-sizeof(disk.checksum)))return PVD_EIO;
     if (disk.nodes[0].kind != UXFS_DIR ||
         !same(disk.nodes[0].path, "/")) return PVD_EIO;
     if (pvd_bootstrap(&staged_view) != PVD_OK) return PVD_EIO;
@@ -457,13 +515,17 @@ int uxfs_restore(UxFs *fs, const UxStore *s, UxOid manifest)
             if (pvd_chdir(&staged_view, "/") != PVD_OK)
                 return PVD_EIO;
         } else if (p->kind == UXFS_FILE) {
-            if (s->get(s->context, p->oid, staged.data[i],
-                       UXFS_DATA_MAX, &n) || n != p->length)
+            if(p->length>UXFS_DATA_MAX-staged.used)return PVD_EIO;
+            staged.offsets[i]=staged.used;
+            if (s->get(s->context, p->oid, staged.data+staged.used,
+                       p->length, &n) || n != p->length)
                 return PVD_EIO;
+            staged.used+=n;
         }
     }
-    bytes(fs->nodes, staged.nodes, sizeof(fs->nodes));
-    bytes(fs->data, staged.data, sizeof(fs->data));
+    Pvd *original_view=fs->view;
+    uxfs_snapshot(fs,&staged);
+    fs->view=original_view;
     zero(fs->modified, sizeof(fs->modified));
     *fs->view = staged_view;
     fs->dirty = 0;

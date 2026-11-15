@@ -21,12 +21,12 @@ static int same(const char *a,const char *b)
 static unsigned int length(const char *s)
 {
     unsigned int n=0;
-    while(s && s[n] && n<UXFS_DATA_MAX) ++n;
+    while(s && s[n] && n<UXFS_IO_CHUNK) ++n;
     return n;
 }
 static int perform(UxRpcClient *client,int argc,char **argv)
 {
-    unsigned char bytes[UXFS_DATA_MAX];
+    unsigned char bytes[UXFS_IO_CHUNK];
     unsigned int n;
     long got;
     int fd,success=0;
@@ -47,7 +47,7 @@ static int perform(UxRpcClient *client,int argc,char **argv)
         return -1;
     if(argc!=4 || !argv[3]) return -1;
     n=length(argv[3]);
-    if(n>=UXFS_DATA_MAX) return -1;
+    if(n>=UXFS_IO_CHUNK) return -1;
     for(unsigned int i=0;i<n;++i) bytes[i]=(unsigned char)argv[3][i];
     bytes[n++]='\n';
     fd=uxrpc_open(client,argv[2],UXFD_WRITE|UXFD_CREATE|

@@ -4,9 +4,9 @@
 #include <stdint.h>
 #include <sys/types.h>
 #define P9_GRANTS 1024
-#define P9_FDS 19
+#define P9_FDS 1024
 #define P9_EXECUTABLES 4
-#define P9_CHILDREN 8
+#define P9_CHILDREN 1024
 #define P9_ENV_BYTES 4096
 #define P9_CONTEXT_MAGIC UINT64_C(0x3158544358553950)
 typedef struct { int handle; uint64_t rights; } P9Grant;
