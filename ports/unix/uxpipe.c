@@ -39,6 +39,7 @@ int uxpipe_format(UxPipeData *data, UxPipeAck *ack)
     data->magic = UXPIPE_DATA_MAGIC;
     data->version = UXPIPE_VERSION;
     for (i=0;i<UXPIPE_CAPACITY;++i) data->payload[i]=0;
+    for (i=0;i<sizeof(data->eof);++i) data->eof[i]=0;
     publish(&data->produced,0);
     publish(&data->closed,0);
     publish(&data->ready,0);
@@ -114,15 +115,15 @@ static int await_peer(UxPipe *pipe, long long timeout_ms)
     }
     return valid(pipe) ? 0 : -1;
 }
-long uxpipe_write(UxPipe *pipe, const void *bytes,
-                  unsigned int count, long long timeout_ms)
+static long write_slots(UxPipe *pipe, const void *bytes,
+                         unsigned int count, long long timeout_ms, int eof)
 {
     const unsigned char *src = (const unsigned char *)bytes;
     unsigned int done=0, n, offset, i;
     unsigned long long wr, rd;
     long rc;
     if (!pipe || pipe->role != UXPIPE_WRITER || !valid(pipe) ||
-        (!src && count) || count > UXPIPE_MAX_IO ||
+        (!src && count && !eof) || count > UXPIPE_MAX_IO ||
         timeout_ms < -1) return -1;
     if (count && await_peer(pipe, timeout_ms) < 0) return -1;
     while (done<count) {
@@ -145,12 +146,33 @@ long uxpipe_write(UxPipe *pipe, const void *bytes,
         n=UXPIPE_CAPACITY-(unsigned int)(wr-rd);
         if (n>UXPIPE_CAPACITY-offset) n=UXPIPE_CAPACITY-offset;
         if (n>count-done) n=count-done;
-        for (i=0;i<n;++i) pipe->data->payload[offset+i]=src[done+i];
+        for (i=0;i<n;++i) {
+            unsigned slot=offset+i;
+            unsigned char mask=(unsigned char)(1u << (slot%8u));
+            if(eof) {
+                __atomic_fetch_or(&pipe->data->eof[slot/8u],mask,__ATOMIC_RELAXED);
+            } else {
+                pipe->data->payload[slot]=src[done+i];
+                __atomic_fetch_and(&pipe->data->eof[slot/8u],
+                                   (unsigned char)~mask,__ATOMIC_RELAXED);
+            }
+        }
         publish(&pipe->data->produced,wr+n);
         (void)region_wake(pipe->data_base, UXPIPE_PUB_OFFSET,1);
         done+=n;
     }
     return (long)done;
+}
+long uxpipe_write(UxPipe *pipe, const void *bytes,
+                  unsigned int count, long long timeout_ms)
+{
+    return write_slots(pipe,bytes,count,timeout_ms,0);
+}
+int uxpipe_send_eof(UxPipe *pipe,long long timeout_ms)
+{
+    /* Advancing produced makes publication observable by REGIONWAIT even
+     * when a reader enrolls after the wake. No byte value is reserved. */
+    return write_slots(pipe,0,1,timeout_ms,1)==1 ? 0 : -1;
 }
 long uxpipe_read(UxPipe *pipe, void *bytes,
                  unsigned int capacity, long long timeout_ms)
@@ -179,8 +201,16 @@ long uxpipe_read(UxPipe *pipe, void *bytes,
     n=(unsigned int)(wr-rd);
     if (n>UXPIPE_CAPACITY-offset) n=UXPIPE_CAPACITY-offset;
     if (n>capacity) n=capacity;
-    for (i=0;i<n;++i) dst[i]=pipe->data->payload[offset+i];
-    publish(&pipe->ack->consumed,rd+n);
+    for (i=0;i<n;++i) {
+        unsigned slot=offset+i;
+        unsigned char flags=__atomic_load_n(&pipe->data->eof[slot/8u],__ATOMIC_RELAXED);
+        if(flags & (1u << (slot%8u))) break;
+        dst[i]=pipe->data->payload[slot];
+    }
+    /* Deliver data preceding an EOF first. The next nonzero-capacity read
+     * consumes the token once and returns 0; it does not close either end. */
+    n=i;
+    publish(&pipe->ack->consumed,rd+(n ? n : 1u));
     (void)region_wake(pipe->ack_base,UXPIPE_ACK_OFFSET,1);
     return (long)n;
 }

@@ -4,7 +4,7 @@
 #include "uxfs.h"
 
 #define MOCK_OBJECTS 40
-#define MOCK_BYTES 20000
+#define MOCK_BYTES (1024*1024)
 typedef struct {
     UxOid oid;
     unsigned int n;
@@ -76,10 +76,10 @@ static int emit(void *ctx, const void *name, unsigned int n)
 int main(void)
 {
     UxStore store = {&disk, create, put, get, commit};
-    unsigned char bytes[UXFS_DATA_MAX];
+    static unsigned char bytes[UXFS_DATA_MAX];
     unsigned int n;
     char path[PVD_PATH_MAX];
-    unsigned char oversized[UXFS_DATA_MAX+1];
+    static unsigned char oversized[UXFS_DATA_MAX+1];
     UxOid previous_oid;
 
     assert(pvd_bootstrap(&view) == 0);
@@ -144,8 +144,84 @@ int main(void)
     assert(uxfs_list(&fs,".",emit,0)==0);
     assert(strcmp(listing,"c\n")==0);
     assert(uxfs_restore(&fs,&store,500000) == PVD_EIO);
+    /* Build a genuine v1 metadata payload using its original 64 records. */
+    {
+        struct Legacy { UxOid magic; unsigned version,reserved; UxNode nodes[64]; UxOid sum; } old={0};
+        old.magic=UXFS_MAGIC;old.version=1;
+        memcpy(old.nodes,disk.committed[1].data+16,sizeof old.nodes);
+        const unsigned char *raw=(const unsigned char *)&old;
+        old.sum=14695981039346656037ULL;
+        for(unsigned i=0;i<sizeof(old)-sizeof(old.sum);i++){old.sum^=raw[i];old.sum*=1099511628211ULL;}
+        memcpy(disk.committed[1].data,&old,sizeof old);disk.committed[1].n=sizeof old;
+        assert(uxfs_restore(&fs,&store,101)==0);
+        assert(uxfs_read(&fs,"/home/notes/c",bytes,sizeof bytes,&n)==0 && n==9);
+    }
     disk.committed[1].data[16] ^= 0x80; /* corrupt manifest */
     assert(uxfs_restore(&fs,&store,101) == PVD_EIO);
+    /* Persist an expanded inventory and a file larger than the old 1 KiB. */
+    memset(&disk,0,sizeof disk);
+    assert(pvd_bootstrap(&view)==0);uxfs_init(&fs,&view);
+    for(unsigned i=0;i<128;i++){snprintf(path,sizeof path,"/tmp/persist%u",i);assert(uxfs_mkdir(&fs,path)==0);}
+    memset(bytes,'p',128*1024);assert(uxfs_write(&fs,"/tmp/persist-data",bytes,128*1024,0)==0);
+    assert(create(&disk,&((UxOid){0}))==0 && uxfs_save(&fs,&store,101)==0);
+    assert(pvd_bootstrap(&view)==0);uxfs_init(&fs,&view);
+    assert(uxfs_restore(&fs,&store,101)==0);
+    assert(pvd_chdir(&view,"/tmp/persist127")==0);
+    assert(uxfs_read(&fs,"/tmp/persist-data",bytes,sizeof bytes,&n)==0 && n==128*1024);
+    for(unsigned i=0;i<n;i++)assert(bytes[i]=='p');
+    /* Directory deletion updates both inventories and reclaims PVD capacity.
+     * Keep IDs of live siblings stable while holes are reused. */
+    assert(pvd_bootstrap(&view)==0); uxfs_init(&fs,&view);
+    unsigned baseline=view.count;
+    assert(uxfs_mkdir(&fs,"/tmp/a")==0 && uxfs_mkdir(&fs,"/tmp/b")==0);
+    unsigned high=view.count;
+    assert(uxfs_rmdir(&fs,"/tmp/a")==0);
+    assert(uxfs_mkdir(&fs,"/tmp/c")==0 && view.count==high);
+    assert(pvd_chdir(&view,"/tmp/b")==0);
+    assert(uxfs_rmdir(&fs,"/tmp/b")==PVD_EBUSY);
+    assert(pvd_chdir(&view,"/")==0);
+    assert(uxfs_rmdir(&fs,"/tmp/c")==0 && uxfs_rmdir(&fs,"/tmp/b")==0);
+    assert(view.count==baseline);
+    for(unsigned round=0;round<2*PVD_MAX_NODES;++round) {
+        assert(uxfs_mkdir(&fs,"/tmp/reuse")==0);
+        assert(uxfs_write(&fs,"/tmp/reuse/item","x",1,0)==0);
+        assert(uxfs_rmdir(&fs,"/tmp/reuse")==PVD_ENOTEMPTY);
+        assert(uxfs_rmdir(&fs,"/tmp/reuse/item")==PVD_ENOTDIR);
+        assert(uxfs_remove(&fs,"/tmp/reuse/item")==0);
+        assert(uxfs_rmdir(&fs,"/tmp/reuse")==0);
+        assert(view.count==baseline);
+        assert(pvd_chdir(&view,"/tmp/reuse")==PVD_ENOENT);
+    }
+    assert(uxfs_rmdir(&fs,"/")==PVD_EBUSY);
+    assert(uxfs_rmdir(&fs,"/tmp")==PVD_EBUSY);
+    assert(uxfs_rmdir(&fs,"/dev")==PVD_EBUSY);
+    puts("PASS: directory removal, nonempty/cwd denial and repeated PVD slot reuse");
+    assert(pvd_bootstrap(&view)==0);uxfs_init(&fs,&view);
+    for(unsigned i=0;i<128;i++){
+        snprintf(path,sizeof path,"/tmp/d%u",i);assert(uxfs_mkdir(&fs,path)==0);
+        snprintf(path,sizeof path,"/tmp/f%u",i);assert(uxfs_write(&fs,path,"ok",2,0)==0);
+    }
+    memset(bytes,'x',256*1024);
+    assert(uxfs_write(&fs,"/tmp/large",bytes,256*1024,0)==0);
+    assert(uxfs_write(&fs,"/tmp/early","tail",4,0)==0);
+    assert(uxfs_pwrite(&fs,"/tmp/f0","after-gap",9,8192,0)==9);
+    assert(uxfs_read(&fs,"/tmp/early",bytes,sizeof bytes,&n)==0 && n==4 && !memcmp(bytes,"tail",4));
+    assert(uxfs_remove(&fs,"/tmp/large")==0);
+    assert(uxfs_read(&fs,"/tmp/early",bytes,sizeof bytes,&n)==0 && n==4 && !memcmp(bytes,"tail",4));
+    assert(uxfs_read(&fs,"/tmp/f0",bytes,sizeof bytes,&n)==0 && n==8201);
+    for(unsigned i=2;i<8192;i++)assert(bytes[i]==0);
+    assert(!memcmp(bytes+8192,"after-gap",9));
+    assert(pvd_bootstrap(&view)==0);uxfs_init(&fs,&view);
+    memset(bytes,'z',sizeof bytes);
+    assert(uxfs_write(&fs,"/tmp/full",bytes,sizeof bytes,0)==0);
+    assert(uxfs_write(&fs,"/tmp/fail","x",1,0)==PVD_ENOSPC);
+    unsigned kind;assert(uxfs_info(&fs,"/tmp/fail",&kind,&n)==PVD_ENOENT);
+    assert(uxfs_write(&fs,"/tmp/full","x",1,1)==PVD_ENOSPC);
+    assert(uxfs_copy(&fs,"/tmp/full","/tmp/copy-fail")==PVD_ENOSPC);
+    assert(uxfs_info(&fs,"/tmp/copy-fail",&kind,&n)==PVD_ENOENT);
+    assert(uxfs_remove(&fs,"/tmp/full")==0 && fs.used==0);
+    assert(uxfs_write(&fs,"/tmp/reuse",bytes,sizeof bytes,0)==0);
+    puts("PASS: 256 nodes, 256 KiB files, sparse writes, compaction, full arena rollback and reuse");
     puts("PASS: bounded files, GE/O OIDs, transactional manifest, restart, denial, corruption");
     return 0;
 }

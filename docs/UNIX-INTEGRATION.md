@@ -32,7 +32,7 @@ the REAL Plan2001 kernel rather than emulating Linux syscalls.
 
 ## Boundaries / unfinished
 
-UXFS remains a 64-node, 1024-byte-file bounded prototype. The service
+UXFS uses 2048 metadata nodes and a shared 8 MiB content arena. The service
 has a single owner per process; separate Unix client processes do not yet
 have file-server RPC. The process-local FD table is not inherited by SPAWN.
 Generic pathname-to-executable resolution and ObjectSpace graph traversal

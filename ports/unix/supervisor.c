@@ -124,7 +124,7 @@ int uxsupervisor_prepare(UxSupervisor *s)
             uxsupervisor_release(s);
             return -1;
         }
-    s->pending_len=s->pending_pos=0;
+    s->pending_len=s->pending_pos=s->pending_eof=0;
     s->edit_len=0;
     return 0;
 }
@@ -143,6 +143,8 @@ int uxsupervisor_pump(UxSupervisor *s)
             if (s->pending_pos==s->pending_len)
                 s->pending_pos=s->pending_len=0;
         }
+    } else if(s->pending_eof) {
+        if(uxpipe_send_eof(&s->streams[0],0)==0) s->pending_eof=0;
     } else {
         /* This is a text console, not a terminal emulator. Provide the
          * visible input echo and a small canonical line editor before
@@ -162,6 +164,13 @@ int uxsupervisor_pump(UxSupervisor *s)
                 s->pending_len=s->edit_len+1;
                 s->pending_pos=0;
                 s->edit_len=0;
+            } else if(ch==4) { /* canonical VEOF (Ctrl+D), never a data byte */
+                if(s->edit_len) {
+                    for(unsigned int i=0;i<s->edit_len;++i) s->pending[i]=s->edit[i];
+                    s->pending_len=s->edit_len;
+                    s->pending_pos=0;
+                    s->edit_len=0;
+                } else s->pending_eof=1;
             } else if (ch==8 || ch==127) {
                 if (s->edit_len) {
                     --s->edit_len;

@@ -62,47 +62,24 @@ int uxfd_open(UxFdTable *t,const char *path,unsigned int flags)
         }
     return PVD_ENOSPC;
 }
-long uxfd_read(UxFdTable *t,int fd,void *dst,unsigned int count)
+long uxfd_read(UxFdTable *t,int fd,void *dst,unsigned count)
 {
-    unsigned char scratch[UXFS_DATA_MAX];
-    unsigned int length=0,n;
-    UxFdSlot *f=slot(t,fd);
-    int rc;
-    if(!f || !(f->rights&UXFD_READ) || (!dst && count)) return PVD_EINVAL;
-    if(!count) return 0;
-    rc=uxfs_read(&t->service->fs,f->path,scratch,sizeof scratch,&length);
-    if(rc) return rc;
-    if(f->position>=length) return 0;
-    n=length-f->position;
-    if(n>count) n=count;
-    copybytes(dst,scratch+f->position,n);
-    f->position+=n;
+    UxFdSlot *f=slot(t,fd);if(!f || !(f->rights&UXFD_READ))return PVD_EINVAL;
+    long n=uxfs_pread(&t->service->fs,f->path,dst,count,f->position);
+    if(n>0)f->position+=(unsigned)n;
     return n;
 }
-long uxfd_write(UxFdTable *t,int fd,const void *src,unsigned int count)
+long uxfd_write(UxFdTable *t,int fd,const void *src,unsigned count)
 {
-    unsigned char scratch[UXFS_DATA_MAX];
-    unsigned int old=0,kind=0,size=0,pos;
-    UxFdSlot *f=slot(t,fd);
-    int rc;
-    if(!f || !(f->rights&UXFD_WRITE) || (!src && count))
-        return PVD_EINVAL;
-    if(!count) return 0;
-    rc=uxfs_info(&t->service->fs,f->path,&kind,&size);
-    if(rc) return rc;
-    if(kind!=UXFS_FILE) return PVD_EINVAL;
-    rc=uxfs_read(&t->service->fs,f->path,scratch,sizeof scratch,&old);
-    if(rc) return rc;
-    pos=(f->rights&UXFD_APPEND) ? old : f->position;
-    if(pos>UXFS_DATA_MAX || count>UXFS_DATA_MAX-pos) return PVD_ENOSPC;
-    while(old<pos) scratch[old++]=0;
-    copybytes(scratch+pos,src,count);
-    if(old<pos+count) old=pos+count;
-    rc=uxfs_write(&t->service->fs,f->path,scratch,old,0);
-    if(rc) return rc;
-    f->position=pos+count;
-    rc=uxservice_sync(t->service);
-    return rc ? rc : (long)count;
+    UxFdSlot *f=slot(t,fd);unsigned pos,kind;int rc;
+    if(!f || !(f->rights&UXFD_WRITE))return PVD_EINVAL;
+    if(!count)return 0;
+    pos=f->position;
+    if(f->rights&UXFD_APPEND){rc=uxfs_info(&t->service->fs,f->path,&kind,&pos);if(rc)return rc;}
+    long n=uxfs_pwrite(&t->service->fs,f->path,src,count,pos,0);
+    if(n<0)return n;
+    f->position=pos+(unsigned)n;rc=uxservice_sync(t->service);
+    return rc ? rc : n;
 }
 long long uxfd_seek(UxFdTable *t,int fd,long long delta,int whence)
 {

@@ -29,7 +29,7 @@ int getrlimit(int resource,struct rlimit *limit)
 {
     if(!limit) { errno=EFAULT; return -1; }
     /* The one real POSIX-relevant bound exposed in this initial profile is
-     * the per-process userland descriptor slot limit. 3 streams + 16 files.
+     * the per-process userland descriptor slot limit: 1024 descriptors.
      * Kernel budgets are controlled by SPAWN capabilities, not RLIMIT_DATA.
      */
     limit->rlim_cur=0;

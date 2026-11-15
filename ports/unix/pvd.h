@@ -5,7 +5,7 @@
 #ifndef PLAN2001_USERLAND_PVD_H
 #define PLAN2001_USERLAND_PVD_H
 
-#define PVD_MAX_NODES 64u
+#define PVD_MAX_NODES 2048u
 #define PVD_MAX_DEPTH 16u
 #define PVD_LABEL_MAX 47u
 #define PVD_PATH_MAX 256u
@@ -17,6 +17,10 @@ enum {
     PVD_EIO = -5,
     PVD_EEXIST = -17,
     PVD_EINVAL = -22,
+    PVD_ENOTDIR = -20,
+    PVD_EISDIR = -21,
+    PVD_ENOTEMPTY = -39,
+    PVD_EBUSY = -16,
     PVD_ENAMETOOLONG = -36,
     PVD_ELOOP = -40,
     PVD_EAMBIG = -76,
@@ -39,6 +43,7 @@ typedef int (*PvdEmit)(void *context, const char *label);
 
 void pvd_init(Pvd *view);
 int pvd_mkdir_memory(Pvd *view, const char *path);
+int pvd_rmdir_memory(Pvd *view, const char *path);
 int pvd_bootstrap(Pvd *view);
 int pvd_chdir(Pvd *view, const char *path);
 int pvd_getcwd(const Pvd *view, char *buffer, unsigned long capacity);

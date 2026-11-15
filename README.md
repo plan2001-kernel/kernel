@@ -4,6 +4,8 @@ A small Unix-like userspace built on the experimental [Plan2001 kernel](https://
 
 **Status:** AMD64 has a reduced, genuine BusyBox 1.36.1 **ash** statically linked with upstream Newlib 4.6.0 and native Plan2001 POSIX adapters. An F5 supervisor can start ash with keyboard/VGA, volatile PVD/UXFS files, redirection and a forked pipe. The native userland also implements bounded fork/exec/wait, descriptor inheritance and asynchronous signals through capability-based kernel primitives. A separate three-applet BusyBox target and a legacy F5 builtin-shell fixture remain regression tests. **This is not a full BusyBox multicall or POSIX distribution.** The native process/signal profile requires the kernel alarm-startup change from kernel PR #64; CI against moving kernel `main` remains a distinct compatibility check.
 
+A separate [native upstream multicall profile](docs/BUSYBOX-MULTICALL.md) now builds 30 command names with generated executable aliases and a 434-name release inventory. It is an initial implementation of #17; the disabled-applet feasibility audit remains incomplete.
+
 ## Goal
 
 Create a familiar Unix command-line environment using a statically linked, selectively configured BusyBox. Alpine Linux minimal base is the initial user-experience reference; OpenBSD base provides a secondary reference for Unix utility behavior. Neither Linux nor OpenBSD kernel ABI compatibility is required.

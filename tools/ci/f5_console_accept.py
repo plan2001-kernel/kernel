@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised", "ash"):
+                "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -81,7 +81,7 @@ def key(name):
 
 
 def focus(number):
-    key(f"ctrl-alt-f{number}")
+    key(f"meta_l-f{number}")
     time.sleep(0.4)
 
 
@@ -91,7 +91,9 @@ def type_text(line):
     specials = {" ": "spc", "/": "slash", ".": "dot", "-": "minus",
                 ">": "shift-dot", "<": "shift-comma", "|": "shift-backslash",
                 "$": "shift-4", "(": "shift-9", ")": "shift-0",
-                ":": "shift-semicolon", ";": "semicolon", "+": "shift-equal"}
+                ":": "shift-semicolon", ";": "semicolon", "+": "shift-equal",
+                "'": "apostrophe", '"': "shift-apostrophe", "\\": "backslash",
+                "{": "shift-bracket_left", "}": "shift-bracket_right", "=": "equal", "&": "shift-7"}
     for letter in line:
         key("shift-"+letter.lower() if letter.isupper() else specials.get(letter, letter))
 
@@ -153,8 +155,88 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode == "ash":
-        waitscreen("ash-ready", "PLAN2001-ASH-READY")
+    if mode == "multicall-pipeline":
+        waitscreen("pipeline-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("pipeline-prompt", "ash$", 45)
+        enter("echo pipe-line > koe.txt")
+        enter("cat koe.txt | awk '{print $0}'; echo PIPE-END")
+        result=waitscreen("pipeline-exact", "PIPE-END", occurrences=2)
+        assert "\npipe-line\nPIPE-END\n" in result, result
+        enter("cat koe.txt | sed s/pipe/second/ | awk '{print $0}'; echo THREE-END")
+        result=waitscreen("pipeline-three", "THREE-END", occurrences=2)
+        assert "\nsecond-line\nTHREE-END\n" in result, result
+        enter("rm koe.txt; echo PIPE-CLEAN")
+        waitscreen("pipeline-clean", "PIPE-CLEAN", occurrences=2)
+        enter("awk 'BEGIN {for (i=0;i<4096;i++) print \"big\"}' > /tmp/big")
+        enter("cat /tmp/big | awk 'END {print NR}'; echo LARGE-END")
+        result=waitscreen("pipeline-large", "LARGE-END", occurrences=2)
+        assert "\n4096\nLARGE-END\n" in result, result
+        enter("rm /tmp/big")
+        print("PASS: exact cat FILE | awk, three external stages and a 16 KiB file with 4096 lines")
+    elif mode == "multicall-essentials":
+        waitscreen("essentials-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("essentials-prompt", "ash$", 45)
+        enter("echo banana > /tmp/text; echo apple >> /tmp/text; echo banana >> /tmp/text")
+        enter("sort < /tmp/text | uniq > /tmp/sorted; echo SORT-READY")
+        waitscreen("essentials-sort-ready", "SORT-READY", occurrences=2)
+        enter("cat /tmp/sorted; echo SORT-CONTENT")
+        result=waitscreen("essentials-sort-content", "SORT-CONTENT", occurrences=2)
+        assert "\napple\nbanana\nSORT-CONTENT\n" in result
+        enter("head -n 1 /tmp/sorted; tail -n 1 /tmp/sorted; echo HEADTAIL")
+        result=waitscreen("essentials-head-tail", "HEADTAIL", occurrences=2)
+        assert "\napple\nbanana\nHEADTAIL\n" in result
+        enter("wc -l < /tmp/text; echo COUNT")
+        result=waitscreen("essentials-wc", "COUNT", occurrences=2)
+        assert "\n3\nCOUNT\n" in result
+        enter("cut -c1-3 < /tmp/sorted | tr a-z A-Z; echo FILTERS")
+        result=waitscreen("essentials-cut-tr", "FILTERS", occurrences=2)
+        assert "\nAPP\nBAN\nFILTERS\n" in result
+        enter("sed s/banana/BANANA/ /tmp/text; echo SED-RESULT")
+        result=waitscreen("essentials-sed", "SED-RESULT", occurrences=2)
+        assert "\nBANANA\napple\nBANANA\nSED-RESULT\n" in result
+        enter("awk '{print $1}' /tmp/text; echo AWK-RESULT")
+        result=waitscreen("essentials-awk", "AWK-RESULT", occurrences=2)
+        assert "\nbanana\napple\nbanana\nAWK-RESULT\n" in result
+        enter("mkdir /tmp/run && tee /tmp/run/copy < /tmp/text && cmp /tmp/text /tmp/run/copy && echo COPY-RESULT")
+        waitscreen("essentials-tee-cmp", "COPY-RESULT", occurrences=2)
+        enter("mv /tmp/run/copy /tmp/run/moved && rm /tmp/run/moved && rm -r /tmp/run && echo FILES-RESULT")
+        waitscreen("essentials-files", "FILES-RESULT", occurrences=2)
+        print("PASS: interactive essential text tools, sed/awk, pipelines and mkdir/mv/rm")
+    elif mode == "multicall-eof":
+        waitscreen("eof-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("eof-prompt", "ash$", 45)
+        key("ctrl-alt-f1") # old Linux VT chord no longer selects a guest view
+        assert "PLAN2001-MULTICALL-READY" in screen("old-chord-ignored")
+        focus(1)
+        waitscreen("win-left-system", "kernel>")
+        key("meta_r-f5")
+        waitscreen("win-right-shell", "ash$")
+        enter("cat > /tmp/eof")
+        enter("EOF-line")
+        key("ctrl-d")
+        enter("echo EOF-RETURN")
+        waitscreen("eof-return", "EOF-RETURN", occurrences=2)
+        enter("cat /tmp/eof; echo EOF-CONTENT")
+        content=waitscreen("eof-content", "EOF-CONTENT", occurrences=2)
+        assert "\nEOF-line\nEOF-CONTENT\n" in content
+        enter("cat > /tmp/partial")
+        type_text("part")
+        key("ctrl-d") # nonempty: flush without closing the read
+        type_text("ial")
+        key("ctrl-d") # second nonempty flush
+        key("ctrl-d") # empty: one zero read, not permanent channel shutdown
+        enter("echo PARTIAL-RETURN")
+        waitscreen("eof-partial-return", "PARTIAL-RETURN", occurrences=2)
+        enter("cat /tmp/partial; echo PARTIAL-END")
+        partial=waitscreen("eof-partial-content", "PARTIAL-END", occurrences=2)
+        assert "\npartialPARTIAL-END\n" in partial
+        enter("cat")
+        key("ctrl-d")
+        enter("echo EOF-EMPTY")
+        waitscreen("eof-empty", "EOF-EMPTY", occurrences=2)
+        print("PASS: Win+F1/F5 (both Super keys), old VT chord ignored, canonical Ctrl+D, partial flush and live shell")
+    elif mode in ("ash", "multicall"):
+        waitscreen("ash-ready", "PLAN2001-MULTICALL-READY" if mode == "multicall" else "PLAN2001-ASH-READY")
         # The ELF prints READY before ash_main enters its first read. Wait for
         # the actual shell prompt, not a framebuffer race with the marker.
         # screen() strips trailing whitespace from each framebuffer row.
@@ -208,12 +290,20 @@ try:
                 assert "\nhw\n" in listing, "ls /tmp missed the created file"
         enter("ls /missing; echo MISSING-pass")
         missing = waitscreen("ash-ls-missing", "MISSING-pass",occurrences=2)
-        assert "ls: /missing: no such file or directory" in missing
+        assert "ls: /missing: no such file or directory" in missing.lower()
         enter("pwd")
         waitscreen("ash-pwd-root", "\n/\nash$")
         enter("cd /usr/bin; pwd; cd ..; pwd; cd /; echo TREE-cd")
         cwd = waitscreen("ash-cd-paths", "TREE-cd",occurrences=2)
         assert cwd.count("/usr/bin") >= 2 and cwd.count("/usr") >= 2
+        if mode == "multicall":
+            enter("/bin/busybox echo MULTI")
+            waitscreen("multicall-explicit", "\nMULTI\n")
+            enter("cat /tmp/hw")
+            waitscreen("multicall-cat", "\ndata\n")
+            enter("cat < /tmp/hw | grep data; echo EXTPIPE")
+            pipe_result=waitscreen("multicall-grep-pipe", "EXTPIPE", occurrences=2)
+            assert "\ndata\nEXTPIPE\n" in pipe_result
         focus(1)
         text=waitscreen("ash-isolation", "kernel>")
         assert "PIPE:piped" not in text

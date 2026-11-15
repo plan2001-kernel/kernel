@@ -38,11 +38,11 @@ After independently identifying a disposable test disk, an example is:
 sudo dd if=FRESH_OUTPUT/plan2001-ash-amd64.img of=/dev/disk/by-id/REPLACE_WITH_TEST_DISK bs=4M conv=fsync status=progress
 ```
 
-Boot the disk, then press Ctrl+Alt+F5. Look for PLAN2001-ASH-READY and `ash$`.
+Boot the disk, then press Win+F5. Look for PLAN2001-ASH-READY and `ash$`.
 Try `echo hello`, `pwd`, `cd /tmp`, `echo data > /tmp/a`,
 `read x < /tmp/a; echo $x`, and
 `echo piped | while read x; do echo $x; done`.
-Ctrl+Alt+F1 returns to the separate kernel console. `exit` ends the F5 session.
+Win+F1 returns to the separate kernel console. `exit` ends the F5 session.
 
 The F5 supervisor visibly echoes typed ASCII and provides a bounded line editor:
 Backspace removes the last typed character, and Enter submits the line to ash.

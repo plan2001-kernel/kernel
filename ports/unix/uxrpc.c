@@ -85,7 +85,7 @@ int uxrpc_server_once(UxRpcServer *s)
     if(!s || !s->service || exact_read(&s->request,&q,sizeof(q)))
         return -1;
     if(q.magic!=UXRPC_MAGIC || q.version!=UXRPC_VERSION ||
-       q.seq!=s->next_seq || q.count>UXFS_DATA_MAX ||
+       q.seq!=s->next_seq || q.count>UXFS_IO_CHUNK ||
        size(q.path)==PVD_PATH_MAX) return -1;
     clear(&r,sizeof(r));
     r.magic=UXRPC_MAGIC;
@@ -122,7 +122,7 @@ int uxrpc_server_once(UxRpcServer *s)
             uxfd_unlink(&s->fds,q.path) : PVD_EACCES;
         break;
     case UXRPC_EMIT:
-        if(q.count>UXFS_DATA_MAX-s->output_size)
+        if(q.count>UXFS_IO_CHUNK-s->output_size)
             r.result=PVD_ENOSPC;
         else {
             copy(s->output+s->output_size,q.data,q.count);
@@ -188,23 +188,27 @@ long uxrpc_read(UxRpcClient *c,int fd,void *buf,unsigned int n)
 {
     UxRpcRequest q;
     UxRpcReply r;
-    if(n>UXFS_DATA_MAX || (n&&!buf)) return PVD_EINVAL;
+    if(n&&!buf)return PVD_EINVAL;
+    if(n>UXFS_IO_CHUNK)n=UXFS_IO_CHUNK;
     clear(&q,sizeof(q));q.op=UXRPC_READ; q.fd=fd;q.count=n;
     if(uxrpc_client_call(c,&q,&r) || r.result>(long long)n)
         return PVD_EIO;
     if(r.result>0) copy(buf,r.data,(unsigned int)r.result);
     return (long)r.result;
 }
-long uxrpc_write(UxRpcClient *c,int fd,const void *buf,unsigned int n)
+long uxrpc_write(UxRpcClient *c,int fd,const void *buf,unsigned n)
 {
-    UxRpcRequest q;
-    UxRpcReply r;
-    if(n>UXFS_DATA_MAX || (n&&!buf)) return PVD_EINVAL;
-    clear(&q,sizeof(q));q.op=UXRPC_WRITE;q.fd=fd;q.count=n;
-    if(n) copy(q.data,buf,n);
-    if(uxrpc_client_call(c,&q,&r) || r.result>(long long)n)
-        return PVD_EIO;
-    return (long)r.result;
+    UxRpcRequest q;UxRpcReply r;unsigned done=0;
+    if(n&&!buf)return PVD_EINVAL;
+    while(done<n){
+        unsigned part=n-done;if(part>UXFS_IO_CHUNK)part=UXFS_IO_CHUNK;
+        clear(&q,sizeof(q));q.op=UXRPC_WRITE;q.fd=fd;q.count=part;
+        copy(q.data,(const unsigned char *)buf+done,part);
+        if(uxrpc_client_call(c,&q,&r) || r.result>(long long)part)return done ? (long)done : PVD_EIO;
+        if(r.result<=0)return done ? (long)done : (long)r.result;
+        done+=(unsigned)r.result;
+    }
+    return done;
 }
 int uxrpc_close(UxRpcClient *c,int fd)
 {
@@ -244,7 +248,7 @@ int uxrpc_unlink(UxRpcClient *c,const char *path)
 int uxrpc_emit(UxRpcClient *c,const void *buf,unsigned int n)
 {
     UxRpcRequest q;UxRpcReply r;
-    if(n>UXFS_DATA_MAX || (n&&!buf)) return PVD_EINVAL;
+    if(n>UXFS_IO_CHUNK || (n&&!buf)) return PVD_EINVAL;
     clear(&q,sizeof(q));q.op=UXRPC_EMIT;q.count=n;
     if(n) copy(q.data,buf,n);
     return uxrpc_client_call(c,&q,&r)?PVD_EIO:(int)r.result==(int)n?0:PVD_EIO;

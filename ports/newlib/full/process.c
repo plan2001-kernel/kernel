@@ -536,6 +536,33 @@ int p9_process_bind_executable(const char *path,int volume,uint64_t oid)
     errno=ENOSPC; return -1;
 }
 
+/* Resolve virtual applet names only to a registered native executable.
+ * No suffix/prefix wildcard, new OID opening or native authority is involved.
+ * The compiled table is immutable and reproduced in every exec image.
+ */
+int p9_process_executable(const char *path,uint64_t *oid)
+{
+    char normalized[PVD_PATH_MAX];
+    const char *target=path;
+    UxService *service=p9_full_file_service();
+    unsigned i;
+    if(!path) return 0;
+    if(service) {
+        if(uxfs_path(&service->fs,path,normalized)) return 0;
+        target=normalized;
+    }
+    if(p9_multicall_resolve) {
+        const char *alias=p9_multicall_resolve(target);
+        if(alias) target=alias;
+    }
+    for(i=0;i<P9_EXECUTABLES;++i)
+        if(executables[i].volume>0 && !strcmp(target,executables[i].path)) {
+            if(oid) *oid=executables[i].oid;
+            return (int)i+1;
+        }
+    return 0;
+}
+
 void p9_process_exit(int code)
 {
     static const char hex[]="0123456789abcdef";
@@ -560,15 +587,14 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     P9Context image,*ctx;
     struct {
         uint64_t cpu,membudget,flags,count;
-        struct { uint64_t handle,rights; } grants[8];
+        struct { uint64_t handle,rights; } grants[P9_GRANTS];
     } options={0};
     unsigned i,j,argc=0,envsize=0;
     long child;
     int selected=-1,saved;
     if(!path || !argv || !argv[0]) { errno=EFAULT; return -1; }
     if(initialize()<0) return -1;
-    for(i=0;i<P9_EXECUTABLES;++i)
-        if(executables[i].volume>0 && !strcmp(path,executables[i].path)) selected=(int)i;
+    selected=p9_process_executable(path,NULL)-1;
     if(selected<0) { errno=ENOENT; return -1; }
     while(argv[argc]) if(++argc>64) { errno=E2BIG; return -1; }
     memset(&image,0,sizeof image);
@@ -576,9 +602,8 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     image.pid=unix_pid; image.ppid=parent_pid; image.blocked=blocked;
     image.alarm_deadline=alarm_deadline;
     image.self=p9_plan_add(&plan,mailbox,Vread|Vwrite|Vdelegate);
-    /* The exec proxy retains parent signaling authority. Forwarding through
-     * the context avoids spending a ninth native SPAWN grant when all six
-     * stdio regions, the context and executable volume are inherited. */
+    /* The exec proxy forwards parent signals while it waits for the
+     * replacement process, preserving the Unix process identity. */
     image.parent=-1;
     if(image.self<0) return -1;
     for(i=1;i<NSIG;++i) if(actions[i].sa_handler==SIG_IGN) image.ignored|=bit((int)i);
@@ -600,7 +625,6 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
         image.children[i].mailbox=p9_plan_add(&plan,children[i].mailbox,Vread|Vwrite|Vdelegate);
         if(image.children[i].handle<0 || image.children[i].mailbox<0) goto undo;
     }
-    if(plan.count>8) { errno=E2BIG; goto undo; }
     image.grants=(int)plan.count;
     ctx=box(mailbox,1);
     if(!ctx) goto undo;
@@ -668,7 +692,7 @@ int p9_process_startup(void)
     n=sysctl(SysctlScopeOwnProcess,SysctlHandleList,&req,sizeof req);
     if(n<0 || n>P9_GRANTS) { errno=EACCES; return -1; }
     for(i=0;i<(unsigned)n;++i)
-        if((records[i].handle&255u)==1 && records[i].kind==VkindRegion &&
+        if((records[i].handle&VhandleSlotMask)==1 && records[i].kind==VkindRegion &&
            records[i].rights==(Vread|Vwrite|Vdelegate)) first=(int)records[i].handle;
     if(!first) return 0;
     mapped=box(first,1);

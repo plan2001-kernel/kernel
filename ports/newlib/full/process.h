@@ -3,10 +3,10 @@
 #define PLAN2001_NEWLIB_PROCESS_H
 #include <stdint.h>
 #include <sys/types.h>
-#define P9_GRANTS 16
-#define P9_FDS 19
+#define P9_GRANTS 1024
+#define P9_FDS 1024
 #define P9_EXECUTABLES 4
-#define P9_CHILDREN 8
+#define P9_CHILDREN 1024
 #define P9_ENV_BYTES 4096
 #define P9_CONTEXT_MAGIC UINT64_C(0x3158544358553950)
 typedef struct { int handle; uint64_t rights; } P9Grant;
@@ -50,6 +50,11 @@ void p9_file_refresh(void);
 void p9_file_detach(void);
 int p9_process_startup(void);
 int p9_process_bind_executable(const char *,int,uint64_t);
+/* Generated immutable executable projection; names only select an existing
+ * delegated registration. These hooks are absent from legacy profiles. */
+extern const char *p9_multicall_resolve(const char *) __attribute__((weak));
+extern const char *p9_multicall_path(unsigned) __attribute__((weak));
+int p9_process_executable(const char *,uint64_t *);
 void p9_signal_checkpoint(void);
 void p9_process_exit(int);
 void p9_process_signal_exit(int);

@@ -10,7 +10,7 @@
 #define UXPIPE_PAGE 4096u
 #define UXPIPE_CAPACITY 2048u
 #define UXPIPE_MAX_IO 65536u
-#define UXPIPE_VERSION 2ULL
+#define UXPIPE_VERSION 3ULL
 #define UXPIPE_DATA_MAGIC 0x3154414450505855ULL
 #define UXPIPE_ACK_MAGIC  0x314b434150505855ULL
 #define UXPIPE_PUB_OFFSET 16ULL
@@ -29,6 +29,9 @@ typedef struct {
     unsigned long long ready;          /* producer mapped data writer */
     unsigned char payload[UXPIPE_CAPACITY];
     unsigned long long users;          /* serialized process endpoint refs */
+    /* Ordered, one-read EOF tokens (canonical VEOF), separate from byte
+     * values. A token occupies one cursor slot; subsequent input stays live. */
+    unsigned char eof[UXPIPE_CAPACITY/8u];
 } UxPipeData;
 
 typedef struct {
@@ -57,5 +60,7 @@ long uxpipe_write(UxPipe *pipe, const void *bytes,
                   unsigned int count, long long timeout_ms);
 long uxpipe_read(UxPipe *pipe, void *bytes,
                  unsigned int capacity, long long timeout_ms);
+/* Publish one zero-length read without permanently closing the channel. */
+int uxpipe_send_eof(UxPipe *pipe, long long timeout_ms);
 int uxpipe_finish(UxPipe *pipe);
 #endif

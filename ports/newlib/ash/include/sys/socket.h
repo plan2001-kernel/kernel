@@ -18,4 +18,11 @@ struct sockaddr_storage { sa_family_t ss_family; char __padding[126]; };
 #define SOCK_RAW 3
 #define SOCK_RDM 4
 #define SOCK_SEQPACKET 5
+/* Declarations permit compiling unused upstream libbb sections. No socket
+ * implementation is supplied; selecting a networking applet must still fail
+ * the native link until a real authorized service exists. */
+int socket(int,int,int);
+int bind(int,const struct sockaddr *,socklen_t);
+int listen(int,int);
+ssize_t sendto(int,const void *,size_t,int,const struct sockaddr *,socklen_t);
 #endif

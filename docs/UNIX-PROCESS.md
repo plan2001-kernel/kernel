@@ -40,10 +40,27 @@ in `UXEXIT1:hh`; signal death uses `UXSIGN1:dd`. Unmodified native programs
 retain their native success/failure distinction. Raw native completion remains
 observable independently of this Unix registry.
 
+`stdio_process.c` supplies native `system`, `popen` and `pclose` for command
+interpreters such as awk. Commands execute the registered `/bin/sh` with the
+caller's explicit fd and capability inheritance. `system` temporarily ignores
+SIGINT/SIGQUIT and blocks SIGCHLD in the caller, restores the child's required
+signal state, and waits for its exact child. `pclose` also reaps its own child
+without consuming another command stream's completion. Return statuses retain
+POSIX wait encoding. No shared-address-space vfork or host shell is used.
+
 ## Descriptors and shared files
 
 Duplicates share an open description and keep descriptor flags separate.
-UXPIPE version 2 adds process endpoint reference counts. Fork/exec increments
+UXPIPE version 3 retains process endpoint reference counts and adds ordered,
+one-read canonical EOF tokens. Tokens occupy cursor slots with a separate bit
+map, so all 256 byte values remain ordinary data and REGIONWAIT observes their
+publication. The F5 supervisor publishes a token for Ctrl+D on an empty edit
+buffer; a nonempty buffer is flushed without a newline or EOF. Consuming a token
+returns 0 once without closing the channel, allowing ash to resume input after
+cat exits. All endpoints must be rebuilt together for this userspace protocol
+version; no kernel ABI changes are involved.
+
+The endpoint reference counts work as follows. Fork/exec increments
 one reference per inherited open description, rather than per duplicated fd;
 the final process reference publishes EOF or reader disconnect.
 

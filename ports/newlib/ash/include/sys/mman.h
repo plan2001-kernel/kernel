@@ -11,6 +11,8 @@
 #define PROT_EXEC 0x4
 #define MAP_SHARED 0x1
 #define MAP_PRIVATE 0x2
+/* Source-only flag: the native mmap adapter always reports ENOSYS. */
+#define MAP_ANONYMOUS 0x100
 #define MAP_FAILED ((void *)-1)
 void *mmap(void *,size_t,int,int,int,off_t);
 int munmap(void *,size_t);

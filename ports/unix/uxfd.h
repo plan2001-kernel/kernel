@@ -5,7 +5,7 @@
 #ifndef PLAN2001_UXFD_H
 #define PLAN2001_UXFD_H
 #include "uxservice.h"
-#define UXFD_SLOTS 16
+#define UXFD_SLOTS 1021
 #define UXFD_READ 1u
 #define UXFD_WRITE 2u
 #define UXFD_CREATE 4u

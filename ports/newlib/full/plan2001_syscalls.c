@@ -134,6 +134,10 @@ static int translate_fs(int code)
     case PVD_EACCES: return EACCES;
     case PVD_EIO: return EIO;
     case PVD_EEXIST: return EEXIST;
+    case PVD_ENOTDIR: return ENOTDIR;
+    case PVD_EISDIR: return EISDIR;
+    case PVD_ENOTEMPTY: return ENOTEMPTY;
+    case PVD_EBUSY: return EBUSY;
     case PVD_ENAMETOOLONG: return ENAMETOOLONG;
     case PVD_ENOSPC: return ENOSPC;
     case PVD_ELOOP: return ELOOP;
@@ -226,6 +230,8 @@ denied:
  * An incomplete or excessive grant list fails closed, without falling back
  * to ObjOpenConsole or another inherited region.
  */
+static int inherited_executable_volume;
+int p9_full_executable_volume(void) { return inherited_executable_volume; }
 int p9_full_bind_inherited_uxpipe(void)
 {
     VobjListRec records[16];
@@ -235,6 +241,8 @@ int p9_full_bind_inherited_uxpipe(void)
     };
     int handles[6];
     unsigned streams = 0, executable_volumes = 0, i;
+    int executable = 0;
+    inherited_executable_volume = 0;
     long n;
     memset(&req, 0, sizeof req);
     req.version = SYSCTL_ABI_VERSION;
@@ -258,12 +266,15 @@ int p9_full_bind_inherited_uxpipe(void)
         } else if(r->kind == VkindGeVolume &&
                   (r->rights == Vexecute || r->rights == (Vexecute|Vdelegate))) {
             if(++executable_volumes != 1) goto denied;
+            executable = (int)r->handle;
         } else {
             goto denied;
         }
     }
     if(streams != 6 || executable_volumes != 1) goto denied;
-    return p9_full_bind_uxpipe(handles);
+    if(p9_full_bind_uxpipe(handles)<0) return -1;
+    inherited_executable_volume=executable;
+    return 0;
 denied:
     errno = EACCES;
     return -1;
@@ -537,7 +548,7 @@ int p9_raw_fstat(int fd, struct stat *st)
         st->st_mode=(kind==UXFS_DIR ? S_IFDIR : S_IFREG) | 0600;
         st->st_size=length;
         st->st_nlink=1;
-        st->st_blksize=UXFS_DATA_MAX;
+        st->st_blksize=UXFS_IO_CHUNK;
         return 0;
     }
     if(proxy_bound && fd >= 0 && fd <= 2 && !proxy_closed[fd]) {
@@ -635,6 +646,8 @@ int p9_backend_stream(int fd,int handles[2],int *role)
 
 int p9_raw_open(const char *path, int flags, ...)
 {
+    if(p9_process_executable(path,NULL)) { errno=EACCES; return -1; }
+
     unsigned rights = 0;
     int acc, result;
     if(!files_bound) { errno = ENOSYS; return -1; }
@@ -655,9 +668,18 @@ int p9_raw_open(const char *path, int flags, ...)
 }
 int p9_raw_unlink(const char *path)
 {
+    if(p9_process_executable(path,NULL)) { errno=EACCES; return -1; }
+
     int result;
     if(!files_bound) { errno = ENOSYS; return -1; }
     if(!path) { errno = EFAULT; return -1; }
+    char resolved[PVD_PATH_MAX];
+    result=uxfs_path(&file_table.service->fs,path,resolved);
+    if(result) return fail_fs(result);
+    for(unsigned i=0;i<UXFD_SLOTS;++i)
+        if(file_table.slots[i].used && !strcmp(file_table.slots[i].path,resolved)) {
+            errno=EBUSY; return -1; /* detached open inode lifetime is not implemented */
+        }
     result = uxfd_unlink(&file_table,path);
     return result == PVD_OK ? 0 : fail_fs(result);
 }
@@ -671,13 +693,23 @@ int p9_raw_stat(const char *path, struct stat *st)
     int result;
     if(!files_bound) { errno = ENOSYS; return -1; }
     if(!path || !st) { errno = EFAULT; return -1; }
+    {
+        uint64_t oid;
+        if(p9_process_executable(path,&oid)) {
+            memset(st,0,sizeof *st);
+            st->st_mode=S_IFREG | 0111; /* immutable execute-only virtual entry */
+            st->st_ino=(ino_t)oid;
+            st->st_nlink=1;
+            return 0;
+        }
+    }
     result=uxfs_info(&file_table.service->fs,path,&kind,&length);
     if(result) return fail_fs(result);
     memset(st,0,sizeof *st);
     st->st_mode=(kind == UXFS_DIR ? S_IFDIR : S_IFREG) | 0600;
     st->st_size=length;
     st->st_nlink=1;
-    st->st_blksize=UXFS_DATA_MAX;
+    st->st_blksize=UXFS_IO_CHUNK;
     return 0;
 }
 /* The POSIX cwd is a userland PVD projection, not kernel state.
@@ -725,6 +757,8 @@ char *p9_raw_getcwd(char *buf, size_t size)
 
 int p9_raw_mkdir(const char *path, mode_t mode)
 {
+    if(p9_process_executable(path,NULL)) { errno=EACCES; return -1; }
+
     UxService *s=file_service();
     int result;
     (void)mode; /* v1 PVD records no Unix mode: no capability is minted. */
@@ -736,15 +770,54 @@ int p9_raw_mkdir(const char *path, mode_t mode)
     return result==PVD_OK ? 0 : fail_fs(result);
 }
 
+int p9_raw_rmdir(const char *path)
+{
+    UxService *s=file_service();
+    char base[PVD_PATH_MAX];
+    int result;
+    if(!s) { errno=ENOSYS; return -1; }
+    if(!path) { errno=EFAULT; return -1; }
+    result=uxfs_path(&s->fs,path,base);
+    if(result) return fail_fs(result);
+    if(p9_multicall_path) for(unsigned i=0;p9_multicall_path(i);++i) {
+        const char *alias=p9_multicall_path(i);
+        size_t n=strlen(base);
+        if(!strncmp(base,alias,n) && alias[n]=='/' && p9_process_executable(alias,NULL)) {
+            errno=ENOTEMPTY; return -1;
+        }
+    }
+    result=uxfs_rmdir(&s->fs,path);
+    if(result) return fail_fs(result);
+    result=uxservice_sync(s);
+    return result ? fail_fs(result) : 0;
+}
+
 int p9_raw_rename(const char *src, const char *dst)
 {
+    if(p9_process_executable(src,NULL) || p9_process_executable(dst,NULL)) {
+        errno=EACCES; return -1;
+    }
+
     UxService *s=file_service();
     int result;
     if(!s) { errno=ENOSYS; return -1; }
     if(!src || !dst) { errno=EFAULT; return -1; }
+    /* Preserve source open descriptions; refuse replacement of an open
+     * destination until detached inode lifetime is implemented. */
+    char from[PVD_PATH_MAX],to[PVD_PATH_MAX];
+    result=uxfs_path(&s->fs,src,from);
+    if(!result) result=uxfs_path(&s->fs,dst,to);
+    if(result) return fail_fs(result);
+    for(unsigned i=0;i<UXFD_SLOTS;++i)
+        if(file_table.slots[i].used && !strcmp(file_table.slots[i].path,to) && strcmp(from,to)) {
+            errno=EBUSY; return -1;
+        }
     /* v1 UXFS supports regular-file moves only, not directory rename. */
-    result=uxfs_move(&s->fs,src,dst);
+    result=uxfs_move(&s->fs,from,to);
     if(result!=PVD_OK) return fail_fs(result);
+    for(unsigned i=0;i<UXFD_SLOTS;++i)
+        if(file_table.slots[i].used && !strcmp(file_table.slots[i].path,from))
+            strcpy(file_table.slots[i].path,to);
     result=uxservice_sync(s);
     return result==PVD_OK ? 0 : fail_fs(result);
 }
@@ -757,6 +830,10 @@ int p9_raw_access(const char *path, int mode)
     if(!s) { errno=ENOSYS; return -1; }
     if(!path) { errno=EFAULT; return -1; }
     if(mode & ~(F_OK|R_OK|W_OK|X_OK)) { errno=EINVAL; return -1; }
+    if(p9_process_executable(path,NULL)) {
+        if(mode & (R_OK|W_OK)) { errno=EACCES; return -1; }
+        return 0;
+    }
     /* Existence is queryable with the service's explicit authority.
      * Unix rwx bits cannot authorize ObjectSpace operations, so deny
      * nontrivial synthetic permission queries instead of returning 0. */

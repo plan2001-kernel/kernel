@@ -1,0 +1,223 @@
+BdsDxe: loading Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x1,0x0)
+BdsDxe: starting Boot0001 "UEFI Misc Device" from PciRoot(0x0)/Pci(0x1,0x0)
+[P2 L01] Plan2001 loader 2026-09-25 boot-abi-1
+[P2 L02] BootInfo blob at 0x7e47c000
+[P2 L02] BootInfo blob bytes=0x16000
+[P2 L03] memory-map buffer: AllocatePool 96 KiB
+[P2 L03] memory-map buffer: ready
+[P2 L04] boot filesystem: open
+[P2 L04] boot filesystem: ready
+[P2 L11] rebase boot-device callbacks
+[P2 L12] configure kernel path
+[P2 L12] clear configuration and collect UEFI data
+[P2 L05] BootInfo: initialise
+[P2 L05] ACPI: probe
+acpi=0x7fb7e014
+[P2 L06] GOP: locating handles
+[P2 L06] GOP: LocateHandleBuffer failed
+[P2 L07] TSC: measure
+[P2 L07] TSC: ok
+[P2 L08] RTC: read
+[P2 L08] RTC: ok
+[P2 L09] RNG: probe
+[P2 L09] RNG: ok
+[P2 L10] BootInfo: initial fields complete
+bootfile=/9pc64.elf
+oboot=server
+obootvol=PARTUUID=7c524cee-ac86-4dd2-a32a-aeafb5b3023e
+obootexec=0x4f45584543000003
+sdflushlog=1
+console=0
+*ncpu=1
+[P2 L12] plan9.ini read complete
+[P2 L13] open kernel
+[P2 L13] kernel opened
+[P2 L22] ELF kernel file closed
+[P2 L23] stop boot device
+[P2 L25] GetMemoryMap + ExitBootServices attempt
+PLAN2001-O: shared boot: BootInfo v1 accepted
+PLAN2001-O: shared boot: arch AMD64
+PLAN2001-O: shared boot: RAM 2041 MiB
+
+Plan 9
+HPET: fed00000 8086a201 100 MHz 
+122 holes free
+0x00024000 0x0009f000 503808
+0x00100000 0x00110000 65536
+0x00350000 0x00800000 4915200
+0x00808000 0x0080b000 12288
+0x0080c000 0x00811000 20480
+0x00900000 0x33374000 849821696
+855339008 bytes free
+cpu0: 2712MHz GenuineIntel P6 (AX 000506E3 CX F7FAB223 DX 0F8BFBFF)
+amlmapio: no address
+amlmapio: mapping \_SB.PCI0.SF8.PIRQ failed
+ELCR: 0000
+LAPIC: fee00000 fffffe80fee00000
+cpu0: lapic clock at 1000MHz
+bootinfo: epoch 1794762192 tscfreq 2712469960
+#S/sdE: ich: sata-I with 6 ports
+sd: controllers initialized (2) native-only
+2004M memory: 818M kernel data, 1185M user
+o-server: BOOTROOT none
+o-server: KERNEL-READY pid=3 entry=0x200028 text=733 image=773
+o-server: EGRP pid=3 ref=1 nent=0
+o-server: VOLSPEC len=45 PARTUUID=7c524cee-ac86-4dd2-a32a-aeafb5b3023e
+o-server: ARGV argc=4 <micropython> <-O> <PARTUUID=7c524cee-ac86-4dd2-a32a-aeafb5b3023e> <-N>
+o-server: OID=0x4f45584543000003
+o-server: BOOTEXEC requested=0x4f45584543000003 effective=0x4f45584543000003 mode=mpy
+o-server: KERNEL-TO-USER pid=3 pc=0x200028 sp=0x7fffffffcf00 arg=0x7fffffffd000
+Plan2001-O kernel build: 2026-11-15 16:38 UTC
+n13: firstuser pid=3 cpu=0 requested=4294967295
+mpintrassign: can't find bus type 12, number 0
+load O lohkolaiteosio (gpt):sdF0:
+	snaptree:	(fa0000,59f2b5793de4070b,-1)
+	narenas:	8
+	features:	-9223372036854775806
+	nextqid:	0
+	lastqgen:	0
+	nextgen:	0
+	blocksize:	16384
+	cachesz:	254 MiB
+o: O volume O lohkolaiteosio (gpt):sdF0@68157440, 129 MiB, opened without FS (native SD block)
+o: OEXECUTE oid=0x4f45584543000003 len=125376 ver=0x1
+objectspace: no boot root selector configured
+PASS: authorized immutable aliases, stat/lstat/access and directory enumeration
+o: SPAWN pid=11 handle=5383 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=11 cpu=0 requested=4294967295
+PASS: busybox --list 
+o: SPAWN pid=13 handle=9479 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=13 cpu=0 requested=4294967295
+PASS: busybox --list-full 
+o: SPAWN pid=15 handle=13575 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=15 cpu=0 requested=4294967295
+PASS: busybox echo hello 
+o: SPAWN pid=17 handle=17671 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=17 cpu=0 requested=4294967295
+PASS: /bin/echo alias 
+o: SPAWN pid=19 handle=21767 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=19 cpu=0 requested=4294967295
+PASS: busybox true 
+o: SPAWN pid=21 handle=25863 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=21 cpu=0 requested=4294967295
+PASS: busybox false 
+o: SPAWN pid=23 handle=29959 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=23 cpu=0 requested=4294967295
+PASS: busybox missing-applet 
+o: SPAWN pid=25 handle=34055 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=25 cpu=0 requested=4294967295
+PASS: busybox --install 
+o: SPAWN pid=27 handle=38151 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=27 cpu=0 requested=4294967295
+PASS: busybox busybox --install 
+o: SPAWN pid=29 handle=42247 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=29 cpu=0 requested=4294967295
+PASS: busybox basename /tmp/file 
+o: SPAWN pid=31 handle=46343 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=31 cpu=0 requested=4294967295
+PASS: busybox dirname /tmp/file/ 
+o: SPAWN pid=33 handle=50439 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=33 cpu=0 requested=4294967295
+PASS: busybox dirname /file 
+o: SPAWN pid=35 handle=54535 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=35 cpu=0 requested=4294967295
+PASS: busybox dirname file 
+o: SPAWN pid=37 handle=58631 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=37 cpu=0 requested=4294967295
+PASS: busybox pwd 
+o: SPAWN pid=39 handle=62727 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=39 cpu=0 requested=4294967295
+PASS: busybox printf %s:%d
+ guest 17 
+o: SPAWN pid=41 handle=66823 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=41 cpu=0 requested=4294967295
+PASS: busybox test 1 -eq 1 
+o: SPAWN pid=43 handle=70919 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=43 cpu=0 requested=4294967295
+PASS: busybox test 1 -eq 2 
+o: SPAWN pid=45 handle=75015 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=45 cpu=0 requested=4294967295
+PASS: [ yes = yes ] 
+o: SPAWN pid=47 handle=79111 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=47 cpu=0 requested=4294967295
+PASS: busybox ash -c echo ash-ok 
+o: SPAWN pid=49 handle=83207 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=49 cpu=0 requested=4294967295
+PASS: busybox sh -c echo sh-ok 
+o: SPAWN pid=51 handle=87303 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=51 cpu=0 requested=4294967295
+o: SPAWN pid=53 handle=90887 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=53 cpu=0 requested=4294967295
+o: SPAWN pid=54 handle=92422 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=54 cpu=0 requested=4294967295
+PASS: /bin/sh -c basename /tmp/path; /bin/busybox echo absolute 
+o: SPAWN pid=56 handle=96519 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=56 cpu=0 requested=4294967295
+o: SPAWN pid=57 handle=98054 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=57 cpu=0 requested=4294967295
+PASS: /bin/sh -c /bin/echo external 
+o: SPAWN pid=59 handle=102151 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=59 cpu=0 requested=4294967295
+o: SPAWN pid=60 handle=103686 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=60 cpu=0 requested=4294967295
+PASS: /bin/sh -c cd /bin; ./echo relative 
+o: SPAWN pid=62 handle=107783 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=62 cpu=0 requested=4294967295
+PASS: /usr/bin/dirname /tmp/file 
+o: SPAWN pid=64 handle=111879 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=64 cpu=0 requested=4294967295
+PASS: /bin/false 
+o: SPAWN pid=66 handle=115975 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=66 cpu=0 requested=4294967295
+PASS: /bin/true 
+o: SPAWN pid=68 handle=120071 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=68 cpu=0 requested=4294967295
+o: SPAWN pid=70 handle=123655 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=70 cpu=0 requested=4294967295
+o: SPAWN pid=71 handle=125190 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=71 cpu=0 requested=4294967295
+PASS: /bin/sh -c /bin/echo file-data > /tmp/native; /bin/cat /tmp/native 
+o: SPAWN pid=73 handle=129287 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=73 cpu=0 requested=4294967295
+o: SPAWN pid=75 handle=136713 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=75 cpu=0 requested=4294967295
+o: SPAWN pid=77 handle=139017 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=77 cpu=0 requested=4294967295
+PASS: /bin/sh -c /bin/echo match | /bin/grep '^ma' 
+o: SPAWN pid=79 handle=143111 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=79 cpu=0 requested=4294967295
+PASS: /bin/grep ^file-[a-z]*$ /tmp/native 
+o: SPAWN pid=81 handle=147207 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=81 cpu=0 requested=4294967295
+PASS: /bin/grep absent /tmp/native 
+o: SPAWN pid=83 handle=151303 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=83 cpu=0 requested=4294967295
+PASS: /bin/grep [ /tmp/native 
+o: SPAWN pid=85 handle=155399 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=85 cpu=0 requested=4294967295
+PASS: /bin/egrep file-(data|other) /tmp/native 
+o: SPAWN pid=87 handle=159495 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=87 cpu=0 requested=4294967295
+PASS: /bin/fgrep file-data /tmp/native 
+o: SPAWN pid=89 handle=163591 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=89 cpu=0 requested=4294967295
+PASS: /bin/ls -1 /tmp 
+o: SPAWN pid=91 handle=167687 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=91 cpu=0 requested=4294967295
+PASS: /bin/ls /missing 
+o: SPAWN pid=93 handle=171783 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=93 cpu=0 requested=4294967295
+o: SPAWN pid=95 handle=175367 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=95 cpu=0 requested=4294967295
+PASS: /bin/sh -c /bin/ls /bin > /tmp/list; test -s /tmp/list 
+o: SPAWN pid=97 handle=179463 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=97 cpu=0 requested=4294967295
+PASS: /bin/cat /tmp/native 
+o: SPAWN pid=99 handle=183559 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=99 cpu=0 requested=4294967295
+PASS: /bin/cat /missing 
+PASS: attenuated and revoked executable grants denied by native loader
+o: SPAWN pid=103 handle=191239 oid=0x4f45584543000005 cpu=4294967295
+n13: firstuser pid=103 cpu=0 requested=4294967295
+PASS: /bin/echo parent-still-authorized 
+PLAN2001-MULTICALL-PASS
