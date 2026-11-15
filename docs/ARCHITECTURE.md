@@ -40,6 +40,17 @@ An `open()` adapter resolves the path using explicitly held capabilities, verifi
 
 OwnerID is provenance, not ambient authorization. Unix uid/gid and rwx metadata can be exposed as compatibility information only; capability checks remain authoritative.
 
+## Portable Unix file metadata (target profile)
+
+The binary layout of framed GE/O payloads is specified by the kernel's
+portable-object footer contract. The userspace [Unix metadata profile]
+(OBJECT-METADATA.md) recommends preserving the original filename,
+creation instant, media type, ordinary stat attributes, optional ACLs and
+extended attributes. Only the raw-first / metadata-last / fixed-footer
+byte layout is normative; the CBOR metadata schema is a de facto
+recommendation. UXFS v1 does not yet persist or expose that full profile.
+Names and metadata never mint kernel capabilities.
+
 ## Processes, streams and console
 
 Native SPAWN/RFORKEX and process Handle observation are not automatically full POSIX fork/exec/wait semantics. Early applets should avoid these dependencies. Later shell execution must explicitly delegate capabilities and descriptor state, preserving applet `argv[0]`.
