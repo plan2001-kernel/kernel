@@ -158,6 +158,8 @@ def two_process_pipe():
 
         a = plan9.process_wait(sending, 30000)
         b = plan9.process_wait(receiving, 30000)
+        print("PLAN2001-UXPIPE-SEND-STATUS:", a)
+        print("PLAN2001-UXPIPE-RECV-STATUS:", b)
         for state in (a, b):
             if state[3] != plan9.OBJ_PROC_COMPLETED:
                 raise RuntimeError("native pipe child did not complete")
