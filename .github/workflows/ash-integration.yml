@@ -2,7 +2,7 @@ name: Ash integration - native process, full Newlib and UEFI QEMU
 
 on:
   push:
-    branches: [feature/ash-hardware-boot]
+    branches: [feature/ash-hardware-boot, main]
     paths:
       - '.github/workflows/ash-integration.yml'
       - 'ports/newlib/**'
@@ -202,6 +202,16 @@ jobs:
             "$RUNNER_TEMP/kernel" \
             "$RUNNER_TEMP/newlib-reports/ash-o.img" \
             "$RUNNER_TEMP/newlib-reports" ash
+      - name: Build distributable GPT UEFI ash image and verify bundle checksums
+        run: |
+          bash tools/ci/build_hw_boot.sh \
+            "$RUNNER_TEMP/kernel" \
+            "$RUNNER_TEMP/busybox" \
+            "$RUNNER_TEMP/newlib-reports" \
+            "$RUNNER_TEMP/ash-hw-image"
+          test -s "$RUNNER_TEMP/ash-hw-image/plan2001-ash-amd64.img"
+          test -s "$RUNNER_TEMP/ash-hw-image/plan2001-ash-amd64.img.gz"
+          (cd "$RUNNER_TEMP/ash-hw-image" && sha256sum -c SHA256SUMS)
       - name: Summarize native evidence and limitations
         if: always()
         shell: bash
