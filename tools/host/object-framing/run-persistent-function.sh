@@ -12,4 +12,8 @@ qob_boot_once "$QOB_OUT/disk.img" reboot 'PLAN2001-O: REPL READY' repl \
 if grep -Eq 'Traceback|commit failed' "$QOB_OUT/serial-boot.log" "$QOB_OUT/serial-reboot.log"; then
   qob_die 'REPL function test raised an exception or failed its commit'
 fi
-qob_say 'PASS: framed REPL function code restored across two QEMU cold boots' 
+tr -d '\r' < "$QOB_OUT/serial-boot.log" | grep -Fx 'FRAMED-FUN-SAVED' >/dev/null ||
+  qob_die 'function value was not verified before shutdown'
+tr -d '\r' < "$QOB_OUT/serial-reboot.log" | grep -Fx 'FRAMED-FUN-RESTORED' >/dev/null ||
+  qob_die 'restored function value was not verified'
+qob_say 'PASS: framed REPL function code restored across two QEMU cold boots'  
