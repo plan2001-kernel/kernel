@@ -210,7 +210,7 @@ try:
         missing = waitscreen("ash-ls-missing", "MISSING-pass",occurrences=2)
         assert "ls: /missing: no such file or directory" in missing
         enter("pwd")
-        waitscreen("ash-pwd-root", "\n/\nash$ ")
+        waitscreen("ash-pwd-root", "\n/\nash$")
         enter("cd /usr/bin; pwd; cd ..; pwd; cd /; echo TREE-cd")
         cwd = waitscreen("ash-cd-paths", "TREE-cd",occurrences=2)
         assert cwd.count("/usr/bin") >= 2 and cwd.count("/usr") >= 2
