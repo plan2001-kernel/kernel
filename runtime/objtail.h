@@ -3,7 +3,13 @@
  */
 #ifndef PLAN2001_OBJTAIL_H
 #define PLAN2001_OBJTAIL_H
+#ifdef OBJTAIL_NATIVE_TYPES
+typedef __UINT32_TYPE__ uint32_t;
+typedef __UINT64_TYPE__ uint64_t;
+#define UINT64_MAX (~(uint64_t)0)
+#else
 #include <stdint.h>
+#endif
 
 enum { ObjTailSize = 32, ObjTailVersion = 1 };
 /* out = magic[8] | version:u32be | flags:u32be |

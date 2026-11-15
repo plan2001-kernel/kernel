@@ -7,7 +7,7 @@ include $(CURDIR)/py/mkenv.mk
 QSTR_DEFS = qstrdefsport.h
 MICROPY_ROM_TEXT_COMPRESSION = 0
 include $(TOP)/py/py.mk
-INC = -I. -I$(TOP) -I$(BUILD)
+INC = -I. -I$(TOP) -I$(BUILD) -I../runtime
 CFLAGS += $(INC) -std=gnu99 -DNDEBUG
 SRC_C = main.c p9hal.c modplan9.c modcbor.c modaesgcm.c p9space.c p9image.c extmod/modjson.c shared/readline/readline.c shared/runtime/pyexec.c shared/runtime/stdout_helpers.c shared/runtime/gchelper_generic.c
 SRC_QSTR += main.c modplan9.c modcbor.c modaesgcm.c p9space.c p9image.c extmod/modjson.c shared/readline/readline.c shared/runtime/pyexec.c

@@ -1,3 +1,4 @@
+#include "objtail.h"
 /*
  * MicroPython persistent Space implementation (p9image.c): O-only.
  *
@@ -520,7 +521,10 @@ static void loadmpy(mp_obj_t envmap, qstr name, mp_obj_t mod, mp_compiled_module
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("space: O: %q: code digest is not the manifest's"), name);
     }
-    mp_raw_code_load_mem((const byte *)v.buf, v.len, cm);
+    uint64_t rawlen, metalen;
+    if(v.len<ObjTailSize || objtail_parse((const unsigned char*)v.buf+v.len-ObjTailSize,v.len,&rawlen,&metalen)<0)
+        mp_raise_ValueError(MP_ERROR_TEXT("space: missing or malformed bytecode footer"));
+    mp_raw_code_load_mem((const byte *)v.buf, (size_t)rawlen, cm);
     snprint(path, sizeof path, "<O:%s>", d->def);
     mp_store_attr(mod, MP_QSTR___file__, MP_OBJ_NEW_QSTR(qstr_from_str(path)));
     p9_dprintf("space: O: %s code OID %s, digest %s\n", qstr_str(name), oid, d->mpy);
@@ -920,7 +924,11 @@ p9_space_create_fun_code(const byte *p, size_t n)
 			MP_ERROR_TEXT("space: REPL function code exceeds the %d-byte O limit"),
 			(int)Obytemax);
 	}
-	oid = objcreate_space((void *)p, (long)n);
+	vstr_t framed;vstr_init_len(&framed,n+ObjTailSize);
+	memcpy(framed.buf,p,n);
+	if(objtail_pack((unsigned char*)framed.buf+n,n,0)<0){vstr_clear(&framed);mp_raise_ValueError(MP_ERROR_TEXT("code footer overflow"));}
+	oid = objcreate_space(framed.buf, (long)framed.len);
+	vstr_clear(&framed);
 	if (oid < 64 || oid >= OID_CODE || obytereserved(oid)) {
 		mp_raise_msg(&mp_type_ValueError,
 			MP_ERROR_TEXT("space: invalid native OID for REPL function code"));
@@ -941,6 +949,9 @@ p9_space_read_fun_code(uint64_t oid, vstr_t *v)
 		mp_raise_msg(&mp_type_ValueError,
 			MP_ERROR_TEXT("space: missing REPL function code object"));
 	}
+	uint64_t rawlen, metalen;
+	if(v->len<ObjTailSize || objtail_parse((const unsigned char*)v->buf+v->len-ObjTailSize,v->len,&rawlen,&metalen)<0){vstr_clear(v);mp_raise_ValueError(MP_ERROR_TEXT("invalid function code footer"));}
+	v->len=(size_t)rawlen;
 }
 
 static mp_obj_t
@@ -1025,6 +1036,22 @@ space_oget(mp_obj_t oidobj)
 	return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(space_oget_obj, space_oget);
+/* Full GE/O reads retain their existing opaque-byte semantics. These explicit
+ * framed views validate the footer and never infer access from metadata. */
+static mp_obj_t space_framed_view(mp_obj_t oidobj,int metadata_only)
+{
+    mp_obj_t full=space_oget(oidobj);mp_buffer_info_t b;
+    mp_get_buffer_raise(full,&b,MP_BUFFER_READ);
+    uint64_t raw,meta;
+    if(b.len<ObjTailSize || objtail_parse((const unsigned char*)b.buf+b.len-ObjTailSize,b.len,&raw,&meta)<0)
+        mp_raise_ValueError(MP_ERROR_TEXT("object has no valid footer"));
+    return mp_obj_new_bytes((const byte*)b.buf+(metadata_only?raw:0),(size_t)(metadata_only?meta:raw));
+}
+static mp_obj_t space_ometa(mp_obj_t oid){return space_framed_view(oid,1);}
+static mp_obj_t space_oraw(mp_obj_t oid){return space_framed_view(oid,0);}
+static MP_DEFINE_CONST_FUN_OBJ_1(space_ometa_obj,space_ometa);
+static MP_DEFINE_CONST_FUN_OBJ_1(space_oraw_obj,space_oraw);
+
 
 /*
  * oregister([data]) -> a fresh local native OID.  Allocation and the
@@ -1582,6 +1609,8 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&space_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_oid), MP_ROM_PTR(&space_oid_obj) },
     { MP_ROM_QSTR(MP_QSTR_oget), MP_ROM_PTR(&space_oget_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ometa), MP_ROM_PTR(&space_ometa_obj) },
+    { MP_ROM_QSTR(MP_QSTR_oraw), MP_ROM_PTR(&space_oraw_obj) },
     { MP_ROM_QSTR(MP_QSTR_oput), MP_ROM_PTR(&space_oput_obj) },
     { MP_ROM_QSTR(MP_QSTR_oregister), MP_ROM_PTR(&space_oregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_spawn), MP_ROM_PTR(&space_spawn_obj) },

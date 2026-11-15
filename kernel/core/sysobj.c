@@ -350,7 +350,7 @@ sysobjinvoke(sysva_list list)
 			error("obj: read timeout not supported");
 		ver = 0;
 		c.result = vobjreadver(handle, c.out,
-			bounded(c.outlen, Vobjpaymax, Ebadarg), 0, &ver);
+			bounded(c.outlen, OBJ_PUT_OID_MAX, Ebadarg), 0, &ver);
 		/* A GE read publishes the version it returned; every other
 		 * provider leaves aux at its previous zero value. */
 		if(c.result >= 0)
@@ -361,7 +361,7 @@ sysobjinvoke(sysva_list list)
 		if(c.arg0 != 0)
 			error("obj: write timeout not supported");
 		c.result = vobjio(handle, VioWrite, c.in,
-			bounded(c.inlen, Vobjpaymax, Ebadarg), 0);
+			bounded(c.inlen, OBJ_PUT_OID_MAX, Ebadarg), 0);
 		break;
 	case ObjOpRevoke:
 		if(c.in != nil || c.inlen != 0 || c.out != nil || c.outlen != 0 ||

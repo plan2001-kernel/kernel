@@ -3956,7 +3956,7 @@ vobjiover(int handle, uvlong op, void *buf, long n, long timeout, uvlong *ver)
 		r = n;
 		break;
 	case VkindGe:
-		if(n < 0 || n > Vobjpaymax)
+		if(n < 0 || (uvlong)n > OBJ_PUT_OID_MAX)
 			error(Ebadarg);
 		if(n > 0)
 			validaddr((uintptr)buf, n, op == VioRead ? 1 : 0);

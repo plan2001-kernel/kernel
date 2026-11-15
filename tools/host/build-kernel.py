@@ -175,6 +175,7 @@ KERNEL_SOURCES = {
     "sysn3": "kernel/core/sysn3.c",
     "sysobj": "kernel/core/sysobj.c",
     "sysproc": "kernel/core/sysproc.c",
+    "objtail": "runtime/objtail.c",
     "sysuart": "kernel/core/sysuart.c",
     "sysvobj": "kernel/core/sysvobj.c",
     "sysdevether": "kernel/core/sysdevether.c",

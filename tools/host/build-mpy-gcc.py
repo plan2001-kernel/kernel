@@ -60,6 +60,7 @@ CFLAGS = [
     "-I", str(ROOT / "include/amd64"),
     "-I", str(ROOT / "include"),
     "-I", str(ROOT / "runtime/mp/port"),
+    "-I", str(ROOT / "runtime"),
     "-I", str(MPY / "lib/libm_dbl"),
     "-I", str(MPY / "lib/musl"),
     "-I", str(ROOT / "runtime/ikecrypto/bearssl/inc"),
@@ -99,6 +100,7 @@ def gen_headers(reuse: bool, report: list[str]) -> None:
     if src.exists():
         shutil.rmtree(src)
     shutil.copytree(MPY, src, symlinks=True)
+    shutil.copy2(ROOT / "runtime/objtail.h", src / "objtail.h")
     ok = True
     p = run(["make", "-C", str(src), "genhdr"], log=BUILD / "genhdr.log", quiet=True)
     if p.returncode != 0:
@@ -236,6 +238,7 @@ def sources() -> list[tuple[str, pathlib.Path]]:
     out.append(("extmod_modjson", MPY / "extmod/modjson.c"))
     out.append(("cbor", ROOT / "runtime/cbor/cbor.c"))
     out.append(("oenv", ROOT / "runtime/cbor/oenv.c"))
+    out.append(("objtail", ROOT / "runtime/objtail.c"))
     out.append(("readline", MPY / "shared/readline/readline.c"))
     for n in ("pyexec", "stdout_helpers", "gchelper_generic"):
         out.append((n, MPY / "shared/runtime" / (n + ".c")))
@@ -388,6 +391,7 @@ def main() -> int:
     # rebuild together; source timestamps alone can silently misbind modules.
     signature=hashlib.sha256("\n".join(CFLAGS).encode())
     headers=set(GENHDR.glob("*.h"))
+    headers.update((ROOT / "runtime").glob("*.h"))
     for base in (MPY,ROOT/"runtime/abi",ROOT/"runtime/cbor",ROOT/"runtime/ikecrypto"):
         headers.update(base.rglob("*.h"))
     for header in sorted(headers):

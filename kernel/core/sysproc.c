@@ -10,6 +10,8 @@
 #include	"sys.h"	/* repository-relative for Linux GCC */
 #include	"../../runtime/abi/vobj.h"
 #include	"vobjint.h"
+#define OBJTAIL_NATIVE_TYPES
+#include "../../runtime/objtail.h"
 #ifdef	PLAN2001_LIFECYCLE_DIAG
 #include	"env/envapi.h"
 #endif
@@ -892,6 +894,12 @@ execo(uvlong oid, void *vbuf, long n, char **uargv, int argc)
 		argn = 1;
 	}
 
+	{
+		uint64_t raw, meta;
+		if(n < ObjTailSize || objtail_parse(buf+n-ObjTailSize,n,&raw,&meta)<0)
+			error("oexec: missing or malformed object footer");
+		n=(long)raw;
+	}
 	iselfimage = iself(buf, n);
 	if(iselfimage){
 		elfparse(buf, n, &entry, &tbase, &toff, &tlen, &dbase,
@@ -1215,6 +1223,12 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 		error("oexec: no such object");
 	if(n > Objspawnmax)
 		error(Ebadexec);
+	{
+		uint64_t raw, meta;
+		if(n < ObjTailSize || objtail_parse(buf+n-ObjTailSize,n,&raw,&meta)<0)
+			error("ospawn: missing or malformed object footer");
+		n=(long)raw;
+	}
 	if(!iself(buf, n))
 		error("ospawn: not a static x86-64 ELF");
 	elfparse(buf, n, &entry, &tbase, &toff, &tlen, &dbase,
