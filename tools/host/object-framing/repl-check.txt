@@ -1,0 +1,1 @@
+print('FRAMED-FUN-RESTORED' if framedfun(5)==12 else 'FAIL')
