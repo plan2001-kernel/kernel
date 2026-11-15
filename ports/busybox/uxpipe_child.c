@@ -11,6 +11,7 @@ extern long obj_list(void *, unsigned long long);
 extern long obj_region_map(int, unsigned long long);
 extern long obj_region_unmap(unsigned long long);
 extern long sleep(long millis);
+extern void exits(char *status);
 
 static int launch_stream(int sending)
 {
