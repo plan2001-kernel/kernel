@@ -28,17 +28,18 @@ semantics. **There is no SpaceID dimension in the on-disk identity.**
   activation uses an explicit PARTUUID. GE/O handles are volume capabilities
   and persistent objects are addressed directly by OID.
 
-## Portable payload footer (opt-in application profile)
+## Portable payload footer (target for persistent object values)
 
 The stable raw-first footer contract and recommended CBOR/Unix metadata are
-specified in [portable object framing](OBJECT-TAIL.md). A framed payload is
-raw bytes beginning at offset zero, followed by optional opaque metadata and
-a fixed 32-byte footer describing metadata offset and length. This is a
-payload-level contract, not a GE/O B-tree key type or automatic migration.
-The existing GE/O v2 values, ELF/MPY seeds and persistent ObjectSpace images
-are currently unframed; native readers and writers do not yet enforce the
-profile. Do not reinterpret an existing unframed object as a valid framed
-object or publish framed executables without reviewing the loader.
+specified in [portable object framing](OBJECT-TAIL.md). The target requires
+all newly published persistent object values to begin with raw bytes at
+offset zero, optionally followed by opaque metadata and always ending in a
+fixed 32-byte footer that locates the metadata. Metadata contents and key
+names are recommendations, not storage ABI. This is a payload-level contract,
+not a GE/O B-tree key type or automatic migration. It is NOT YET ACTIVE:
+existing GE/O v2 values, ELF/MPY seeds and ObjectSpace images remain unframed;
+native readers and writers do not currently enforce the profile. Do not
+publish framed executables without adapting and testing their loader.
 
 ## Volume-global allocator and transactions
 
