@@ -11,7 +11,7 @@ KERNEL=$(cd "$1" && pwd)
 IMAGE=$(realpath "$2")
 REPORTS=$(cd "$3" && pwd)
 MODE=${4:-default}
-if [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ]; then
+if [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ]; then
   echo "unsupported acceptance mode: $MODE" >&2
   exit 2
 fi
@@ -72,7 +72,7 @@ qob_make_disk "$IMAGE" "$OUT/disk.img" "$OUT/esp.img" "$puuid" "$OUT/disk.layout
 # The original disk image is built once. Between boots only the QEMU
 # process and its OVMF variable overlay are reset, not the GE/O disk.
 phases=(initial reboot)
-if [ "$MODE" = newlib-supervised ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ]; then phases=(initial); fi
+if [ "$MODE" = newlib-supervised ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ]; then phases=(initial); fi
 for phase in "${phases[@]}"; do
   mon="$OUT/monitor-$phase.sock"
   serial="$OUT/serial-$phase.log"
@@ -102,7 +102,7 @@ for phase in "${phases[@]}"; do
   qob_cleanup
 done
 
-if [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ]; then
+if [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ]; then
   echo "PASS: native ash F5 acceptance; bootable disk at $OUT/disk.img"
   exit 0
 fi

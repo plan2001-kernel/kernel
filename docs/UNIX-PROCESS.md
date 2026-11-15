@@ -40,6 +40,14 @@ in `UXEXIT1:hh`; signal death uses `UXSIGN1:dd`. Unmodified native programs
 retain their native success/failure distinction. Raw native completion remains
 observable independently of this Unix registry.
 
+`stdio_process.c` supplies native `system`, `popen` and `pclose` for command
+interpreters such as awk. Commands execute the registered `/bin/sh` with the
+caller's explicit fd and capability inheritance. `system` temporarily ignores
+SIGINT/SIGQUIT and blocks SIGCHLD in the caller, restores the child's required
+signal state, and waits for its exact child. `pclose` also reaps its own child
+without consuming another command stream's completion. Return statuses retain
+POSIX wait encoding. No shared-address-space vfork or host shell is used.
+
 ## Descriptors and shared files
 
 Duplicates share an open description and keep descriptor flags separate.

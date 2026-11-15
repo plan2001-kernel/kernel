@@ -39,6 +39,7 @@ typedef int (*UxEmit)(void *, const void *, unsigned int);
 void uxfs_init(UxFs *fs, Pvd *view);
 int uxfs_path(const UxFs *fs, const char *path, char out[PVD_PATH_MAX]);
 int uxfs_mkdir(UxFs *fs, const char *path);
+int uxfs_rmdir(UxFs *fs, const char *path);
 int uxfs_write(UxFs *fs, const char *path, const void *buf,
                unsigned int size, int append);
 int uxfs_info(UxFs *fs, const char *path, unsigned int *kind,

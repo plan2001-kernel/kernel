@@ -36,23 +36,39 @@ static void check(int ok, const char *what)
         _exit(99);
     }
 }
-static void command(char *const args[], int code, const char *expected)
+static void command_input(char *const args[], int code, const char *expected,const char *input)
 {
-    int stream[2], child, status, got;
+    int stream[2],feed[2]={-1,-1},child,status,got;
     char output[4096];
     unsigned used = 0;
+    if(input) check(pipe(feed)==0,"create command input pipe");
     check(pipe(stream) == 0, "create output pipe");
     child = fork();
     check(child >= 0, "fork");
     if (!child) {
         char *environment[] = {"PATH=/bin:/usr/bin", "HOME=/", NULL};
         (void)close(stream[0]);
+        if(input) {
+            (void)close(feed[1]);
+            if(dup2(feed[0],0)<0) _exit(120);
+            if(feed[0]!=0) (void)close(feed[0]);
+        }
         if (dup2(stream[1], 1) < 0 || dup2(stream[1], 2) < 0) _exit(121);
         if (stream[1] != 1 && stream[1] != 2) (void)close(stream[1]);
         execve(strchr(args[0], '/') ? args[0] : "/bin/busybox", args, environment);
         _exit(122);
     }
     check(close(stream[1]) == 0, "drop parent writer");
+    if(input) {
+        size_t used=0,len=strlen(input);
+        (void)close(feed[0]);
+        while(used<len) {
+            int n=write(feed[1],input+used,len-used);
+            if(n<0 && errno==EINTR) continue;
+            check(n>0,"feed command stdin"); used+=(unsigned)n;
+        }
+        check(close(feed[1])==0,"publish input EOF");
+    }
     while ((got = read(stream[0], output + used, sizeof output - 1 - used)) != 0) {
         if (got < 0 && errno == EINTR) continue;
         check(got > 0, "read command output");
@@ -118,7 +134,25 @@ static void denied_execution(int revoke)
           revoke ? "revoked executable alias denied" : "non-executable grant denied");
 }
 #define RUN(code, output, ...) do { char *args[] = {__VA_ARGS__, NULL}; \
-    command(args, code, output); } while (0)
+    command_input(args, code, output, NULL); } while (0)
+#define INPUT(input, code, output, ...) do { char *args[] = {__VA_ARGS__, NULL}; \
+    command_input(args, code, output, input); } while (0)
+static void fixture(const char *path,const char *data)
+{
+    int fd=open(path,O_WRONLY|O_CREAT|O_TRUNC,0600);
+    unsigned n=(unsigned)strlen(data);
+    check(fd>=0,"create fixture");
+    check(write(fd,data,n)==(int)n && close(fd)==0,"write fixture");
+}
+static void content(const char *path,const char *data)
+{
+    char buf[1024];
+    int fd=open(path,O_RDONLY),n;
+    check(fd>=0,"open expected file");
+    n=read(fd,buf,sizeof buf);
+    check(n==(int)strlen(data) && !memcmp(buf,data,(unsigned)n),"file content");
+    check(read(fd,buf,1)==0 && close(fd)==0,"file EOF and close");
+}
 int main(void)
 {
     static Pvd view;
@@ -202,6 +236,83 @@ int main(void)
     RUN(0, "", "/bin/sh", "-c", "/bin/ls /bin > /tmp/list; test -s /tmp/list");
     RUN(0, "file-data\n", "/bin/cat", "/tmp/native");
     RUN(1, NULL, "/bin/cat", "/missing");
+    fixture("/tmp/lines","a\nb\nc\n");
+    RUN(0,"a\nb\n","busybox","head","-n","2","/tmp/lines");
+    RUN(0,"c\n","busybox","tail","-n","1","/tmp/lines");
+    INPUT("a\nb\nc\n",0,"3\n","busybox","wc","-l");
+    INPUT("abc def\n",0,"8\n","busybox","wc","-c");
+    INPUT("one\n",0,"one\n","busybox","tee","/tmp/tee");
+    INPUT("two\n",0,"two\n","busybox","tee","-a","/tmp/tee");
+    content("/tmp/tee","one\ntwo\n");
+    INPUT("a:1\nb:2\n",0,"1\n2\n","busybox","cut","-d:","-f2");
+    INPUT("hello\n",0,"HELLO\n","busybox","tr","a-z","A-Z");
+    INPUT("b\na\nb\n",0,"a\nb\nb\n","busybox","sort");
+    INPUT("a\na\nb\n",0,"a\nb\n","busybox","uniq");
+    fixture("/tmp/identical","a\nb\nc\n");
+    RUN(0,"","busybox","cmp","/tmp/lines","/tmp/identical");
+    RUN(1,NULL,"busybox","cmp","/tmp/lines","/tmp/tee");
+    RUN(2,NULL,"busybox","cmp","/tmp/lines","/missing");
+    RUN(0,"","/bin/mkdir","/tmp/tree");
+    RUN(1,NULL,"/bin/mkdir","/tmp/tree");
+    RUN(1,NULL,"/bin/mkdir","/missing/child");
+    fixture("/tmp/tree/item","remove-me");
+    RUN(1,NULL,"/bin/rm","/tmp/tree");
+    RUN(0,"","/bin/rm","-r","/tmp/tree");
+    struct stat removed;
+    check(stat("/tmp/tree",&removed)<0 && errno==ENOENT,"recursive directory removal");
+    RUN(0,"","/bin/mkdir","/tmp/tree"); /* deleted PVD slots are reusable */
+    RUN(0,"","/bin/rm","-r","/tmp/tree");
+    RUN(1,NULL,"/bin/rm","/missing");
+    RUN(0,"","/bin/rm","-f","/missing");
+    fixture("/tmp/from","moved");
+    RUN(0,"","/bin/mv","/tmp/from","/tmp/to");
+    content("/tmp/to","moved");
+    check(stat("/tmp/from",&removed)<0 && errno==ENOENT,"move removes old name");
+    RUN(1,NULL,"/bin/mv","/bin/busybox","/tmp/stolen");
+    RUN(1,NULL,"/bin/rm","/bin/echo");
+    RUN(0,"a\nB\nc\n","/bin/sed","s/b/B/","/tmp/lines");
+    INPUT("one 2\ntwo 3\n",0,"5\n","busybox","awk","{s+=$2} END {print s}");
+    RUN(0,"9\n32\n","busybox","awk","BEGIN {print sqrt(81); print 2^5}");
+    RUN(0,"7\n","busybox","awk","BEGIN {print system(\"exit 7\")}");
+    RUN(0,"child\n","busybox","awk","BEGIN {\"echo child\" | getline x; close(\"echo child\"); print x}");
+    RUN(0,"0\n","busybox","awk","BEGIN {print \"data\" | \"cat > /tmp/awkpipe\"; print close(\"cat > /tmp/awkpipe\")}");
+    content("/tmp/awkpipe","data\n");
+    RUN(1,NULL,"busybox","awk","BEGIN {");
+    RUN(1,NULL,"/bin/sed","[");
+    RUN(1,NULL,"/bin/mkdir","-p","/tmp/unsupported/child");
+    check(stat("/tmp/unsupported",&removed)<0 && errno==ENOENT,"unsupported mkdir mask fails before mutation");
+    RUN(1,NULL,"/bin/sed","-i","s/a/A/","/tmp/lines");
+    content("/tmp/lines","a\nb\nc\n");
+    int held=open("/tmp/to",O_RDONLY);
+    check(held>=0,"hold source across rename");
+    RUN(0,"","/bin/mv","/tmp/to","/tmp/renamed");
+    char held_data[8];
+    check(read(held,held_data,5)==5 && !memcmp(held_data,"moved",5),"rename preserves open source description");
+    fixture("/tmp/destination","keep");
+    int destination=open("/tmp/destination",O_RDONLY);
+    check(destination>=0,"hold rename destination");
+    RUN(1,NULL,"/bin/mv","/tmp/renamed","/tmp/destination");
+    content("/tmp/destination","keep");
+    RUN(1,NULL,"/bin/rm","/tmp/renamed");
+    check(close(held)==0 && close(destination)==0,"close held descriptions");
+    errno=0;
+    check(rmdir("/dev")==-1 && errno==EBUSY,"bootstrap directory anchor protected");
+    RUN(0,"","/bin/rm","/tmp/renamed");
+    FILE *first=popen("echo first","re"),*second;
+    check(first!=NULL && fcntl(fileno(first),F_GETFD)==FD_CLOEXEC,"popen cloexec");
+    check(fgets(held_data,sizeof held_data,first)!=NULL && !strcmp(held_data,"first\n"),"popen first command");
+    second=popen("echo second","r");
+    check(second!=NULL,"second popen command");
+    int shell_status=system("exit 3");
+    check(WIFEXITED(shell_status) && WEXITSTATUS(shell_status)==3,"system waits for its own child");
+    check(fgets(held_data,sizeof held_data,second)!=NULL && !strcmp(held_data,"second\n"),"popen second command");
+    check(pclose(second)==0 && pclose(first)==0,"pclose reaps exact children");
+    first=popen("exit 7","r");
+    check(first!=NULL,"popen nonzero status");
+    shell_status=pclose(first);
+    check(WIFEXITED(shell_status) && WEXITSTATUS(shell_status)==7,"pclose encoded exit status");
+    errno=0;
+    check(popen("true","invalid")==NULL && errno==EINVAL,"popen rejects invalid mode");
     for(unsigned i=0;i<sizeof(covered);++i) {
         if(!covered[i]) { emit(expected_names[i]); check(0,"enabled applet lacks guest command test"); }
     }

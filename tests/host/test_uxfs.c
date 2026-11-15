@@ -146,6 +146,33 @@ int main(void)
     assert(uxfs_restore(&fs,&store,500000) == PVD_EIO);
     disk.committed[1].data[16] ^= 0x80; /* corrupt manifest */
     assert(uxfs_restore(&fs,&store,101) == PVD_EIO);
+    /* Directory deletion updates both inventories and reclaims PVD capacity.
+     * Keep IDs of live siblings stable while holes are reused. */
+    assert(pvd_bootstrap(&view)==0); uxfs_init(&fs,&view);
+    unsigned baseline=view.count;
+    assert(uxfs_mkdir(&fs,"/tmp/a")==0 && uxfs_mkdir(&fs,"/tmp/b")==0);
+    unsigned high=view.count;
+    assert(uxfs_rmdir(&fs,"/tmp/a")==0);
+    assert(uxfs_mkdir(&fs,"/tmp/c")==0 && view.count==high);
+    assert(pvd_chdir(&view,"/tmp/b")==0);
+    assert(uxfs_rmdir(&fs,"/tmp/b")==PVD_EBUSY);
+    assert(pvd_chdir(&view,"/")==0);
+    assert(uxfs_rmdir(&fs,"/tmp/c")==0 && uxfs_rmdir(&fs,"/tmp/b")==0);
+    assert(view.count==baseline);
+    for(unsigned round=0;round<2*PVD_MAX_NODES;++round) {
+        assert(uxfs_mkdir(&fs,"/tmp/reuse")==0);
+        assert(uxfs_write(&fs,"/tmp/reuse/item","x",1,0)==0);
+        assert(uxfs_rmdir(&fs,"/tmp/reuse")==PVD_ENOTEMPTY);
+        assert(uxfs_rmdir(&fs,"/tmp/reuse/item")==PVD_ENOTDIR);
+        assert(uxfs_remove(&fs,"/tmp/reuse/item")==0);
+        assert(uxfs_rmdir(&fs,"/tmp/reuse")==0);
+        assert(view.count==baseline);
+        assert(pvd_chdir(&view,"/tmp/reuse")==PVD_ENOENT);
+    }
+    assert(uxfs_rmdir(&fs,"/")==PVD_EBUSY);
+    assert(uxfs_rmdir(&fs,"/tmp")==PVD_EBUSY);
+    assert(uxfs_rmdir(&fs,"/dev")==PVD_EBUSY);
+    puts("PASS: directory removal, nonempty/cwd denial and repeated PVD slot reuse");
     puts("PASS: bounded files, GE/O OIDs, transactional manifest, restart, denial, corruption");
     return 0;
 }

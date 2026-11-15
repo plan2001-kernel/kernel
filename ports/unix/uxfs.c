@@ -143,6 +143,37 @@ int uxfs_mkdir(UxFs *fs, const char *path)
     fs->dirty = 1;
     return PVD_OK;
 }
+int uxfs_rmdir(UxFs *fs,const char *path)
+{
+    char resolved[PVD_PATH_MAX];
+    static const char *const anchors[]={
+        "/","/bin","/dev","/etc","/home","/tmp","/usr","/usr/bin","/var"
+    };
+    unsigned i,n;
+    int id,rc=uxfs_path(fs,path,resolved);
+    if(rc) return rc;
+    id=find(fs,resolved);
+    if(id<0) return PVD_ENOENT;
+    if(fs->nodes[id].kind!=UXFS_DIR) return PVD_ENOTDIR;
+    /* These fixed view anchors are required by the v1 restore contract.
+     * Treat them like mount points; deleting their children remains allowed. */
+    for(i=0;i<sizeof(anchors)/sizeof(anchors[0]);++i)
+        if(same(resolved,anchors[i])) return PVD_EBUSY;
+    n=length(resolved);
+    if(n==1) return PVD_EBUSY;
+    for(i=0;i<UXFS_NODES;++i) {
+        unsigned j;
+        if(!fs->nodes[i].kind || i==(unsigned)id) continue;
+        for(j=0;j<n && fs->nodes[i].path[j]==resolved[j];++j) {}
+        if(j==n && fs->nodes[i].path[n]=='/') return PVD_ENOTEMPTY;
+    }
+    rc=pvd_rmdir_memory(fs->view,resolved);
+    if(rc) return rc;
+    zero(&fs->nodes[id],sizeof(fs->nodes[id]));
+    fs->modified[id]=0;
+    fs->dirty=1;
+    return PVD_OK;
+}
 int uxfs_write(UxFs *fs, const char *path, const void *buf,
                unsigned int size, int append)
 {

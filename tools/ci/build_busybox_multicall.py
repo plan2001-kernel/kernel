@@ -23,6 +23,9 @@ OPTIONS = (
     'ASH_PRINTF', 'ASH_TEST', 'ASH_GETOPTS', 'FEATURE_SH_MATH',
     'TRUE', 'FALSE', 'ECHO', 'PRINTF', 'TEST', 'TEST1',
     'BASENAME', 'DIRNAME', 'PWD', 'CAT', 'LS', 'GREP', 'EGREP', 'FGREP',
+    'HEAD', 'TAIL', 'WC', 'TEE', 'CUT', 'TR', 'SORT', 'UNIQ', 'CMP',
+    'MKDIR', 'RM', 'MV', 'SED', 'AWK', 'FEATURE_AWK_LIBM',
+    'FEATURE_FANCY_HEAD', 'FEATURE_WC_LARGE', 'FEATURE_SORT_BIG', 'FEATURE_ALLOW_EXEC',
 )
 EXTRA_SOURCES = (
     'libbb/appletlib.c', 'coreutils/true.c', 'coreutils/false.c',
@@ -38,6 +41,14 @@ EXTRA_SOURCES = (
     'libbb/common_bufsiz.c', 'libbb/auto_string.c',
     'findutils/grep.c', 'libbb/xregcomp.c', 'libbb/get_line_from_file.c',
     'libbb/fclose_nonstdin.c', 'libbb/wfopen.c',
+    *('coreutils/' + name + '.c' for name in
+      ('head','tail','wc','tee','cut','tr','sort','uniq','mkdir','rm','mv')),
+    'editors/cmp.c', 'editors/sed.c', 'editors/awk.c',
+    'libbb/make_directory.c', 'libbb/remove_file.c', 'libbb/copy_file.c',
+    'libbb/xfuncs_printf.c', 'libbb/fflush_stdout_and_exit.c',
+    'libbb/perror_nomsg_and_die.c', 'libbb/ask_confirmation.c', 'libbb/inode_hash.c',
+    'coreutils/libcoreutils/cp_mv_stat.c', 'libbb/last_char_is.c', 'libbb/getopt_allopts.c',
+    'libbb/get_line_from_file.c',
 )
 
 
@@ -46,6 +57,8 @@ def main():
     for name in ('kernel', 'busybox', 'reports'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--newlib-source', type=Path, required=True)
+    parser.add_argument('--update-profile', action='store_true',
+                        help='regenerate the reviewed config/inventory after changing OPTIONS')
     args = parser.parse_args()
     kernel, busybox, reports = (p.resolve() for p in
                                (args.kernel, args.busybox, args.reports))
@@ -83,6 +96,8 @@ def main():
         # Kconfig emits wall-clock comments; strip only that generated date so
         # the reviewed config and manifest hash are reproducible across runs.
         config.write_text(re.sub(r'(?m)^# (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [^\n]*\n', '', config.read_text()))
+        if args.update_profile:
+            (ROOT / 'config/busybox-multicall.config').write_bytes(config.read_bytes())
         if config.read_bytes() != (ROOT / 'config/busybox-multicall.config').read_bytes():
             raise RuntimeError('Regenerated Kconfig differs from versioned native profile')
         selected = set(config.read_text().splitlines())
@@ -113,11 +128,12 @@ def main():
                  '-DBB_EXTRA_VERSION=""', '-Werror=implicit-function-declaration',
                  '-Werror=int-conversion', '-I' + str(out / 'include'),
                  '-I' + str(ROOT / 'ports/newlib/ash/include'),
-                 '-I' + str(busybox / 'include'), '-I' + str(busybox / 'shell'),
+                 '-I' + str(busybox / 'include'),
                  '-isystem', str(newlib / 'include'), '-isystem',
                  subprocess.check_output(['gcc-14', '-print-file-name=include'],
                                          text=True).strip(),
-                 '-include', str(busybox / 'include/autoconf.h')]
+                 '-include', str(busybox / 'include/autoconf.h'),
+                 '-include', str(ROOT / 'ports/newlib/multicall/native_posix.h')]
         # Newlib's generic unknown-elf profile omits its existing BSD regex
         # implementation. Compile the pinned upstream sources, not host regex.
         newlib_source = args.newlib_source.resolve()
@@ -153,11 +169,29 @@ def main():
                 dispatch = dispatch.replace(old, '\t\t\tbb_simple_perror_msg_and_die(fpc);')
                 source = out / 'appletlib-native.c'
                 source.write_text(dispatch)
+            if source.name == 'make_directory.c':
+                text = source.read_text()
+                old = '\t\t\t\torg_mask = umask(0);'
+                if text.count(old) != 1:
+                    raise RuntimeError('Upstream mkdir layout changed')
+                text = text.replace(old,old + '\n\t\t\t\tif (org_mask == (mode_t)-1) { fail_msg = "apply creation mask to"; break; }')
+                source = out / 'make_directory-native.c'
+                source.write_text(text)
+            if source.name == 'sed.c':
+                text = source.read_text()
+                old = '\t\t\tfchmod(nonstdoutfd, statbuf.st_mode);\n\t\t\tfchown(nonstdoutfd, statbuf.st_uid, statbuf.st_gid);'
+                if text.count(old) != 1:
+                    raise RuntimeError('Upstream sed metadata layout changed')
+                text = text.replace(old, '\t\t\tif (fchmod(nonstdoutfd, statbuf.st_mode) < 0 || fchown(nonstdoutfd, statbuf.st_uid, statbuf.st_gid) < 0)\n\t\t\t\tbb_simple_perror_msg_and_die(*argv);')
+                source = out / 'sed-native.c'
+                source.write_text(text)
             if source.name == 'libbb_compat.c':
                 extra = ['-DPLAN2001_MULTICALL=1']
             run(flags + extra + ['-c', source, '-o', obj])
             objects.append(obj)
         applets = inventory(busybox)
+        if args.update_profile:
+            (ROOT / 'config/busybox-applets.json').write_text(json.dumps(applets, indent=2) + '\n')
         check_reference(applets, ROOT / 'config/busybox-applets.json')
         table = (busybox / 'include/applet_tables.h').read_text()
         table = table.split('const char applet_names[]',1)[1].split(';',1)[0]
@@ -190,7 +224,7 @@ def main():
              '-o', elf, kernel / 'build/gcc/mpy/mpyobj/rt_startup.o',
              runtime / 'startup.o', main_obj, aliases_obj,
              *[runtime / (x + '.o') for x in
-               ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix',
+               ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
                 'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxshell', 'uxservice',
                 'uxfd', 'rt_stubs-newlib')],
              '-Wl,--start-group', archive, newlib / 'libc.a', newlib / 'libm.a',
@@ -216,7 +250,7 @@ def main():
                 '-o', out / 'guest-probe.elf', kernel / 'build/gcc/mpy/mpyobj/rt_startup.o',
                 runtime / 'startup.o', probe, aliases_obj,
                 *[runtime / (x + '.o') for x in
-                  ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix',
+                  ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
                    'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxshell', 'uxservice',
                    'uxfd', 'rt_stubs-newlib')],
                 '-Wl,--start-group', newlib / 'libc.a', newlib / 'libm.a',

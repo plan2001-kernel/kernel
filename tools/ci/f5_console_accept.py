@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised", "ash", "multicall", "multicall-eof"):
+                "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -91,7 +91,9 @@ def type_text(line):
     specials = {" ": "spc", "/": "slash", ".": "dot", "-": "minus",
                 ">": "shift-dot", "<": "shift-comma", "|": "shift-backslash",
                 "$": "shift-4", "(": "shift-9", ")": "shift-0",
-                ":": "shift-semicolon", ";": "semicolon", "+": "shift-equal"}
+                ":": "shift-semicolon", ";": "semicolon", "+": "shift-equal",
+                "'": "apostrophe", '"': "shift-apostrophe", "\\": "backslash",
+                "{": "shift-bracket_left", "}": "shift-bracket_right", "=": "equal", "&": "shift-7"}
     for letter in line:
         key("shift-"+letter.lower() if letter.isupper() else specials.get(letter, letter))
 
@@ -153,7 +155,36 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode == "multicall-eof":
+    if mode == "multicall-essentials":
+        waitscreen("essentials-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("essentials-prompt", "ash$", 45)
+        enter("echo banana > /tmp/text; echo apple >> /tmp/text; echo banana >> /tmp/text")
+        enter("sort < /tmp/text | uniq > /tmp/sorted; echo SORT-READY")
+        waitscreen("essentials-sort-ready", "SORT-READY", occurrences=2)
+        enter("cat /tmp/sorted; echo SORT-CONTENT")
+        result=waitscreen("essentials-sort-content", "SORT-CONTENT", occurrences=2)
+        assert "\napple\nbanana\nSORT-CONTENT\n" in result
+        enter("head -n 1 /tmp/sorted; tail -n 1 /tmp/sorted; echo HEADTAIL")
+        result=waitscreen("essentials-head-tail", "HEADTAIL", occurrences=2)
+        assert "\napple\nbanana\nHEADTAIL\n" in result
+        enter("wc -l < /tmp/text; echo COUNT")
+        result=waitscreen("essentials-wc", "COUNT", occurrences=2)
+        assert "\n3\nCOUNT\n" in result
+        enter("cut -c1-3 < /tmp/sorted | tr a-z A-Z; echo FILTERS")
+        result=waitscreen("essentials-cut-tr", "FILTERS", occurrences=2)
+        assert "\nAPP\nBAN\nFILTERS\n" in result
+        enter("sed s/banana/BANANA/ /tmp/text; echo SED-RESULT")
+        result=waitscreen("essentials-sed", "SED-RESULT", occurrences=2)
+        assert "\nBANANA\napple\nBANANA\nSED-RESULT\n" in result
+        enter("awk '{print $1}' /tmp/text; echo AWK-RESULT")
+        result=waitscreen("essentials-awk", "AWK-RESULT", occurrences=2)
+        assert "\nbanana\napple\nbanana\nAWK-RESULT\n" in result
+        enter("mkdir /tmp/run && tee /tmp/run/copy < /tmp/text && cmp /tmp/text /tmp/run/copy && echo COPY-RESULT")
+        waitscreen("essentials-tee-cmp", "COPY-RESULT", occurrences=2)
+        enter("mv /tmp/run/copy /tmp/run/moved && rm /tmp/run/moved && rm -r /tmp/run && echo FILES-RESULT")
+        waitscreen("essentials-files", "FILES-RESULT", occurrences=2)
+        print("PASS: interactive essential text tools, sed/awk, pipelines and mkdir/mv/rm")
+    elif mode == "multicall-eof":
         waitscreen("eof-ready", "PLAN2001-MULTICALL-READY")
         waitscreen("eof-prompt", "ash$", 45)
         key("ctrl-alt-f1") # old Linux VT chord no longer selects a guest view

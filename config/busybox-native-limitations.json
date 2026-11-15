@@ -1,0 +1,33 @@
+{
+  "mkdir": {
+    "missing_interfaces": [
+      "umask/creation-mode metadata for -p",
+      "chmod for -m"
+    ],
+    "reason": "Basic creation is supported; -p and explicit mode changes fail with ENOSYS instead of claiming unsupported permission semantics."
+  },
+  "mv": {
+    "missing_interfaces": [
+      "directory rename",
+      "detached overwritten-open-file lifetime"
+    ],
+    "reason": "Same-service regular-file rename preserves source open descriptions. Replacing an open destination returns EBUSY; directory moves are unsupported."
+  },
+  "rm": {
+    "missing_interfaces": [
+      "detached unlinked-open-file lifetime"
+    ],
+    "reason": "Regular and recursive removal are supported. Removing an open file returns EBUSY; root/cwd and nonempty-directory rules remain enforced."
+  },
+  "sed": {
+    "missing_interfaces": [
+      "O_CREAT|O_EXCL for in-place temporary files",
+      "fchmod/fchown metadata preservation"
+    ],
+    "reason": "Stream/file-to-stdout editing is supported. -i fails without replacing the original file; unsupported metadata preservation is checked."
+  },
+  "awk": {
+    "missing_interfaces": [],
+    "reason": "Fields, regex, arithmetic/libm, system and command streams use native adapters. Commands remain subject to native argument, child, fd and eight-grant limits."
+  }
+}

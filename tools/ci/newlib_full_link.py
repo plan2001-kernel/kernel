@@ -76,6 +76,7 @@ def main():
     sources = {
         "syscalls": PORT / "plan2001_syscalls.c",
         "posix": PORT / "posix_forward.c",
+        "stdio_process": PORT / "stdio_process.c",
         "fd_table": PORT / "fd_table.c",
         "process": PORT / "process.c",
         "inherit": PORT / "inherit.c",
@@ -139,7 +140,7 @@ def main():
                 "-Wl,--build-id=none", "-o", str(elf),
                 "-Wl,--wrap=longjmp",
                 str(startup), str(objects["startup"]), str(objects[program]),
-                str(objects["syscalls"]), str(objects["process"]), str(objects["inherit"]), str(objects["file_state"]), str(objects["fd_table"]), str(objects["posix"]), str(objects["dirent"]),
+                str(objects["syscalls"]), str(objects["process"]), str(objects["inherit"]), str(objects["file_state"]), str(objects["fd_table"]), str(objects["posix"]), str(objects["stdio_process"]), str(objects["dirent"]),
                 str(objects["ash_posix"]), str(objects["pipe"]),
                 *(str(objects[key]) for key in ("pvd", "uxfs", "uxshell", "uxservice", "uxfd")),
                 str(native_stubs),

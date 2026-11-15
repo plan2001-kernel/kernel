@@ -22,16 +22,6 @@ int get_terminal_width(int fd)
 #include <stdio.h>
 #include <stdarg.h>
 extern void xfunc_die(void);
-char *xasprintf(const char *format, ...)
-{
-    char *result;
-    va_list args;
-    va_start(args, format);
-    int n = vasprintf(&result, format, args);
-    va_end(args);
-    if (n < 0) xfunc_die();
-    return result;
-}
 /* UXFS v1 cannot create or follow symlinks. Fail explicitly. */
 int symlink(const char *target, const char *path)
 {
@@ -59,29 +49,24 @@ char *dirname(char *path)
 #include <fcntl.h>
 #include <dirent.h>
 extern void bb_simple_perror_msg(const char *);
-int open_or_warn(const char *path, int flags)
-{
-    int fd = open(path, flags);
-    if (fd < 0) bb_simple_perror_msg(path);
-    return fd;
-}
-DIR *warn_opendir(const char *path)
-{
-    DIR *dir = opendir(path);
-    if (!dir) bb_simple_perror_msg(path);
-    return dir;
-}
-void fputs_stdout(const char *text) { fputs(text, stdout); }
-
 void exit_SUCCESS(void) { exit(0); }
-void bb_die_memory_exhausted(void)
-{
-    fputs("memory exhausted\n", stderr);
-    xfunc_die();
-}
-FILE *xfopen(const char *path, const char *mode)
-{
-    FILE *fp = fopen(path, mode);
-    if (!fp) { bb_simple_perror_msg(path); xfunc_die(); }
-    return fp;
-}
+
+/* Native capability/UXFS profile has no device creation or Unix ownership
+ * mutation. These paths fail explicitly rather than faking metadata changes. */
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/time.h>
+int mknod(const char *path,mode_t mode,dev_t device)
+{ (void)path; (void)mode; (void)device; errno=ENOSYS; return -1; }
+int chmod(const char *path,mode_t mode)
+{ (void)path; (void)mode; errno=ENOSYS; return -1; }
+int fchmod(int fd,mode_t mode)
+{ (void)fd; (void)mode; errno=ENOSYS; return -1; }
+int chown(const char *path,uid_t uid,gid_t gid)
+{ (void)path; (void)uid; (void)gid; errno=ENOSYS; return -1; }
+int lchown(const char *path,uid_t uid,gid_t gid)
+{ return chown(path,uid,gid); }
+int fchown(int fd,uid_t uid,gid_t gid)
+{ (void)fd; (void)uid; (void)gid; errno=ENOSYS; return -1; }
+int utimes(const char *path,const struct timeval times[2])
+{ (void)path; (void)times; errno=ENOSYS; return -1; }

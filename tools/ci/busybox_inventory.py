@@ -92,6 +92,15 @@ def inventory(source, built=False):
                 'Not enabled in the initial multicall profile; native interface audit required.',
             'verification': [], 'variants': variants,
         })
+    annotations_path = ROOT / 'config/busybox-native-limitations.json'
+    if annotations_path.exists():
+        annotations = json.loads(annotations_path.read_text())
+        unknown = set(annotations) - set(grouped)
+        if unknown:
+            raise ValueError('Limitations refer to unknown applets: ' + repr(sorted(unknown)))
+        for applet in applets:
+            if applet['name'] in annotations:
+                applet.update(annotations[applet['name']])
     config = source / '.config'
     return {'schema': 1, 'busybox': lock,
             'config_sha256': hashlib.sha256(config.read_bytes()).hexdigest(),

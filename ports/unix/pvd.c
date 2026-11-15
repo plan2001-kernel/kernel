@@ -96,9 +96,12 @@ static int walk(Pvd *view, const char *name, unsigned int *stack,
         if (!matches) {
             if (!create || !last)
                 return PVD_ENOENT;
-            if (view->count >= PVD_MAX_NODES)
-                return PVD_ENOSPC;
-            found = view->count++;
+            for(found=1;found<view->count;++found)
+                if(!view->nodes[found].label[0]) break;
+            if(found==view->count) {
+                if(view->count>=PVD_MAX_NODES) return PVD_ENOSPC;
+                ++view->count;
+            }
             view->nodes[found].parent = parent;
             copy_label(view->nodes[found].label, label, partlen);
             created = 1;
@@ -176,6 +179,22 @@ int pvd_getcwd(const Pvd *view, char *buffer, unsigned long capacity)
     return PVD_OK;
 }
 
+int pvd_rmdir_memory(Pvd *view,const char *path)
+{
+    unsigned int stack[PVD_MAX_DEPTH],depth,i,id;
+    int rc=walk(view,path,stack,&depth,0);
+    if(rc) return rc;
+    if(depth==1) return PVD_EBUSY;
+    id=stack[depth-1];
+    for(i=0;i<view->depth;++i) if(view->path[i]==id) return PVD_EBUSY;
+    for(i=1;i<view->count;++i)
+        if(view->nodes[i].label[0] && view->nodes[i].parent==id) return PVD_ENOTEMPTY;
+    view->nodes[id].label[0]=0;
+    view->nodes[id].parent=0;
+    while(view->count>1 && !view->nodes[view->count-1].label[0]) --view->count;
+    return PVD_OK;
+}
+
 int pvd_list(const Pvd *view, const char *path, PvdEmit emit, void *context)
 {
     unsigned int stack[PVD_MAX_DEPTH], depth, i;
@@ -187,7 +206,7 @@ int pvd_list(const Pvd *view, const char *path, PvdEmit emit, void *context)
     if (status != PVD_OK)
         return status;
     for (i = 1; i < view->count; ++i) {
-        if (view->nodes[i].parent == stack[depth - 1]) {
+        if (view->nodes[i].label[0] && view->nodes[i].parent == stack[depth - 1]) {
             if (emit(context, view->nodes[i].label) != 0)
                 return PVD_EIO;
         }

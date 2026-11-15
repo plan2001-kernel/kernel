@@ -5,8 +5,10 @@ It introduces a genuine upstream dispatcher, an immutable virtual executable
 projection and reproducible full-release name inventory. **It does not complete
 #17 or establish that every feasible upstream applet has been enabled.**
 
-The initial profile includes 16 names: `[`, `ash`, `basename`, `cat`, `dirname`,
-`echo`, `egrep`, `false`, `fgrep`, `grep`, `ls`, `printf`, `pwd`, `sh`, `test`, `true`.
+The profile includes 30 names: `[`, `ash`, `awk`, `basename`, `cat`, `cmp`,
+`cut`, `dirname`, `echo`, `egrep`, `false`, `fgrep`, `grep`, `head`, `ls`,
+`mkdir`, `mv`, `printf`, `pwd`, `rm`, `sed`, `sh`, `sort`, `tail`, `tee`,
+`test`, `tr`, `true`, `uniq`, `wc`.
 Upstream features are selectively configured; this is not the all-features Linux
 configuration. The older ash-only and three-applet artifacts remain separate.
 
@@ -89,6 +91,34 @@ compares those names with preprocessed source declarations; the driver compares
 both outputs byte-for-byte with the inventory. The canonical busybox entry is in
 addition to the applet list, as with a normal BusyBox installation.
 
+## File and text tools
+
+`head`, `tail`, `wc`, `tee`, `cut`, `tr`, `sort`, `uniq`, `cmp`, `sed` and
+`awk` are upstream applets using the native fd/file/stream layer. Awk math
+uses target Newlib libm. `system`, `popen` and `pclose` use native fork, pipes,
+exec and exact-child wait; system exit status is preserved. No host shell or
+vfork is used. Source builds avoid the BusyBox shell's private `math.h`
+shadowing target Newlib's standard math header.
+
+`mkdir` creates individual directories; `rm -r` now removes empty directories
+from both UXFS and PVD and reuses freed PVD slots. Fixed bootstrap view
+anchors are protected with EBUSY so saved manifests remain restorable. `mv` supports regular-file
+renames and updates open source descriptions. Overwriting an open destination
+or unlinking an open file returns EBUSY until detached inode lifetime exists.
+
+The versioned `config/busybox-native-limitations.json` supplies per-applet
+missing interfaces and restrictions. In particular `mkdir -p`/`-m` and `sed -i`
+are not implemented by this profile. They fail with errors; the in-place sed
+failure leaves the original content intact. Stream editing and redirection
+remain usable. Directory moves and Unix permission/ownership preservation are
+also unsupported.
+
+The 64-node, 1 KiB-per-file volatile UXFS bound remains. Native SPAWN allows
+eight grants, so complex external pipelines or awk command streams can exceed
+the limit and fail. Input redirection releases unused console-input grants;
+`2>&1` can share output/error endpoints when appropriate. No descriptor is
+silently dropped to make a process launch succeed.
+
 ## Evidence and limits
 
 The native driver runs each enabled applet through real fork/exec/wait, captures
@@ -119,8 +149,8 @@ has happened. The guest result upgrades only enabled names after all driver test
 pass, with the corresponding log path as evidence.
 
 Remaining work for #17 includes applet-specific dependency/semantics audits for
-disabled names, further userspace adapters and applet families (including sed,
-awk, find, sort, xargs, tar and file mutation tools), a guest test with more than
+disabled names, further userspace adapters and applet families (including cp, touch,
+find, xargs, tar and broader file metadata support), a guest test with more than
 64 enabled aliases, broader
 terminal/network/device facilities. Native process/fd/grant, argument and file
 size bounds still apply; compilation is never evidence of working services.

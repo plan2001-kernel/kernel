@@ -34,6 +34,7 @@ extern off_t p9_raw_lseek(int,off_t,int);
 extern int p9_raw_stat(const char *,struct stat *),p9_raw_lstat(const char *,struct stat *);
 extern int p9_raw_unlink(const char *),p9_raw_link(const char *,const char *);
 extern int p9_raw_chdir(const char *),p9_raw_mkdir(const char *,mode_t);
+extern int p9_raw_rmdir(const char *);
 extern int p9_raw_rename(const char *,const char *),p9_raw_access(const char *,int);
 extern char *p9_raw_getcwd(char *,size_t);
 
@@ -184,6 +185,7 @@ int _unlink(const char *p) { PATH_WRAP(p9_raw_unlink(p)); }
 int _link(const char *p,const char *q) { PATH_WRAP(p9_raw_link(p,q)); }
 int _chdir(const char *p) { PATH_WRAP(p9_raw_chdir(p)); }
 int _mkdir(const char *p,mode_t mode) { PATH_WRAP(p9_raw_mkdir(p,mode)); }
+int rmdir(const char *p) { PATH_WRAP(p9_raw_rmdir(p)); }
 int _rename(const char *p,const char *q) { PATH_WRAP(p9_raw_rename(p,q)); }
 int _access(const char *p,int mode) { PATH_WRAP(p9_raw_access(p,mode)); }
 char *getcwd(char *p,size_t n)

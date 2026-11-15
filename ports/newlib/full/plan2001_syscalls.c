@@ -134,6 +134,10 @@ static int translate_fs(int code)
     case PVD_EACCES: return EACCES;
     case PVD_EIO: return EIO;
     case PVD_EEXIST: return EEXIST;
+    case PVD_ENOTDIR: return ENOTDIR;
+    case PVD_EISDIR: return EISDIR;
+    case PVD_ENOTEMPTY: return ENOTEMPTY;
+    case PVD_EBUSY: return EBUSY;
     case PVD_ENAMETOOLONG: return ENAMETOOLONG;
     case PVD_ENOSPC: return ENOSPC;
     case PVD_ELOOP: return ELOOP;
@@ -669,6 +673,13 @@ int p9_raw_unlink(const char *path)
     int result;
     if(!files_bound) { errno = ENOSYS; return -1; }
     if(!path) { errno = EFAULT; return -1; }
+    char resolved[PVD_PATH_MAX];
+    result=uxfs_path(&file_table.service->fs,path,resolved);
+    if(result) return fail_fs(result);
+    for(unsigned i=0;i<UXFD_SLOTS;++i)
+        if(file_table.slots[i].used && !strcmp(file_table.slots[i].path,resolved)) {
+            errno=EBUSY; return -1; /* detached open inode lifetime is not implemented */
+        }
     result = uxfd_unlink(&file_table,path);
     return result == PVD_OK ? 0 : fail_fs(result);
 }
@@ -759,6 +770,28 @@ int p9_raw_mkdir(const char *path, mode_t mode)
     return result==PVD_OK ? 0 : fail_fs(result);
 }
 
+int p9_raw_rmdir(const char *path)
+{
+    UxService *s=file_service();
+    char base[PVD_PATH_MAX];
+    int result;
+    if(!s) { errno=ENOSYS; return -1; }
+    if(!path) { errno=EFAULT; return -1; }
+    result=uxfs_path(&s->fs,path,base);
+    if(result) return fail_fs(result);
+    if(p9_multicall_path) for(unsigned i=0;p9_multicall_path(i);++i) {
+        const char *alias=p9_multicall_path(i);
+        size_t n=strlen(base);
+        if(!strncmp(base,alias,n) && alias[n]=='/' && p9_process_executable(alias,NULL)) {
+            errno=ENOTEMPTY; return -1;
+        }
+    }
+    result=uxfs_rmdir(&s->fs,path);
+    if(result) return fail_fs(result);
+    result=uxservice_sync(s);
+    return result ? fail_fs(result) : 0;
+}
+
 int p9_raw_rename(const char *src, const char *dst)
 {
     if(p9_process_executable(src,NULL) || p9_process_executable(dst,NULL)) {
@@ -769,9 +802,22 @@ int p9_raw_rename(const char *src, const char *dst)
     int result;
     if(!s) { errno=ENOSYS; return -1; }
     if(!src || !dst) { errno=EFAULT; return -1; }
+    /* Preserve source open descriptions; refuse replacement of an open
+     * destination until detached inode lifetime is implemented. */
+    char from[PVD_PATH_MAX],to[PVD_PATH_MAX];
+    result=uxfs_path(&s->fs,src,from);
+    if(!result) result=uxfs_path(&s->fs,dst,to);
+    if(result) return fail_fs(result);
+    for(unsigned i=0;i<UXFD_SLOTS;++i)
+        if(file_table.slots[i].used && !strcmp(file_table.slots[i].path,to) && strcmp(from,to)) {
+            errno=EBUSY; return -1;
+        }
     /* v1 UXFS supports regular-file moves only, not directory rename. */
-    result=uxfs_move(&s->fs,src,dst);
+    result=uxfs_move(&s->fs,from,to);
     if(result!=PVD_OK) return fail_fs(result);
+    for(unsigned i=0;i<UXFD_SLOTS;++i)
+        if(file_table.slots[i].used && !strcmp(file_table.slots[i].path,from))
+            strcpy(file_table.slots[i].path,to);
     result=uxservice_sync(s);
     return result==PVD_OK ? 0 : fail_fs(result);
 }
