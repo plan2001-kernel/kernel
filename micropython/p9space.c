@@ -1095,7 +1095,8 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     struct {
         mp_arg_val_t oid, cpu, argv, membudget, handle, roles, env, vhandles;
     } a;
-    struct { struct Ospawn base; struct Oinherit extra; } ext;
+    typedef struct { struct Ospawn base; union { struct Oinherit extra; struct Oinheritv caps; }; } SpawnOptions;
+    SpawnOptions *ext = m_new0(SpawnOptions, 1);
     struct Oinheritv *hv;
     int hasv;
     char *argv[33];
@@ -1114,9 +1115,9 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     }
     oid = (unsigned long long)mp_obj_get_uint(a.oid.u_obj);
 
-    memset(&ext, 0, sizeof ext);
+
     if(a.handle.u_obj == mp_const_none) obyteopen();
-    ext.base.cpu = ~0ULL;
+    ext->base.cpu = ~0ULL;
     if (a.cpu.u_obj != mp_const_none) {
         int cpu = mp_obj_get_int(a.cpu.u_obj);
         if (cpu == -1) {
@@ -1125,7 +1126,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
             mp_raise_msg(&mp_type_ValueError,
                 MP_ERROR_TEXT("space.spawn: cpu must be >= 0, -1 or None"));
         } else {
-            ext.base.cpu = (unsigned long long)cpu;
+            ext->base.cpu = (unsigned long long)cpu;
         }
     }
 
@@ -1159,9 +1160,9 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         /* negative values raise OverflowError in mp_obj_get_uint */
         mb = (unsigned long long)mp_obj_get_uint(a.membudget.u_obj);
     }
-    ext.base.membudget = mb;
+    ext->base.membudget = mb;
     hasv = a.vhandles.u_obj != mp_const_none;
-    hv = (struct Oinheritv *)&ext.extra;
+    hv = &ext->caps;
     if (hasv) {
         if (a.roles.u_obj != mp_const_none
         || a.env.u_obj != mp_const_none) {
@@ -1180,26 +1181,26 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
                 handle_item = pair[0];
                 selected_rights = (unsigned long long)mp_obj_get_int(pair[1]);
             }
-            if (hv->nhandles >= 8) {
+            if (hv->nhandles >= OINHERIT_MAXHANDLES) {
                 mp_raise_msg(&mp_type_ValueError,
-                    MP_ERROR_TEXT("space.spawn: at most 8 vhandles"));
+                    MP_ERROR_TEXT("space.spawn: native Handle limit exceeded"));
             }
             hv->h[hv->nhandles].handle = (unsigned long long)mp_obj_get_int(handle_item);
             hv->h[hv->nhandles].rights = selected_rights;
             hv->nhandles++;
         }
     }
-    ext.base.flags = hasv ? 2 : 1;
+    ext->base.flags = hasv ? 2 : 1;
     if (!hasv) {
     /* Legacy namespace view is gone. Process roots are explicit grants. */
-    ext.extra.view = 0;
+    ext->extra.view = 0;
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
             s = mp_obj_str_get_str(item);
-            if(ext.extra.nroles == 32 || strlen(s) >= 32)
+            if(ext->extra.nroles == 32 || strlen(s) >= 32)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn role limit"));
-            strcpy(ext.extra.roles[ext.extra.nroles++], s);
+            strcpy(ext->extra.roles[ext->extra.nroles++], s);
         }
     }
     if(a.env.u_obj != mp_const_none){
@@ -1207,14 +1208,14 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
             size_t count; mp_obj_t *pair;
             mp_obj_get_array(item, &count, &pair);
-            if(count != 2 || ext.extra.nenv == 8)
+            if(count != 2 || ext->extra.nenv == 8)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn env limit"));
             const char *key = mp_obj_str_get_str(pair[0]);
             const char *val = mp_obj_str_get_str(pair[1]);
             if(strlen(key) >= 32 || strlen(val) >= 128)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn env size"));
-            strcpy(ext.extra.env[ext.extra.nenv].name, key);
-            strcpy(ext.extra.env[ext.extra.nenv++].value, val);
+            strcpy(ext->extra.env[ext->extra.nenv].name, key);
+            strcpy(ext->extra.env[ext->extra.nenv++].value, val);
         }
     }
     }
@@ -1226,8 +1227,9 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
             mp_raise_msg(&mp_type_OSError,
                 MP_ERROR_TEXT("space.spawn: no open O Space"));
         }
-        pid = obj_ospawn(spaceh, oid, argv, argc, &ext.base);
+        pid = obj_ospawn(spaceh, oid, argv, argc, &ext->base);
     }
+    m_del(SpawnOptions, ext, 1);
     if (pid < 0) {
         raise_err();
     }

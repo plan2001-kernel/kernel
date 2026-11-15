@@ -96,6 +96,10 @@ typedef struct VobjInfo {
 } VobjInfo;
 
 /* VOBJLIST record.  Handles are process-local; the identity is informational. */
+/* Handles are opaque. These fields are used only by native slot projections. */
+enum { VhandleSlotBits = 11, VhandleSlotMask = (1<<VhandleSlotBits)-1,
+       VhandleLimit = 1024 };
+
 typedef struct VobjListRec {
 	unsigned int		handle;
 	unsigned int		kind;

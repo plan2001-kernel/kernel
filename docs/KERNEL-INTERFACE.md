@@ -92,8 +92,16 @@ path; the loader's in-place `OEXECUTE` remains the autostart action.
 Unregistered names and non-boot registration are rejected. Cross-owner
 termination requires an explicitly delegated process `Vcontrol` Handle;
 `Vobserve` alone never authorizes it. The optional
-`Ospawn`/`Oinherit`/`Oinheritv` layout is unchanged and describes
-explicitly delegated capability rights, CPU placement and budgets.
+`Ospawn`/`Oinherit`/`Oinheritv` records describe explicitly delegated
+capability rights, CPU placement and budgets. SPAWN and RFORKEX accept up to
+1024 explicit grants, the full process-local native Handle capacity. This
+uses Linux's initial RLIMIT_NOFILE soft limit as the default capacity; it
+does not implement Linux rlimits or their adjustable hard limit. There is
+no separate smaller per-launch grant limit. Both calls snapshot the count
+once, validate it before allocating, and read only that many entries.
+Inheritance plans and Handle-list snapshots use heap memory, not arrays
+proportional to this limit on the kernel stack. Handle slot projections use
+`VhandleSlotMask`; a Handle number alone never authorizes access.
 
 The named-owner and registered-program tables are volatile RAM. Stored object
 OwnerIDs survive restart, but the names and program records do not. Trusted

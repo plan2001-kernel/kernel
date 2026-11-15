@@ -474,6 +474,50 @@ def run():
 
     sh = p.obj_open_volume()
 
+    # SPAWN inherits the complete native table, with attenuated rights.
+    reg = p.region_create(8192)
+    child_code = """import plan9 as p
+hs=p.obj_list()
+assert len(hs)==1024, len(hs)
+for h in hs:
+    assert p.obj_info(h)[10]==p.VREAD|p.VMETA
+    try: p.obj_open_handle(h,p.VREAD)
+    except OSError: pass
+    else: raise AssertionError('delegate amplification')
+p.exits('inherit-1024')
+"""
+    many = ((reg, p.VREAD | p.VMETA),) * 1024
+    child = spawn(child_code, many)
+    result = rec_ok(child, p.OBJ_PROC_CAUSE_EXIT, 'inherit-1024')
+    ok(result[1] == 'inherit-1024', 'SPAWN delegates 1024 attenuated Handles without truncation')
+    p.obj_close(child)
+    before = p.obj_list()
+    denied(lambda: spawn(child_code, ((reg, RO),) * 1023 + ((reg, p.VEXECUTE),)),
+           'last entry rights amplification')
+    ok(p.obj_list() == before, 'invalid final entry rolls back all 1023 pinned grants')
+    try:
+        spawn(child_code, many + ((reg, RO),))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('SPAWN table overflow accepted')
+    denied(lambda: p.rforkex(p.RFPROC, (), None, 1025), 'oversized RFORKEX count')
+    # RFORKEX uses the same full-table plan and child Handle mapping.
+    child, mapped = p.rforkex(p.RFPROC, many)
+    if child == 0:
+        hs = p.obj_list()
+        if len(hs) != 1024:
+            p.exits('rfork-count')
+        for h in hs:
+            if p.obj_info(h)[10] != p.VREAD | p.VMETA:
+                p.exits('rfork-rights')
+        p.exits('rfork-1024')
+    result = rec_ok(child, p.OBJ_PROC_CAUSE_EXIT, 'rfork-1024')
+    ok(result[1] == 'rfork-1024' and len(mapped) == 1024 and len(set(mapped)) == 1024,
+       'RFORKEX delegates 1024 Handles with a complete distinct result mapping')
+    p.obj_close(child)
+    p.obj_close(reg)
+
     # --- A launches B, delegates observation to C, then A exits -----------
     chain_code = (A_CHAIN.replace('@CID@', str(CID))
                   .replace('@BCHILD@', repr(B_LONG.replace('@MS@', '6000')))
@@ -616,7 +660,7 @@ p.exits('handled-note-exit')
 
     def rawprocess(op, dest, timeout=0):
         # ObjCall: no Python object/wrapper touches dest before kernel entry.
-        call = struct.pack('<IIIIQQQQQQqQII', 1, op, 0, 0,
+        call = struct.pack('<IIIIQQQQQQqQII', p.OBJ_ABI_VERSION, op, 0, 0,
                            timeout, 0, 0, 0, dest, 200, 0, 0, 0, 0)
         p.region_write(callbase, call)
         return p.sysraw(140, b, callbase, len(call))
@@ -693,7 +737,7 @@ p.exits('handled-note-exit')
     i2 = None
     for _ in range(8):
         h = spawn(B_LONG.replace('@MS@', '60000'))
-        if (h & 0xff) == (first & 0xff):
+        if (h & 0x7ff) == (first & 0x7ff):
             live = h
             i2 = p.process_info(h)
             break

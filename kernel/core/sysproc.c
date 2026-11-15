@@ -1049,7 +1049,9 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 	int argn, cpu, i, nargs, childhandle;
 	struct Oinherit *inh;
 	struct Oinheritv *inhv;
-	Vinhand plan[24];
+	Vinhand *plan;
+	uvlong nh;
+	ulong inhbytes;
 	Vinherit vi;
 	int nplan;
 	int lockup, lockp;
@@ -1061,6 +1063,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 	nplan = 0;
 	inh = nil;
 	inhv = nil;
+	plan = nil;
 	buf = nil;
 	stackbuf = nil;
 	kargv = nil;
@@ -1080,6 +1083,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 		free(buf);
 		free(inh);
 		free(inhv);
+		free(plan);
 		free(stackbuf);
 		free(kargv);
 		free(kargs);
@@ -1160,11 +1164,21 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 		uchar *base = (uchar*)(uopt+1);
 		if(opt.flags & 1)
 			base += sizeof *inh;
-		inhv = malloc(sizeof *inhv);
+		/* Snapshot the count once, bound before multiplication, then copy
+		 * exactly the requested tail. Never reread an untrusted count. */
+		validaddr((uintptr)base, sizeof nh, 0);
+		memmove(&nh, base, sizeof nh);
+		if(nh > Vhandmax) error(Ebadarg);
+		inhbytes = sizeof nh + nh * sizeof inhv->h[0];
+		inhv = malloc(inhbytes);
 		if(inhv == nil) error(Enomem);
-		validaddr((uintptr)base, sizeof *inhv, 0);
-		memmove(inhv, base, sizeof *inhv);
-		if(inhv->nhandles > 8) error(Ebadarg);
+		validaddr((uintptr)base, inhbytes, 0);
+		inhv->nhandles = nh;
+		memmove(inhv->h, base + sizeof nh, inhbytes - sizeof nh);
+		if(nh > 0){
+			plan = malloc(nh * sizeof *plan);
+			if(plan == nil) error(Enomem);
+		}
 		for(i = 0; i < (int)inhv->nhandles; i++)
 			if(inhv->h[i].rights & ~(uvlong)Vall) error(Ebadarg);
 	}
@@ -1173,8 +1187,7 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 	 * explicit Handle/read-write pair with the same attenuation rules. */
 	if(inhv != nil){
 		for(i = 0; i < (int)inhv->nhandles; i++){
-			if(nplan >= (int)(sizeof plan/sizeof plan[0]) ||
-			   inhv->h[i].handle > 0x7fffffffULL)
+			if(inhv->h[i].handle > 0x7fffffffULL)
 				error(Ebadarg);
 			plan[nplan].handle = (int)inhv->h[i].handle;
 			plan[nplan].rights = inhv->h[i].rights;
@@ -1306,7 +1319,9 @@ kernospawn(Ohand *soh, uvlong oid, char **uargv, int argc, struct Ospawn *uopt,
 	}
 	vobjinheritrelease(&vi);
 	free(inhv);
+	free(plan);
 	inhv = nil;
+	plan = nil;
 	free(inh);
 	inh = nil;
 	procsetup(p);
@@ -1497,43 +1512,60 @@ sysnoted(sysva_list list)
 uintptr
 sysrforkex(sysva_list list)
 {
-	struct Rforkex opt;
+	struct { unsigned int version, count; } header;
+	struct Rforkex *opt;
 	struct Rforkex *uopt;
 	uvlong *uch;
-	Vinhand list_[RFORKEX_MAXHANDLES];
-	ulong flag;
-	ulong handle;
+	Vinhand *list_;
+	ulong flag, handle;
 	int i;
+	ulong bytes;
 
 	flag = (ulong)sysva_arg(list, uvlong);
 	uopt = sysva_arg(list, struct Rforkex*);
 	uch = sysva_arg(list, uvlong*);
-	memset(&opt, 0, sizeof opt);
+	/* The large public maximum is not a kernel stack allocation. */
+	opt = nil;
+	list_ = nil;
+	if(waserror()){
+		free(opt);
+		free(list_);
+		nexterror();
+	}
+	header.version = RFORKEX_VERSION;
+	header.count = 0;
 	if(uopt != nil){
 		validaddr((uintptr)uopt, 2*sizeof(unsigned int), 0);
-		memmove(&opt, uopt, 2*sizeof(unsigned int));
-		if(opt.version != RFORKEX_VERSION ||
-		   opt.count > RFORKEX_MAXHANDLES)
+		memmove(&header, uopt, 2*sizeof(unsigned int));
+		if(header.version != RFORKEX_VERSION || header.count > Vhandmax)
 			error(Ebadarg);
-		if(opt.count > 0){
-			validaddr((uintptr)&uopt->h[0],
-				opt.count*sizeof opt.h[0], 0);
-			memmove(opt.h, &uopt->h[0],
-				opt.count*sizeof opt.h[0]);
-		}
 	}
-	if(uch != nil && opt.count > 0)
-		validaddr((uintptr)uch, opt.count*sizeof *uch, 1);
-	for(i = 0; i < (int)opt.count; i++){
-		if(opt.h[i].handle > 0x7fffffffULL ||
-		   (opt.h[i].rights & ~(uvlong)Vall) != 0 ||
-		   opt.h[i].dstslot > Vhandmax)
+	bytes = 2*sizeof(unsigned int) + header.count*sizeof opt->h[0];
+	opt = malloc(bytes);
+	if(opt == nil) error(Enomem);
+	opt->version = header.version;
+	opt->count = header.count;
+	if(header.count > 0){
+		validaddr((uintptr)uopt->h, bytes - 2*sizeof(unsigned int), 0);
+		memmove(opt->h, uopt->h, bytes - 2*sizeof(unsigned int));
+		list_ = malloc(header.count*sizeof *list_);
+		if(list_ == nil) error(Enomem);
+	}
+	if(uch != nil && opt->count > 0)
+		validaddr((uintptr)uch, opt->count*sizeof *uch, 1);
+	for(i = 0; i < (int)opt->count; i++){
+		if(opt->h[i].handle > 0x7fffffffULL ||
+		   (opt->h[i].rights & ~(uvlong)Vall) != 0 ||
+		   opt->h[i].dstslot > Vhandmax)
 			error(Ebadarg);
-		list_[i].handle = (int)opt.h[i].handle;
-		list_[i].rights = opt.h[i].rights;
-		list_[i].dstslot = (int)opt.h[i].dstslot;
+		list_[i].handle = (int)opt->h[i].handle;
+		list_[i].rights = opt->h[i].rights;
+		list_[i].dstslot = (int)opt->h[i].dstslot;
 	}
-	handle = kernrforkex(flag, list_, (int)opt.count, uch);
+	handle = kernrforkex(flag, list_, (int)opt->count, uch);
+	free(opt);
+	free(list_);
+	poperror();
 	return handle;
 }
 
