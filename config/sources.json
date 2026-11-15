@@ -1,7 +1,7 @@
 {
   "kernel": {
     "repository": "plan2001-kernel/kernel",
-    "commit": "82814608dff31f2b33e34689821c468b69d7641e"
+    "ref": "main"
   },
   "busybox": {
     "repository": "mirror/busybox",

@@ -7,13 +7,12 @@ POSIX libc implementation.
 
 ## Inputs and boundaries
 
-- Both immutable revisions are read from [config/sources.json](../config/sources.json):
-  Plan2001 kernel and upstream BusyBox 1.36.1.
+- The [source policy](../config/sources.json) fetches the latest kernel `main` for each run and pins upstream BusyBox 1.36.1 by immutable commit; the resolved kernel SHA is recorded per CI run.
 - The original upstream sources `coreutils/true.c`, `false.c` and
   `echo.c` are compiled **unchanged** with GCC 14, `-ffreestanding`,
   `-nostdinc`, and a small, explicit `ports/busybox/libbb.h` surface.
 - Native executable startup, linker script, syscall stubs and
-  `libc-user.a` are obtained from the pinned kernel's normal
+  `libc-user.a` are obtained from the fetched kernel's normal
   `tools/build-mpy-gcc.sh` output. The target link uses
   `-nostdlib -nostartfiles -static` with native objects and `libgcc`.
 - No glibc, Linux CRT, Linux syscalls, kernel POSIX pathname layer, or

@@ -67,6 +67,14 @@ ssize_t full_write(int fd, const void *buf, size_t count)
     int h;
     if (fd != STDOUT_FILENO)
         return -1;
+    /* A manifest process uses only its kernel-provided session region.
+     * A non-session SPAWN child keeps its explicitly delegated legacy frame.
+     */
+    h = p2001_session_probe();
+    if (h < 0)
+        return -1;
+    if (h == 1)
+        return p2001_session_write(fd, buf, count);
     if (out_handle < 0 && region_data == 0) {
         if (open_stdout() < 0 && use_inherited_stdout() < 0)
             return -1;
@@ -90,6 +98,16 @@ ssize_t full_write(int fd, const void *buf, size_t count)
         total += (size_t)n;
     }
     return (ssize_t)total;
+}
+
+/* Raw session input is available only to a process with an actual RO
+ * console stdin grant. No fallback to a physical keyboard or fake EOF.
+ */
+ssize_t full_read(int fd, void *buf, size_t count)
+{
+    if (fd != STDIN_FILENO)
+        return -1;
+    return p2001_session_read(fd, buf, count);
 }
 
 void *xmalloc(size_t size)

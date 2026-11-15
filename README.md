@@ -2,7 +2,7 @@
 
 A small Unix-like userspace built on the experimental [Plan2001 kernel](https://github.com/plan2001-kernel/kernel).
 
-**Status:** Pinned source CI and libc symbol audit are implemented. A new first-stage native target workflow builds original BusyBox `true`/`false`/`echo` applets with Plan2001's own libc and tests them on the real kernel in QEMU. The new MicroPython child-process integration uses native SPAWN/process Handle observation in QEMU. These are **limited three-applet subset** tests, not a complete upstream BusyBox multicall port or POSIX layer.
+**Status:** AMD64 has a reduced, genuine BusyBox 1.36.1 **ash** statically linked with upstream Newlib 4.6.0 and native Plan2001 POSIX adapters. An F5 supervisor can start ash with keyboard/VGA, volatile PVD/UXFS files, redirection and a forked pipe. The native userland also implements bounded fork/exec/wait, descriptor inheritance and asynchronous signals through capability-based kernel primitives. A separate three-applet BusyBox target and a legacy F5 builtin-shell fixture remain regression tests. **This is not a full BusyBox multicall or POSIX distribution.** The native process/signal profile requires the kernel alarm-startup change from kernel PR #64; CI against moving kernel `main` remains a distinct compatibility check.
 
 ## Goal
 
@@ -30,9 +30,9 @@ The familiar `/bin`, `/usr`, `/etc`, and `/tmp` directories are userland project
 
 ## Build and CI workspace
 
-The [build mechanism](docs/BUILD.md) pins the external kernel and BusyBox sources in [`config/sources.json`](config/sources.json). GitHub Actions fetches each as a **sibling source tree** outside the userland repo, verifies the exact commits, inspects the kernel's `runtime/libc` and native ABI, and builds a minimal **Linux-host static BusyBox control** (`true`, `false`, `echo`). That control is intentionally linked against the Linux runner's libc and is **not** a Plan2001 program.
+The [build mechanism](docs/BUILD.md) fetches the **latest kernel `main` on every CI run**, records the resolved commit as the run's source manifest, and keeps BusyBox pinned by SHA using [`config/sources.json`](config/sources.json). Actions checks out both as **sibling source trees** outside the userland repo, audits the native ABI/libc, and builds a minimal **Linux-host static BusyBox control** (`true`, `false`, `echo`). That control is intentionally linked against the Linux runner's libc and is **not** a Plan2001 program.
 
-The native diagnostic workflow links the upstream BusyBox `true.c` applet (not the full multicall binary) against the actual Plan2001 runtime and runs separate guest checks. The dedicated [libc ABI audit](docs/libc-audit.md) compares host-compiled BusyBox object references with native library exports. These checks are not evidence of complete POSIX compatibility.
+The native diagnostic workflow links the upstream BusyBox `true.c` applet against Plan2001's runtime and runs separate guest checks. The [F5 console test](docs/BUSYBOX-F5.md) also builds a native BusyBox-bearing ELF, executes upstream `echo_main` on kernel manifest slot 4 and reads PS/2 keyboard input through kernel-granted console regions, with real QEMU VGA verification. The dedicated [libc ABI audit](docs/libc-audit.md) compares host-compiled BusyBox object references with native library exports. These checks are not evidence of complete POSIX compatibility.
 
 ## Milestones (proposed)
 
@@ -47,11 +47,18 @@ The native diagnostic workflow links the upstream BusyBox `true.c` applet (not t
 - [Build mechanism and local Debian commands](docs/BUILD.md)
 - [GitHub Actions libc ABI audit and evidence](docs/libc-audit.md)
 - [Native BusyBox target subset build and QEMU smoke test](docs/BUSYBOX-TARGET.md)
+- [Userspace PVD and memory-only Unix directory tree (stage 2)](docs/UNIX-PVD.md)
 - [MicroPython native BusyBox child-process launch, QEMU and command example](docs/BUSYBOX-SPAWN.md)
+- [Native F5 console I/O adapter, capability rings and QEMU acceptance](docs/BUSYBOX-F5.md)
 - [GitHub Actions build workflow](.github/workflows/build.yml)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Minimal POSIX profile](docs/POSIX-PROFILE.md)
 - [BusyBox porting plan](docs/PORTING.md)
+- [BusyBox ash compilation and Newlib POSIX integration](docs/ASH-NEWLIB.md)
+- [Native Unix process, file-descriptor and signal projection](docs/UNIX-PROCESS.md)
+- [UEFI ash boot image, hardware limitations and operator guide](docs/HARDWARE-BOOT.md)
+- [Native ash/Newlib QEMU integration gate](.github/workflows/ash-integration.yml)
+- [Shared GE/O UXFS service over capability-only UXPIPE RPC](docs/UXFS-SHARED-GEO.md)
 - [Development instructions](AGENTS.md)
 
 The authoritative native definitions are in the [kernel ObjectSpace architecture](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECTSPACE.md) and [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md).
@@ -59,3 +66,20 @@ The authoritative native definitions are in the [kernel ObjectSpace architecture
 ## Licensing
 
 BusyBox is GPLv2-licensed. Record source provenance and licenses before importing BusyBox sources or kernel runtime code. No third-party sources are included at this stage.
+
+## Stage 2: volatile Unix paths
+
+The F5 acceptance process now carries a bounded userspace Present View Descriptor
+(PVD) and the memory-only /bin, /dev, /etc, /home, /tmp, /usr/bin and /var
+directory tree. Its interim console builtins implement pwd, cd and ls; these
+are **not** upstream BusyBox applets or ash. GitHub Actions tests path rules
+with host sanitizers and PS/2+VGA QEMU. Stage 2 alone provided no init, persisted objects, or
+native pathname authority. See [PVD design](docs/UNIX-PVD.md).
+
+## Stage 3: Unix init boot entry
+
+The F5 boot-manifest executable now starts a [native Unix-init entry](docs/UNIX-INIT.md)
+that constructs a fresh PVD root and hands it to its statically linked builtin
+shell. The prompt starts at `unix:/$` and follows cwd. GitHub Actions verifies
+a fresh root across **two QEMU boots of the same disposable GE/O disk**.
+That stage-3 shell is the legacy builtin evaluator, not upstream ash; the separate ash hardware-boot profile uses a genuine ash ELF and a trusted F5 supervisor.

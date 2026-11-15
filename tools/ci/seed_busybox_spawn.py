@@ -16,6 +16,7 @@ from pathlib import Path
 
 BUSYBOX_OID = 0x4f45584543000005
 MPY_OID = 0x4f45584543000003
+UNIX_CHILD_OID = 0x4f45584543000006
 
 
 def sha(data: bytes) -> str:
@@ -26,6 +27,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", required=True, type=Path)
     parser.add_argument("--elf", required=True, type=Path)
+    parser.add_argument("--unix-manifest", action="store_true",
+                        help="provision a checked UXFS manifest on the new scratch volume")
+    parser.add_argument("--extra-elf", type=Path,
+                        help="additional checked native F5 child at OID 0x...06")
     parser.add_argument("--init", required=True, type=Path)
     parser.add_argument("--reports", required=True, type=Path)
     parser.add_argument("--image", required=True, type=Path)
@@ -48,7 +53,8 @@ def main():
     formatter = kernel / "build/format-o/format-o"
     oseed = kernel / "tools/host/oseed.py"
     inspect = kernel / "tools/oinspect.py"
-    for file in (mp, cross, formatter, oseed, inspect, args.elf, args.init):
+    for file in (mp, cross, formatter, oseed, inspect, args.elf, args.init,
+                 *((args.extra_elf,) if args.extra_elf else ())):
         if not file.is_file():
             raise SystemExit("missing input: " + str(file))
     if not all(file.read_bytes().startswith(b"\x7fELF") for file in (mp, args.elf)):
@@ -73,6 +79,13 @@ def main():
                 (seed / "rawexec").write_bytes(args.elf.read_bytes())
                 (seed / "rawexecoid").write_text(f"{BUSYBOX_OID:016x}",
                                                   encoding="ascii")
+                if args.extra_elf:
+                    (seed / "exe").write_bytes(args.extra_elf.read_bytes())
+                    (seed / "exeoid").write_text(f"{UNIX_CHILD_OID:016x}",
+                                                 encoding="ascii")
+            if command[0] == str(formatter) and args.unix_manifest:
+                from seed_unix_manifest import provision
+                provision(seed)
             stream.write("$ " + " ".join(command) + "\n")
             stream.flush()
             run = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
@@ -84,8 +97,13 @@ def main():
         ["python3", str(inspect), str(image)], text=True)
     (reports / "busybox-spawn-oinspect.json").write_text(result, encoding="utf-8")
     info = json.loads(result)
-    for oid, data in ((MPY_OID, mp.read_bytes()),
-                      (BUSYBOX_OID, args.elf.read_bytes())):
+    verified = [(MPY_OID, mp.read_bytes()), (BUSYBOX_OID, args.elf.read_bytes())]
+    if args.extra_elf:
+        verified.append((UNIX_CHILD_OID, args.extra_elf.read_bytes()))
+    if args.unix_manifest:
+        from seed_unix_manifest import MANIFEST_OID, initial_manifest
+        verified.append((MANIFEST_OID, initial_manifest()))
+    for oid, data in verified:
         found = info["objects"].get(f"{oid:016x}")
         if not found or found["sha256"] != sha(data) or found["bytes"] != len(data):
             raise SystemExit(f"seeded OID {oid:016x} disagrees with input ELF")
@@ -97,6 +115,10 @@ def main():
         "child_executable_oid": f"{BUSYBOX_OID:016x}",
         "child_executable_sha256": sha(args.elf.read_bytes()),
         "initial_python_code": str(args.init),
+        "additional_f5_child_oid": (f"{UNIX_CHILD_OID:016x}"
+                                  if args.extra_elf else None),
+        "additional_f5_child_sha256": (sha(args.extra_elf.read_bytes())
+                                      if args.extra_elf else None),
         "image_size": image.stat().st_size,
         "result": "PASS: fresh GE/O volume contains both native ELFs",
     }

@@ -1,4 +1,4 @@
-# Reproducible build and test workspace
+# Live-kernel build and test workspace
 
 This is the **working source/build mechanism** for the Plan2001 userland project. It is not yet a complete Plan2001 BusyBox port. The host-control workflow produces a **statically linked Linux-host reference BusyBox**. A separate [libc ABI audit](libc-audit.md) builds the native libc archive and links the upstream BusyBox `true.c` applet as a diagnostic, without claiming a multicall port.
 
@@ -9,7 +9,7 @@ The CI and local development directory layout is:
 ```text
 workspace/
   userland/   # writable: code, docs, CI; GitHub repo plan2001-kernel/userland
-  kernel/     # pinned checkout, INPUT ONLY; never modified by userland build
+  kernel/     # latest main resolved to a detached SHA for this run, INPUT ONLY
   busybox/    # pinned upstream BusyBox checkout; host-control build writes here
 reports/      # generated diagnostics, outside all source Git trees
 ```
@@ -19,23 +19,32 @@ The GitHub Actions job implements the same layout using runner temp directories 
 ```text
 $GITHUB_WORKSPACE/             userland checkout (the PR under test)
 $RUNNER_TEMP/plan2001-sources/
-  kernel/                     pinned exact kernel SHA
+  kernel/                     freshly fetched main, detached for this run
   busybox/                    pinned exact upstream BusyBox SHA
 $RUNNER_TEMP/plan2001-reports/  reports/artifacts
 ```
 
 **No Git submodule or copy of the kernel sources is committed into userland.** The kernel remains its own canonical repo. The kernel checkout is logically read-only; Git does not enforce OS file permissions, but the audit and build scripts do not write to it. The BusyBox checkout may contain build output; discard/recreate it between runs.
 
-## Single source lock
+## Source policy: live kernel main, immutable BusyBox
 
-[`config/sources.json`](../config/sources.json) is the **only authority for external repository URLs and exact 40-character commit SHAs**. The source fetcher verifies that the actual checked-out HEAD matches each pin. Dependencies are not silently updated by a moving `main`, `master` or tag.
+[`config/sources.json`](../config/sources.json) is the source policy:
+`kernel.repository=plan2001-kernel/kernel` with `kernel.ref=main`, and
+`busybox.repository=mirror/busybox` with one immutable 40-digit commit
+(BusyBox **1.36.1**, upstream tag `1_36_1`).
 
-The first reproducibility baseline uses:
+Every job fetches the **current kernel `main` at source-fetch time**,
+resolves it to its precise 40-character commit, then checks out the commit
+detached. The SHA is written to the uploaded `reports/sources.json`
+alongside the fixed BusyBox SHA, so the run is auditable and repeatable
+*by manually checking out that recorded kernel SHA*. The next job fetches
+`main` afresh. No stale kernel revision lock is maintained.
 
-- `plan2001-kernel/kernel`, pinned to the commit in the lockfile.
-- `mirror/busybox`, pinned to the commit in the lockfile (upstream BusyBox **1.36.1**, release tag `1_36_1`).
-
-The mirror is a fetch location; the software remains upstream BusyBox, GPLv2 licensed. A change to either pin must be reviewed as a userland PR with a corresponding compatibility check. A kernel SHA update does not imply a BusyBox API change, nor vice versa.
+BusyBox stays pinned; changing its commit requires review and a license and
+compatibility check. The mirror is only a fetch location; original BusyBox
+is GPLv2. A floating kernel intentionally sacrifices identical CI inputs
+across different run dates in exchange for always testing current kernel
+development. It does not silently modify the user's working kernel tree.
 
 ## Local Debian execution
 
@@ -54,6 +63,7 @@ export PLAN2001_DEPS="$HOME/Src/Plan2001/deps"
 export PLAN2001_REPORTS="$HOME/Src/Plan2001/reports"
 
 # Fresh destination required; the scripts never overwrite a checkout.
+# Kernel is fetched from live main at this moment, BusyBox stays at its SHA.
 python3 tools/ci/fetch_sources.py \
   --lock config/sources.json \
   --dest "$PLAN2001_DEPS" \
@@ -70,7 +80,7 @@ python3 tools/ci/host_control.py \
 
 For a fresh second run, remove/recreate **only the throwaway `deps` and `reports` paths you deliberately created**, never your kernel development checkout, O volume or userland working tree. The fetcher intentionally refuses to overwrite an existing checkout.
 
-The source trees will look like sibling `kernel` and `busybox` dependencies relative to the `userland` checkout, but there is no assumption that they live inside the userland repo. On a development host with an existing kernel checkout, use its **exact pinned revision** when doing manual research; the automated fetcher keeps a clean, isolated copy.
+The source trees will look like sibling `kernel` and `busybox` dependencies relative to the `userland` checkout, but there is no assumption that they live inside the userland repo. On a development host, inspect the **exact kernel SHA recorded in the run's `sources.json`** when reproducing a specific CI result. A fresh automated run uses the latest `main`, never the host's existing kernel checkout.
 
 ## GitHub Actions
 
@@ -82,7 +92,7 @@ Steps:
 
 1. Check out the `userland` commit under test.
 2. Install host build tools.
-3. Fetch kernel and BusyBox by immutable source pins into separate sibling directories; compare both HEAD values.
+3. Fetch the latest kernel `main` and immutable BusyBox SHA into separate sibling directories; detach both commits and record them in `sources.json`.
 4. Audit `runtime/abi` and `runtime/libc`. Compile one native ObjectSpace ABI header as a **host syntax test**, and inventory the runtime source files.
 5. Configure BusyBox via `make allnoconfig`, enable exactly `CONFIG_STATIC`, `CONFIG_TRUE`, `CONFIG_FALSE` and `CONFIG_ECHO`, build with **Linux host libc**, check ELF dynamic dependencies, run `true`, `false`, `echo`.
 6. Upload logs, config, ELF inspection and source inventory as a 14-day diagnostic artifact. Summarize what was and was not run.

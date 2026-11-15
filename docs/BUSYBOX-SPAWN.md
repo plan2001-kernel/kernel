@@ -8,7 +8,7 @@ API to run the normal three-applet BusyBox ELF in a separate process, then
 waits on the returned Process Handle with **plan9.process_wait()**. No
 BusyBox-specific kernel changes or special BusyBox test launcher are used.
 
-Both pinned commits are read from [sources.json](../config/sources.json).
+The latest kernel `main` is fetched for each run and its SHA recorded; BusyBox stays commit-pinned by [sources.json](../config/sources.json).
 The host fixture uses the kernel's normal mpy-cross, oseed.py and format-o
 tools to create a **fresh disposable, regular-file** GE/O volume.
 

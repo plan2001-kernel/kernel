@@ -53,3 +53,13 @@ Console input/output must respect the native session/device authority model.
 Persistent ObjectSpace graph snapshots exist experimentally in the kernel. Root selection, complete lifetime/GC policy and hardware validation remain separate work. The early Unix view can use an explicitly supplied root capability. No compatibility-layer test may silently reformat GE/O storage.
 
 Native ABI and implementation details must always be checked in the current [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md) and source before coding.
+
+## First Unix init and F5 shell handoff
+
+The stage-3 AMD64 boot-manifest F5 ELF enters the userland `p2001_unix_init`
+function after validating native stdin/stdout/stderr region grants. Init
+constructs a fresh, process-local volatile PVD with cwd `/`, and passes it
+to a statically linked small shell builtin entry. The console prompt reflects
+the current projected path. There is no Unix init-process ancestry or
+separate shell process yet; no arbitrary ObjectSpace root or GE/O authority
+is created by this memory-only directory tree. See [UNIX-INIT](UNIX-INIT.md).
