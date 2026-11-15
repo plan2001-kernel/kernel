@@ -556,15 +556,10 @@ o_user_bootstrap(void)
 	up = nil;
 	if(eve == nil)
 		kstrdup(&eve, "");
-#ifdef PLAN2001_ALARM_NOTETEST
-	/*
-	 * Test-only: start the existing alarm kernel service so a real "alarm"
-	 * note can be delivered to the test process.  The normal build does not
-	 * define this macro; alarm.c and the ALARM syscall are unchanged, and
-	 * the published kernel keeps its previous alarm behavior.
-	 */
+	/* ALARM is a live native syscall. Its existing timer service must run
+	 * in ordinary boots as well as note tests; otherwise an armed alarm can
+	 * never publish its note to a CPU-bound user process. */
 	kproc("alarm", alarmkproc, nil);
-#endif
 	if(bootkernelonly){
 		kproc("*kernelready*", kernelreadyproc, nil);
 		return;
