@@ -226,6 +226,8 @@ denied:
  * An incomplete or excessive grant list fails closed, without falling back
  * to ObjOpenConsole or another inherited region.
  */
+static int inherited_executable_volume;
+int p9_full_executable_volume(void) { return inherited_executable_volume; }
 int p9_full_bind_inherited_uxpipe(void)
 {
     VobjListRec records[16];
@@ -235,6 +237,8 @@ int p9_full_bind_inherited_uxpipe(void)
     };
     int handles[6];
     unsigned streams = 0, executable_volumes = 0, i;
+    int executable = 0;
+    inherited_executable_volume = 0;
     long n;
     memset(&req, 0, sizeof req);
     req.version = SYSCTL_ABI_VERSION;
@@ -258,12 +262,15 @@ int p9_full_bind_inherited_uxpipe(void)
         } else if(r->kind == VkindGeVolume &&
                   (r->rights == Vexecute || r->rights == (Vexecute|Vdelegate))) {
             if(++executable_volumes != 1) goto denied;
+            executable = (int)r->handle;
         } else {
             goto denied;
         }
     }
     if(streams != 6 || executable_volumes != 1) goto denied;
-    return p9_full_bind_uxpipe(handles);
+    if(p9_full_bind_uxpipe(handles)<0) return -1;
+    inherited_executable_volume=executable;
+    return 0;
 denied:
     errno = EACCES;
     return -1;
@@ -635,6 +642,8 @@ int p9_backend_stream(int fd,int handles[2],int *role)
 
 int p9_raw_open(const char *path, int flags, ...)
 {
+    if(p9_process_executable(path,NULL)) { errno=EACCES; return -1; }
+
     unsigned rights = 0;
     int acc, result;
     if(!files_bound) { errno = ENOSYS; return -1; }
@@ -655,6 +664,8 @@ int p9_raw_open(const char *path, int flags, ...)
 }
 int p9_raw_unlink(const char *path)
 {
+    if(p9_process_executable(path,NULL)) { errno=EACCES; return -1; }
+
     int result;
     if(!files_bound) { errno = ENOSYS; return -1; }
     if(!path) { errno = EFAULT; return -1; }
@@ -671,6 +682,16 @@ int p9_raw_stat(const char *path, struct stat *st)
     int result;
     if(!files_bound) { errno = ENOSYS; return -1; }
     if(!path || !st) { errno = EFAULT; return -1; }
+    {
+        uint64_t oid;
+        if(p9_process_executable(path,&oid)) {
+            memset(st,0,sizeof *st);
+            st->st_mode=S_IFREG | 0111; /* immutable execute-only virtual entry */
+            st->st_ino=(ino_t)oid;
+            st->st_nlink=1;
+            return 0;
+        }
+    }
     result=uxfs_info(&file_table.service->fs,path,&kind,&length);
     if(result) return fail_fs(result);
     memset(st,0,sizeof *st);
@@ -725,6 +746,8 @@ char *p9_raw_getcwd(char *buf, size_t size)
 
 int p9_raw_mkdir(const char *path, mode_t mode)
 {
+    if(p9_process_executable(path,NULL)) { errno=EACCES; return -1; }
+
     UxService *s=file_service();
     int result;
     (void)mode; /* v1 PVD records no Unix mode: no capability is minted. */
@@ -738,6 +761,10 @@ int p9_raw_mkdir(const char *path, mode_t mode)
 
 int p9_raw_rename(const char *src, const char *dst)
 {
+    if(p9_process_executable(src,NULL) || p9_process_executable(dst,NULL)) {
+        errno=EACCES; return -1;
+    }
+
     UxService *s=file_service();
     int result;
     if(!s) { errno=ENOSYS; return -1; }
@@ -757,6 +784,10 @@ int p9_raw_access(const char *path, int mode)
     if(!s) { errno=ENOSYS; return -1; }
     if(!path) { errno=EFAULT; return -1; }
     if(mode & ~(F_OK|R_OK|W_OK|X_OK)) { errno=EINVAL; return -1; }
+    if(p9_process_executable(path,NULL)) {
+        if(mode & (R_OK|W_OK)) { errno=EACCES; return -1; }
+        return 0;
+    }
     /* Existence is queryable with the service's explicit authority.
      * Unix rwx bits cannot authorize ObjectSpace operations, so deny
      * nontrivial synthetic permission queries instead of returning 0. */

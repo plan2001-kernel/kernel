@@ -536,6 +536,33 @@ int p9_process_bind_executable(const char *path,int volume,uint64_t oid)
     errno=ENOSPC; return -1;
 }
 
+/* Resolve virtual applet names only to a registered native executable.
+ * No suffix/prefix wildcard, new OID opening or native authority is involved.
+ * The compiled table is immutable and reproduced in every exec image.
+ */
+int p9_process_executable(const char *path,uint64_t *oid)
+{
+    char normalized[PVD_PATH_MAX];
+    const char *target=path;
+    UxService *service=p9_full_file_service();
+    unsigned i;
+    if(!path) return 0;
+    if(service) {
+        if(uxfs_path(&service->fs,path,normalized)) return 0;
+        target=normalized;
+    }
+    if(p9_multicall_resolve) {
+        const char *alias=p9_multicall_resolve(target);
+        if(alias) target=alias;
+    }
+    for(i=0;i<P9_EXECUTABLES;++i)
+        if(executables[i].volume>0 && !strcmp(target,executables[i].path)) {
+            if(oid) *oid=executables[i].oid;
+            return (int)i+1;
+        }
+    return 0;
+}
+
 void p9_process_exit(int code)
 {
     static const char hex[]="0123456789abcdef";
@@ -567,8 +594,7 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     int selected=-1,saved;
     if(!path || !argv || !argv[0]) { errno=EFAULT; return -1; }
     if(initialize()<0) return -1;
-    for(i=0;i<P9_EXECUTABLES;++i)
-        if(executables[i].volume>0 && !strcmp(path,executables[i].path)) selected=(int)i;
+    selected=p9_process_executable(path,NULL)-1;
     if(selected<0) { errno=ENOENT; return -1; }
     while(argv[argc]) if(++argc>64) { errno=E2BIG; return -1; }
     memset(&image,0,sizeof image);

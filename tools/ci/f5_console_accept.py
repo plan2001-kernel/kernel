@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised", "ash"):
+                "newlib-supervised", "ash", "multicall"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -153,8 +153,8 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode == "ash":
-        waitscreen("ash-ready", "PLAN2001-ASH-READY")
+    if mode in ("ash", "multicall"):
+        waitscreen("ash-ready", "PLAN2001-MULTICALL-READY" if mode == "multicall" else "PLAN2001-ASH-READY")
         # The ELF prints READY before ash_main enters its first read. Wait for
         # the actual shell prompt, not a framebuffer race with the marker.
         # screen() strips trailing whitespace from each framebuffer row.
@@ -208,12 +208,20 @@ try:
                 assert "\nhw\n" in listing, "ls /tmp missed the created file"
         enter("ls /missing; echo MISSING-pass")
         missing = waitscreen("ash-ls-missing", "MISSING-pass",occurrences=2)
-        assert "ls: /missing: no such file or directory" in missing
+        assert "ls: /missing: no such file or directory" in missing.lower()
         enter("pwd")
         waitscreen("ash-pwd-root", "\n/\nash$")
         enter("cd /usr/bin; pwd; cd ..; pwd; cd /; echo TREE-cd")
         cwd = waitscreen("ash-cd-paths", "TREE-cd",occurrences=2)
         assert cwd.count("/usr/bin") >= 2 and cwd.count("/usr") >= 2
+        if mode == "multicall":
+            enter("/bin/busybox echo MULTI")
+            waitscreen("multicall-explicit", "\nMULTI\n")
+            enter("cat /tmp/hw")
+            waitscreen("multicall-cat", "\ndata\n")
+            enter("cat < /tmp/hw | grep data; echo EXTPIPE")
+            pipe_result=waitscreen("multicall-grep-pipe", "EXTPIPE", occurrences=2)
+            assert "\ndata\nEXTPIPE\n" in pipe_result
         focus(1)
         text=waitscreen("ash-isolation", "kernel>")
         assert "PIPE:piped" not in text

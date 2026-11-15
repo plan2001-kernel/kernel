@@ -29,4 +29,7 @@ gid_t getegid(void){errno=ENOSYS;return (gid_t)-1;}
 int getgroups(int n,gid_t *p){(void)n;(void)p;errno=ENOSYS;return -1;}
 struct passwd *getpwnam(const char *s){(void)s;errno=ENOSYS;return NULL;}
 mode_t umask(mode_t mask){(void)mask;errno=ENOSYS;return (mode_t)-1;}
+#ifndef PLAN2001_MULTICALL
 unsigned string_array_len(char **p){unsigned n=0;while(p[n])++n;return n;}
+
+#endif

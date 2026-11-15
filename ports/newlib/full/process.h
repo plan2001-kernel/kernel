@@ -50,6 +50,11 @@ void p9_file_refresh(void);
 void p9_file_detach(void);
 int p9_process_startup(void);
 int p9_process_bind_executable(const char *,int,uint64_t);
+/* Generated immutable executable projection; names only select an existing
+ * delegated registration. These hooks are absent from legacy profiles. */
+extern const char *p9_multicall_resolve(const char *) __attribute__((weak));
+extern const char *p9_multicall_path(unsigned) __attribute__((weak));
+int p9_process_executable(const char *,uint64_t *);
 void p9_signal_checkpoint(void);
 void p9_process_exit(int);
 void p9_process_signal_exit(int);

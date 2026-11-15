@@ -8,12 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../full/plan2001_full.h"
+#include "../full/process.h"
 
 struct p2001_dir {
-    unsigned used, next;
+    unsigned used, next, capacity;
     UxService *service;
     char base[PVD_PATH_MAX];
-    struct dirent entries[UXFS_NODES+2];
+    struct dirent *entries;
 };
 
 static int dir_error(int code)
@@ -33,7 +34,7 @@ static int add_entry(struct p2001_dir *d,const char *name,unsigned int n,
     struct dirent *e;
     unsigned int i;
     if(!n || n>=sizeof(d->entries[0].d_name) ||
-       d->used>=UXFS_NODES+2) return -1;
+       d->used>=d->capacity) return -1;
     e=&d->entries[d->used];
     memset(e,0,sizeof *e);
     for(i=0;i<n;++i) e->d_name[i]=name[i];
@@ -77,12 +78,35 @@ DIR *opendir(const char *path)
     d=(struct p2001_dir *)malloc(sizeof(*d));
     if(!d) { errno=ENOMEM; return NULL; }
     memset(d,0,sizeof(*d));
+    d->capacity=UXFS_NODES+2;
+    if(p9_multicall_path) {
+        unsigned i;
+        for(i=0;p9_multicall_path(i);++i) {
+            if(i>=512) { free(d); errno=EOVERFLOW; return NULL; }
+            ++d->capacity;
+        }
+    }
+    d->entries=calloc(d->capacity,sizeof(*d->entries));
+    if(!d->entries) { free(d); errno=ENOMEM; return NULL; }
     d->service=service;
     rc=uxfs_path(&service->fs,path,d->base);
     if(!rc && add_entry(d,".",1,UXFS_DIR)==0 &&
        add_entry(d,"..",2,UXFS_DIR)==0)
         rc=uxfs_list(&service->fs,path,emit_child,d);
-    if(rc) { free(d); (void)dir_error(rc); return NULL; }
+    if(!rc && p9_multicall_path) {
+        unsigned i;
+        const char *entry;
+        for(i=0;(entry=p9_multicall_path(i))!=NULL;++i) {
+            const char *name=strrchr(entry,'/');
+            size_t parent=(size_t)(name-entry);
+            uint64_t oid;
+            if(strlen(d->base)!=parent || strncmp(entry,d->base,parent) ||
+               !p9_process_executable(entry,&oid)) continue;
+            if(add_entry(d,name+1,(unsigned)strlen(name+1),UXFS_FILE)) { rc=PVD_ENOSPC; break; }
+            d->entries[d->used-1].d_ino=(ino_t)oid;
+        }
+    }
+    if(rc) { free(d->entries); free(d); (void)dir_error(rc); return NULL; }
     return d;
 }
 struct dirent *readdir(DIR *dir)
@@ -94,6 +118,7 @@ struct dirent *readdir(DIR *dir)
 int closedir(DIR *dir)
 {
     if(!dir) { errno=EBADF; return -1; }
+    free(dir->entries);
     free(dir);
     return 0;
 }
