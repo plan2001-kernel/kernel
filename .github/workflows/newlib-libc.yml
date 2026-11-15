@@ -2,7 +2,7 @@ name: Newlib real libc and native Plan2001 runtime
 
 on:
   push:
-    branches: [experiment/newlib-ci, feature/unix-newlib-geo-integration]
+    branches: [main, feature/ash-hardware-boot]
     paths:
       - '.github/workflows/newlib-libc.yml'
       - 'ports/newlib/**'
@@ -10,8 +10,6 @@ on:
       - 'tools/ci/test_newlib_fd.sh'
       - 'tools/ci/build_newlib_libc.sh'
       - 'tools/ci/newlib_full_*.py'
-      - 'tools/ci/seed_busybox_spawn.py'
-      - 'tools/ci/guest_libgloss_exit.sh'
       - 'tools/ci/seed_busybox_spawn.py'
       - 'tools/ci/guest_libgloss_exit.sh'
       - 'tools/ci/newlib_full_*.sh'
