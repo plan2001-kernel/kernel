@@ -154,8 +154,10 @@ try:
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
     if mode == "ash":
-        ready = waitscreen("ash-ready", "PLAN2001-ASH-READY")
-        assert "ash$ " in ready
+        waitscreen("ash-ready", "PLAN2001-ASH-READY")
+        # The ELF prints READY before ash_main enters its first read. Wait for
+        # the actual shell prompt, not a framebuffer race with the marker.
+        waitscreen("ash-prompt", "ash$ ", 45)
         enter("echo visible")
         typed = waitscreen("ash-input-echo", "visible")
         assert "echo visible" in typed, "typed command was not echoed"
