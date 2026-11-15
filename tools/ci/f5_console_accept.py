@@ -84,13 +84,12 @@ def focus(number):
 
 
 def type_text(line):
-    # The kernel's active PS/2 map is Finnish PC QWERTY. QEMU key names
-    # identify physical key positions, so punctuation must use Finnish
-    # positions and modifiers rather than US character names.
-    specials = {" ": "spc", "/": "shift-7", ".": "dot", "-": "slash",
-                ">": "shift-less", "<":"less", "|": "alt_r-less", "$":"alt_r-4",
-                "(":"shift-8", ")":"shift-9", ":":"shift-dot",
-                ";":"shift-comma", "+":"minus"}
+    # The fixture pins keymap=us (and older manifest consoles decode US
+    # scancodes). HMP sendkey uses PHYSICAL keys, not typed characters.
+    specials = {" ": "spc", "/": "slash", ".": "dot", "-": "minus",
+                ">": "shift-dot", "<": "shift-comma", "|": "shift-backslash",
+                "$": "shift-4", "(": "shift-9", ")": "shift-0",
+                ":": "shift-semicolon", ";": "semicolon", "+": "shift-equal"}
     for letter in line:
         key("shift-"+letter.lower() if letter.isupper() else specials.get(letter, letter))
 
