@@ -88,6 +88,8 @@ def typecode(code):
             key = "shift-dot" if os.getenv("CONSOLE_KEYMAP") == "fi" else "shift-semicolon"
         elif ch == "+":
             key = "minus" if os.getenv("CONSOLE_KEYMAP") == "fi" else "shift-equal"
+        elif ch in "<>" and os.getenv("CONSOLE_KEYMAP") != "fi":
+            key = "shift-comma" if ch == "<" else "shift-dot"
         elif ch in "abcdefghijklmnopqrstuvwxyz0123456789":
             key = ch
         else:
@@ -153,6 +155,12 @@ try:
     typecode("print(111)\n")
     a = waitscreen("A-111", "111")
     assert a.count("111") >= 2, "A did not echo AND evaluate 111"
+    if os.getenv("CONSOLE_KEYMAP") != "fi":
+        # US physical shift-comma/dot must not fall through the Finnish map.
+        typecode("print(1<2)\n")
+        assert waitscreen("us-less-than", "True").count("True") >= 1
+        typecode("print(2>1)\n")
+        assert waitscreen("us-greater-than", "True").count("True") >= 2
 
     focus(3)
     b = waitscreen("B-prompt", ">>>")
