@@ -5,8 +5,8 @@ object values, independent of the GE/O B-tree keys. The **target state** is
 that all newly published persistent values use this structure; metadata
 may be empty or opaque, but the footer is always present. It does **not**
 reinterpret GE/O OIDs as file types or add a kernel pathname namespace.
-**Implementation status:** native ELF and MPY producers/loaders and UXFS v3
-now use this framing. ELF/MPY loaders and UXFS v3 require a valid footer and
+**Implementation status:** native ELF and MPY producers/loaders and UXFS v4
+now use this framing. ELF/MPY loaders and UXFS v4 require a valid footer and
 explicitly reject unframed legacy executable/manifest input. Generic GE/O
 storage remains opaque: existing graph snapshots, Environment records and
 other producer formats are not silently converted. This is activation of
@@ -99,7 +99,7 @@ by the local Unix projection** from volume mapping, OID identity, current
 bindings, and allocation. A producer may record their source observations,
 but importing those values must not silently create object links or access
 rights. Unix metadata is not the GE/O OwnerID and not a substitute for
-capability authorization. The UXFS v3 manifest retains the namespace projection and directory
+capability authorization. The UXFS v4 manifest retains the namespace projection and directory
 attributes; each regular-file OID carries its raw bytes and metadata together.
 
 ## Views, operations and rollout

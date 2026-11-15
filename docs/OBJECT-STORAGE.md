@@ -36,9 +36,9 @@ all newly published persistent object values to begin with raw bytes at
 offset zero, optionally followed by opaque metadata and always ending in a
 fixed 32-byte footer that locates the metadata. Metadata contents and key
 names are recommendations, not storage ABI. This is a payload-level contract,
-not a GE/O B-tree key type or automatic migration. It is active for native ELF/MPY provisioning/loading and UXFS v3. Generic
+not a GE/O B-tree key type or automatic migration. It is active for native ELF/MPY provisioning/loading and UXFS v4. Generic
 GE/O values, ObjectSpace images and Environment records remain opaque and
-are not implicitly migrated. Executable loaders and UXFS v3 reject legacy
+are not implicitly migrated. Executable loaders and UXFS v4 reject legacy
 unframed executable/manifest input; use explicitly provisioned new images.
 
 ## Volume-global allocator and transactions
