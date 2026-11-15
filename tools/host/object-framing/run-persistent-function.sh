@@ -16,4 +16,4 @@ tr -d '\r' < "$QOB_OUT/serial-boot.log" | grep -Fx 'FRAMED-FUN-SAVED' >/dev/null
   qob_die 'function value was not verified before shutdown'
 tr -d '\r' < "$QOB_OUT/serial-reboot.log" | grep -Fx 'FRAMED-FUN-RESTORED' >/dev/null ||
   qob_die 'restored function value was not verified'
-qob_say 'PASS: framed REPL function code restored across two QEMU cold boots'  
+qob_say 'PASS: framed REPL function code restored across two QEMU cold boots'
