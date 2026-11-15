@@ -26,17 +26,19 @@ python3 "$KERNEL/tools/host/oseed.py" \
   --source "$KERNEL/tools/host/odemo.py" --seed "$OUT/seed" \
   --mp-exec "$BUILD/guest-probe.elf" --mpy-cross "$QOB_MPYCROSS" \
   > "$OUT/seed.log" 2>&1
-cp "$BUILD/busybox.elf" "$OUT/seed/rawexec"
+python3 "$KERNEL/tools/host/object_format.py" pack "$BUILD/busybox.elf" "$OUT/seed/rawexec" --media-type application/x-elf
 printf '4f45584543000005' > "$OUT/seed/rawexecoid"
 "$QOB_FORMAT" --seed "$OUT/seed" --size 129 "$OUT/o.img" > "$OUT/format.log" 2>&1
 python3 "$KERNEL/tools/oinspect.py" "$OUT/o.img" > "$OUT/oinspect.json"
-python3 - "$BUILD" "$OUT/oinspect.json" <<'PY'
+python3 - "$BUILD" "$OUT/oinspect.json" "$KERNEL/tools/host" <<'PY'
 import hashlib, json, pathlib, sys
+sys.path.insert(0,sys.argv[3])
+from object_format import frame_file
 build = pathlib.Path(sys.argv[1])
 objects = json.loads(pathlib.Path(sys.argv[2]).read_text())['objects']
 for oid, name in [('4f45584543000003', 'guest-probe.elf'),
                   ('4f45584543000005', 'busybox.elf')]:
-    data = (build / name).read_bytes()
+    data = frame_file(build / name,"application/x-elf")
     assert objects[oid]['bytes'] == len(data)
     assert objects[oid]['sha256'] == hashlib.sha256(data).hexdigest()
 print('PASS: exact native driver and BusyBox bytes in fresh GE/O image')

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Offline corruption and layout regression for native C UxManifest."""
+import os
+import sys
 import struct
 import tempfile
 import unittest
@@ -9,10 +11,16 @@ from seed_unix_manifest import (MANIFEST_OID, MANIFEST_BYTES, BOOT_DIRS,
 
 
 class ManifestTest(unittest.TestCase):
+    def setUp(self):
+        self.kernel=Path(os.environ['PLAN2001_KERNEL'])
+        sys.path.insert(0,str(self.kernel/'tools/host'))
+
     def test_checked_layout(self):
-        data = initial_manifest()
+        from object_format import unpack
+        data,metadata=unpack(initial_manifest(self.kernel))
+        self.assertTrue(metadata)
         self.assertEqual(len(data), MANIFEST_BYTES)
-        self.assertEqual(struct.unpack_from("<QII", data), (0x3153465855323030, 1, 0))
+        self.assertEqual(struct.unpack_from("<QII", data), (0x3153465855323030, 3, 0))
         self.assertEqual(struct.unpack_from("<Q", data, len(data)-8)[0],
                          fnv1a(data[:-8]))
         for slot, directory in enumerate(BOOT_DIRS):
@@ -28,11 +36,11 @@ class ManifestTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / "env").write_bytes(b"test")
-            provision(path)
-            self.assertEqual((path / "bad").read_bytes(), initial_manifest())
+            provision(path,self.kernel)
+            self.assertEqual((path / "bad").read_bytes(), initial_manifest(self.kernel))
             self.assertEqual((path / "badoid").read_text(), f"{MANIFEST_OID:016x}")
             with self.assertRaises(ValueError):
-                provision(path)
+                provision(path,self.kernel)
 
 
 if __name__ == "__main__":

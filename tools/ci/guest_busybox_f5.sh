@@ -65,6 +65,7 @@ owner=unixSupervisorF5
 args=0x4f45584543000006${UX_GEO_PERSIST:+ 0x4f45584543000007}
 required=true
 EOF
+if [ "${UX_AHCI_DEBUG:-0}" = 1 ]; then printf '*ahcidebug=1\n' >> "$OUT/plan9.ini"; fi
 qob_make_esp "$OUT/plan9.ini" "$OUT/esp.img"
 mcopy -i "$OUT/esp.img" "$OUT/processes.conf" ::/processes.conf
 qob_make_disk "$IMAGE" "$OUT/disk.img" "$OUT/esp.img" "$puuid" "$OUT/disk.layout"

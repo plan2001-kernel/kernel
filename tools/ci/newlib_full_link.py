@@ -86,6 +86,8 @@ def main():
         "pipe": ROOT / "ports/unix/uxpipe.c",
         "pvd": ROOT / "ports/unix/pvd.c",
         "uxfs": ROOT / "ports/unix/uxfs.c",
+        "uxobject": ROOT / "ports/unix/uxobject.c",
+        "objtail": args.kernel / "runtime/objtail.c",
         "uxshell": ROOT / "ports/unix/uxshell.c",
         "uxservice": ROOT / "ports/unix/uxservice.c",
         "uxfd": ROOT / "ports/unix/uxfd.c",
@@ -112,13 +114,14 @@ def main():
         "-I", str(ROOT / "ports/newlib/ash/include"),
         "-I", str(PORT), "-I", str(args.kernel / "runtime/abi"),
         "-I", str(args.kernel / "include/amd64"),
+        "-I", str(args.kernel / "runtime"),
         "-isystem", str(include), "-isystem", gcc_includes,
     ]
     try:
         objects = {}
         for key, source in sources.items():
             path = build / (key + ".o")
-            flags = (["-DPLAN2001_UXPIPE_NEWLIB=1"] if key == "pipe" else [])
+            flags = (["-DPLAN2001_UXPIPE_NEWLIB=1"] if key == "pipe" else ["-DOBJTAIL_NATIVE_TYPES"] if key=="objtail" else [])
             run(cflags + flags + ["-c", str(source), "-o", str(path)], log)
             objects[key] = path
         # Native SLEEP and ALARM are millisecond Plan9 syscalls, not POSIX
@@ -142,7 +145,7 @@ def main():
                 str(startup), str(objects["startup"]), str(objects[program]),
                 str(objects["syscalls"]), str(objects["process"]), str(objects["inherit"]), str(objects["file_state"]), str(objects["fd_table"]), str(objects["posix"]), str(objects["stdio_process"]), str(objects["dirent"]),
                 str(objects["ash_posix"]), str(objects["pipe"]),
-                *(str(objects[key]) for key in ("pvd", "uxfs", "uxshell", "uxservice", "uxfd")),
+                *(str(objects[key]) for key in ("pvd", "uxfs", "uxobject", "objtail", "uxshell", "uxservice", "uxfd")),
                 str(native_stubs),
                 "-Wl,--start-group", str(libc), str(libm),
                 "-lgcc", "-Wl,--end-group",

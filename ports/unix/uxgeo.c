@@ -53,3 +53,6 @@ int uxgeo_bind(UxGeo *geo, int volume, UxStore *store)
     store->commit = commit_files;
     return 0;
 }
+
+extern long long _nsec(void);
+unsigned long long uxfs_clock_ns(void){return (unsigned long long)_nsec();}

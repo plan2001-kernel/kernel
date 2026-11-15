@@ -225,7 +225,7 @@ def main():
              runtime / 'startup.o', main_obj, aliases_obj,
              *[runtime / (x + '.o') for x in
                ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
-                'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxshell', 'uxservice',
+                'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxobject', 'objtail', 'uxshell', 'uxservice',
                 'uxfd', 'rt_stubs-newlib')],
              '-Wl,--start-group', archive, newlib / 'libc.a', newlib / 'libm.a',
              '-lgcc', '-Wl,--end-group'])
@@ -251,7 +251,7 @@ def main():
                 runtime / 'startup.o', probe, aliases_obj,
                 *[runtime / (x + '.o') for x in
                   ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
-                   'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxshell', 'uxservice',
+                   'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxobject', 'objtail', 'uxshell', 'uxservice',
                    'uxfd', 'rt_stubs-newlib')],
                 '-Wl,--start-group', newlib / 'libc.a', newlib / 'libm.a',
                 '-lgcc', '-Wl,--end-group']

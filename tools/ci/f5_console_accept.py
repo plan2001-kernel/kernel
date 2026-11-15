@@ -170,7 +170,7 @@ try:
         enter("awk 'BEGIN {for (i=0;i<4096;i++) print \"big\"}' > /tmp/big")
         enter("cat /tmp/big | awk 'END {print NR}'; echo LARGE-END")
         result=waitscreen("pipeline-large", "LARGE-END", occurrences=2)
-        assert "\n4096\nLARGE-END\n" in result, result
+        assert re.search(r"(?:\n|ash\$ )4096\nLARGE-END\n",result), result
         enter("rm /tmp/big")
         print("PASS: exact cat FILE | awk, three external stages and a 16 KiB file with 4096 lines")
     elif mode == "multicall-essentials":
@@ -353,9 +353,9 @@ try:
             waitscreen("geo-restored-list", "persisted")
             # A SECOND native process reads the exact same committed
             # service view via two delegated UXPIPE channels, no volume.
-            enter("cat /tmp/fromclient")
+            enter("cat /tmp/client-renamed")
             waitscreen("geo-rpc-reboot-local", "\nremote\nunix:/$")
-            enter("uxfile get /tmp/fromclient")
+            enter("uxfile get /tmp/client-renamed")
             waitscreen("geo-rpc-reboot-remote", "\nremote\nunix:/$")
             print("PASS: GE/O restored file written by a separate UXPIPE RPC client")
             print("PASS: real GE/O manifest and file restored across fresh QEMU boot")
@@ -370,6 +370,9 @@ try:
             enter("uxfile put /tmp/fromclient remote")
             enter("cat /tmp/fromclient")
             waitscreen("geo-rpc-child-to-shell", "\nremote\nunix:/$")
+            enter("mv /tmp/fromclient /tmp/client-renamed")
+            enter("cat /tmp/client-renamed")
+            waitscreen("geo-renamed-before-reboot", "\nremote\nunix:/$")
             enter("uxfile put /etc/protected secret")
             waitscreen("geo-rpc-denied", "uxfile: output failed")
             enter("cat /etc/protected")

@@ -4,7 +4,7 @@
 #include "uxfs.h"
 
 #define MOCK_OBJECTS 40
-#define MOCK_BYTES (1024*1024)
+#define MOCK_BYTES (2*1024*1024)
 typedef struct {
     UxOid oid;
     unsigned int n;
@@ -144,18 +144,6 @@ int main(void)
     assert(uxfs_list(&fs,".",emit,0)==0);
     assert(strcmp(listing,"c\n")==0);
     assert(uxfs_restore(&fs,&store,500000) == PVD_EIO);
-    /* Build a genuine v1 metadata payload using its original 64 records. */
-    {
-        struct Legacy { UxOid magic; unsigned version,reserved; UxNode nodes[64]; UxOid sum; } old={0};
-        old.magic=UXFS_MAGIC;old.version=1;
-        memcpy(old.nodes,disk.committed[1].data+16,sizeof old.nodes);
-        const unsigned char *raw=(const unsigned char *)&old;
-        old.sum=14695981039346656037ULL;
-        for(unsigned i=0;i<sizeof(old)-sizeof(old.sum);i++){old.sum^=raw[i];old.sum*=1099511628211ULL;}
-        memcpy(disk.committed[1].data,&old,sizeof old);disk.committed[1].n=sizeof old;
-        assert(uxfs_restore(&fs,&store,101)==0);
-        assert(uxfs_read(&fs,"/home/notes/c",bytes,sizeof bytes,&n)==0 && n==9);
-    }
     disk.committed[1].data[16] ^= 0x80; /* corrupt manifest */
     assert(uxfs_restore(&fs,&store,101) == PVD_EIO);
     /* Persist an expanded inventory and a file larger than the old 1 KiB. */
@@ -167,7 +155,16 @@ int main(void)
     assert(pvd_bootstrap(&view)==0);uxfs_init(&fs,&view);
     assert(uxfs_restore(&fs,&store,101)==0);
     assert(pvd_chdir(&view,"/tmp/persist127")==0);
-    assert(uxfs_read(&fs,"/tmp/persist-data",bytes,sizeof bytes,&n)==0 && n==128*1024);
+    UxMeta before,after;
+    assert(uxfs_metadata(&fs,"/tmp/persist-data",&before)==0);
+    assert(!strcmp(before.name,"persist-data"));
+    assert(uxfs_move(&fs,"/tmp/persist-data","/tmp/renamed-data")==0);
+    assert(uxfs_save(&fs,&store,101)==0);
+    assert(uxfs_restore(&fs,&store,101)==0);
+    assert(uxfs_metadata(&fs,"/tmp/renamed-data",&after)==0 && !strcmp(after.name,before.name));
+    assert(after.birth_ns==before.birth_ns && after.mode==before.mode);
+
+    assert(uxfs_read(&fs,"/tmp/renamed-data",bytes,sizeof bytes,&n)==0 && n==128*1024);
     for(unsigned i=0;i<n;i++)assert(bytes[i]=='p');
     /* Directory deletion updates both inventories and reclaims PVD capacity.
      * Keep IDs of live siblings stable while holes are reused. */

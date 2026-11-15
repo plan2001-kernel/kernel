@@ -8,9 +8,11 @@ BUSYBOX=$(realpath "$2")
 NEWLIB=$(realpath "$3")
 REPORTS=$(realpath "$4")
 OUT=$(realpath "$5")
-python3 - "$REPORTS" "$OUT" <<'PY'
+python3 - "$REPORTS" "$OUT" "$KERNEL/tools/host" <<'PY'
 import hashlib, json, pathlib, sys
-reports, out = map(pathlib.Path, sys.argv[1:])
+reports, out = map(pathlib.Path, sys.argv[1:3])
+sys.path.insert(0,sys.argv[3])
+from object_format import frame_file
 build = reports / 'busybox-multicall'
 result = json.loads((out / 'native/qemu-busybox-multicall/result.json').read_text())
 assert result['guest_execution'] == 'PASS'
@@ -22,7 +24,7 @@ digest = hashlib.sha256((build / 'busybox.elf').read_bytes()).hexdigest()
 assert result['artifact']['sha256'] == digest
 assert result['config_sha256'] == hashlib.sha256((build / 'busybox.config').read_bytes()).hexdigest()
 seed = json.loads((out / 'busybox-spawn-oinspect.json').read_text())
-assert seed['objects']['4f45584543000006']['sha256'] == digest
+assert seed['objects']['4f45584543000006']['sha256'] == hashlib.sha256(frame_file(build/'busybox.elf','application/x-elf')).hexdigest()
 result.pop('applets',None)
 result['verification']=verification
 result['evidence']='native/qemu-busybox-multicall/boot-multicall.log'
@@ -30,7 +32,12 @@ result['evidence']='native/qemu-busybox-multicall/boot-multicall.log'
 print('PASS: packaged ELF/config match native driver and F5-tested GE/O image')
 PY
 cp "$OUT/qemu-busybox-f5/disk.img" "$OUT/plan2001-busybox-amd64.img"
+cp "$OUT/multicall-o.img" "$OUT/p5.img"
 cp "$REPORTS/busybox-multicall/busybox.elf" "$OUT/busybox.elf"
+cp "$OUT/seed-busybox-child/exe" "$OUT/busybox.p2o"
+cp "$OUT/seed-busybox-child/mp" "$OUT/micropython.p2o"
+cp "$KERNEL/tools/host/object_format.py" "$OUT/object_format.py"
+cp "$ROOT/docs/OBJECT-METADATA.md" "$OUT/OBJECT-METADATA.md"
 cp "$REPORTS/busybox-multicall/LICENSE.busybox" "$OUT/LICENSE.busybox"
 cp "$REPORTS/busybox-multicall/busybox.config" "$OUT/busybox.config"
 cp "$OUT/native/qemu-busybox-multicall/applets.json" "$OUT/applets.json"
@@ -49,7 +56,7 @@ subprocess.run(['git','-C',source,'archive','--format=tar.gz','--output='+output
 PYARCHIVE
 tar --exclude=__pycache__ -czf "$OUT/userland-source.tar.gz" -C "$ROOT" \
   ports config tools/ci tests docs AGENTS.md README.md
-(cd "$OUT" && sha256sum plan2001-busybox-amd64.img busybox.elf busybox.config \
+(cd "$OUT" && sha256sum plan2001-busybox-amd64.img p5.img busybox.elf busybox.p2o micropython.p2o object_format.py busybox.config \
   applets.json build.json verification.json *source.tar.gz > SHA256SUMS)
 echo "PASS: virtio image and corresponding sources: $OUT"
 echo 'NOT RUN: physical hardware, ARM64; consult verification.json for AHCI status.'

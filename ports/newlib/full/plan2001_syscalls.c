@@ -545,7 +545,15 @@ int p9_raw_fstat(int fd, struct stat *st)
         int code=uxfd_info(&file_table,fd,&kind,&length);
         if(code) return fail_fs(code);
         memset(st,0,sizeof *st);
-        st->st_mode=(kind==UXFS_DIR ? S_IFDIR : S_IFREG) | 0600;
+        UxMeta meta;
+        if(uxfs_metadata(&file_table.service->fs,file_table.slots[fd-3].path,&meta))return fail_fs(PVD_EIO);
+        st->st_mode=meta.mode;st->st_uid=meta.uid;st->st_gid=meta.gid;st->st_rdev=meta.rdev;
+        st->st_atim.tv_sec=meta.atime_ns/1000000000LL;st->st_atim.tv_nsec=meta.atime_ns%1000000000LL;
+        st->st_mtim.tv_sec=meta.mtime_ns/1000000000LL;st->st_mtim.tv_nsec=meta.mtime_ns%1000000000LL;
+        st->st_ctim.tv_sec=meta.ctime_ns/1000000000LL;st->st_ctim.tv_nsec=meta.ctime_ns%1000000000LL;
+        unsigned long long inode;
+        if(uxfs_inode(&file_table.service->fs,file_table.slots[fd-3].path,&inode))return fail_fs(PVD_EIO);
+        st->st_ino=(ino_t)inode;st->st_dev=1;st->st_blocks=(length+511u)/512u;
         st->st_size=length;
         st->st_nlink=1;
         st->st_blksize=UXFS_IO_CHUNK;
@@ -706,7 +714,15 @@ int p9_raw_stat(const char *path, struct stat *st)
     result=uxfs_info(&file_table.service->fs,path,&kind,&length);
     if(result) return fail_fs(result);
     memset(st,0,sizeof *st);
-    st->st_mode=(kind == UXFS_DIR ? S_IFDIR : S_IFREG) | 0600;
+    UxMeta meta;
+    if(uxfs_metadata(&file_table.service->fs,path,&meta))return fail_fs(PVD_EIO);
+    st->st_mode=(mode_t)meta.mode;st->st_uid=meta.uid;st->st_gid=meta.gid;st->st_rdev=meta.rdev;
+    st->st_atim.tv_sec=meta.atime_ns/1000000000LL;st->st_atim.tv_nsec=meta.atime_ns%1000000000LL;
+    st->st_mtim.tv_sec=meta.mtime_ns/1000000000LL;st->st_mtim.tv_nsec=meta.mtime_ns%1000000000LL;
+    st->st_ctim.tv_sec=meta.ctime_ns/1000000000LL;st->st_ctim.tv_nsec=meta.ctime_ns%1000000000LL;
+    unsigned long long inode;
+    if(uxfs_inode(&file_table.service->fs,path,&inode))return fail_fs(PVD_EIO);
+    st->st_ino=(ino_t)inode;st->st_dev=1;st->st_blocks=(length+511u)/512u;
     st->st_size=length;
     st->st_nlink=1;
     st->st_blksize=UXFS_IO_CHUNK;
@@ -869,3 +885,5 @@ int _gettimeofday(struct timeval *tv, void *tz)
     }
     return 0;
 }
+
+unsigned long long uxfs_clock_ns(void){return _nsec();}

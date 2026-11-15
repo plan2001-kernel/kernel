@@ -170,3 +170,27 @@ size bounds still apply; compilation is never evidence of working services.
 
 Distributable image bundles contain BusyBox, Newlib, kernel and userland sources,
 GPL license, complete config, manifest, build instructions and checksums.
+
+## Framed-object integration
+
+The integration build provisions MicroPython ELF, MPY modules, the native
+console supervisor and the genuine BusyBox ELF as raw-first framed GE/O
+objects. Native ELF/MPY loaders require a valid footer, expose only its raw
+executable span and reject unframed/corrupt input explicitly. The host
+`object_format.py inspect` command and native `space.ometa(oid)` read metadata;
+`space.oraw(oid)` reads only raw content under the same volume capability.
+
+UXFS v3 publishes raw file bytes, profile CBOR and footer in one version.
+Its framed manifest includes directory metadata and is committed after
+successor files are staged. Object-owned names and known creation instants
+survive namespace rename. Different OIDs may share the same object name.
+Opaque and unknown metadata is preserved; unsupported chmod/chown/xattr/ACL
+mutation remains an error. Older unframed manifests are rejected explicitly,
+so provision a fresh image rather than silently reformat an existing disk.
+
+The hardware bundle contains a complete UEFI/GPT boot image, a raw `p5.img`
+GE/O volume, separately inspectable `micropython.p2o` and `busybox.p2o`, source
+archives, provenance and SHA256SUMS. Physical hardware is a user-run check,
+not inferred from QEMU. The multicall shell currently uses volatile shared
+files; the separate persistent-service image exercises durable UXFS through
+its restricted RPC clients. Both use the same framed object contract.
