@@ -20,24 +20,27 @@ static int launch_stream(int sending)
     long count, wb = -1, rb = -1, n;
     UxPipe pipe;
     unsigned int total = 0;
+    const char *stage = "uxpipe:grant-discovery";
     unsigned char chunk[257];
     count = obj_list(entries, 16);
-    if (count < 0 || count > 16) return 1;
+    if (count < 0 || count > 16) { exits("uxpipe:list"); return 1; }
     for (i=0;i<(unsigned int)count;++i) {
         if (entries[i].kind != VkindRegion) continue;
         if ((entries[i].rights & Vwrite) != 0) {
-            if (writer >= 0) return 1;
+            if (writer >= 0) { exits("uxpipe:duplicate-writer"); return 1; }
             writer = (int)entries[i].handle;
         } else if ((entries[i].rights & Vread) != 0) {
-            if (observer >= 0) return 1;
+            if (observer >= 0) { exits("uxpipe:duplicate-reader"); return 1; }
             observer = (int)entries[i].handle;
         }
     }
-    if (writer < 0 || observer < 0) return 1;
+    if (writer < 0 || observer < 0) { exits("uxpipe:missing-grant"); return 1; }
     wb = obj_region_map(writer,0);
-    if (wb < 0) return 1;
+    if (wb < 0) { exits("uxpipe:map-writer"); return 1; }
+    stage = "uxpipe:map-reader";
     rb = obj_region_map(observer,0);
     if (rb < 0) goto cleanup;
+    stage = "uxpipe:bind";
     if (sending) {
         if (uxpipe_bind(&pipe,(UxPipeData *)(unsigned long long)wb,
                         (UxPipeAck *)(unsigned long long)rb,
@@ -48,11 +51,13 @@ static int launch_stream(int sending)
          * mapped its ACK writer. The bounded startup rendezvous uses a
          * release-published ready word and ordinary process sleep.
          */
+        stage = "uxpipe:peer-ready";
         for (i=0;i<5000u;++i) {
             if (__atomic_load_n(&pipe.ack->ready,__ATOMIC_ACQUIRE)) break;
             (void)sleep(1);
         }
         if (i == 5000u) goto cleanup;
+        stage = "uxpipe:send";
         while (total < 10000u) {
             unsigned int amount=10000u-total;
             if (amount > sizeof(chunk)) amount=sizeof(chunk);
@@ -67,6 +72,7 @@ static int launch_stream(int sending)
                         (UxPipeAck *)(unsigned long long)wb,
                         (unsigned long long)rb,(unsigned long long)wb,
                         UXPIPE_READER) != 0) goto cleanup;
+        stage = "uxpipe:receive";
         for (;;) {
             n=uxpipe_read(&pipe,chunk,sizeof(chunk),-1);
             if (n < 0) goto cleanup;
@@ -78,11 +84,13 @@ static int launch_stream(int sending)
             total+=(unsigned int)n;
         }
     }
+    stage = "uxpipe:finish";
     if (total != 10000u || uxpipe_finish(&pipe) < 0) goto cleanup;
     ok = 1;
 cleanup:
     if (rb >= 0) (void)obj_region_unmap((unsigned long long)rb);
     if (wb >= 0) (void)obj_region_unmap((unsigned long long)wb);
+    if (!ok) exits((char *)stage);
     return ok ? 0 : 1;
 }
 int p2001_uxpipe_send_main(int argc, char **argv)
