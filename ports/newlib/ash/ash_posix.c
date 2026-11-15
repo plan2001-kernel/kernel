@@ -64,12 +64,32 @@ int uname(struct utsname *name)
     return 0;
 }
 
+extern int p9_fd_events(int,short);
+extern int p9_process_interrupted(void);
+extern long p9_native_sleep_millis(long);
+extern unsigned long long _nsec(void);
 int poll(struct pollfd *fds,nfds_t count,int timeout_ms)
 {
-    (void)timeout_ms;
+    unsigned long long start=_nsec();
     if(count && !fds) { errno=EFAULT; return -1; }
-    errno=ENOSYS; /* no bounded multi-FD event dispatcher yet */
-    return -1;
+    if(count>19) { errno=EINVAL; return -1; }
+    (void)p9_process_interrupted();
+    for(;;) {
+        int ready=0;
+        nfds_t i;
+        for(i=0;i<count;++i) {
+            fds[i].revents=0;
+            if(fds[i].fd<0) continue;
+            int flags=p9_fd_events(fds[i].fd,fds[i].events);
+            if(flags<0) return -1;
+            fds[i].revents=(short)flags;
+            if(flags) ++ready;
+        }
+        if(ready || timeout_ms==0) return ready;
+        if(p9_process_interrupted()) { errno=EINTR; return -1; }
+        if(timeout_ms>0 && (_nsec()-start)/1000000ULL >= (unsigned)timeout_ms) return 0;
+        (void)p9_native_sleep_millis(1);
+    }
 }
 int tcgetattr(int fd,struct termios *attr)
 {

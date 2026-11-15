@@ -16,7 +16,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised"):
+                "newlib-supervised", "ash"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,7 @@ def reply():
 def command(line):
     sock.sendall((line + "\n").encode("ascii"))
     r = reply()
-    if b"Error" in r or b"error:" in r:
+    if b"Error" in r or b"error:" in r or b"unknown key" in r.lower():
         raise RuntimeError(f"QEMU monitor {line!r}: {r!r}")
 
 
@@ -80,9 +80,11 @@ def focus(number):
 
 def enter(line):
     specials = {" ": "spc", "/": "slash", ".": "dot",
-                ">": "shift-dot", "|": "shift-backslash"}
+                ">": "shift-dot", "<":"shift-comma", "|": "shift-backslash", "$":"shift-4",
+                "(":"shift-9", ")":"shift-0", ":":"shift-semicolon",
+                ";":"semicolon", "=":"equal", "+":"shift-equal"}
     for letter in line:
-        key(specials.get(letter, letter))
+        key("shift-"+letter.lower() if letter.isupper() else specials.get(letter, letter))
     key("ret")
 
 
@@ -128,7 +130,19 @@ try:
     reply()  # QEMU monitor greeting.
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode == "newlib-supervised":
+    if mode == "ash":
+        waitscreen("ash-ready", "PLAN2001-ASH-READY")
+        enter("echo sum$((2+3))")
+        waitscreen("ash-arithmetic", "sum5")
+        enter("echo data > /tmp/hw; read x < /tmp/hw; echo FILE:$x")
+        waitscreen("ash-file", "FILE:data")
+        enter("echo piped | while read x; do echo PIPE:$x; done")
+        waitscreen("ash-pipeline", "PIPE:piped")
+        focus(1)
+        text=waitscreen("ash-isolation", "kernel>")
+        assert "PIPE:piped" not in text
+        print("PASS: upstream ash interactive F5, arithmetic, files, forked pipeline, isolation")
+    elif mode == "newlib-supervised":
         ready = waitscreen("newlib-supervised-boot",
                            "PLAN2001-NEWLIB-SUPERVISED-READY")
         assert "PLAN2001-UNIX-SUPERVISOR-READY" in ready, (

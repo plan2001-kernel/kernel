@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <signal.h>
+#include <poll.h>
+extern int p9_fd_events(int,short);
 #include "../../ports/newlib/full/fd_backend.h"
 #include "../../ports/newlib/full/process.h"
 #include "../../ports/unix/uxfd.h"
@@ -130,14 +132,18 @@ int main(void)
     assert(_close(alias)==-1 && errno==EBADF);
     assert(pipe(p)==0 && region_count==2);
     copy=dup(p[1]); assert(copy>=0);
+    assert(p9_fd_events(p[0],POLLIN)==0);
+    assert(p9_fd_events(p[1],POLLOUT)==POLLOUT);
     assert(_write(p[0],"x",1)==-1 && errno==EBADF);
     assert(_write(p[1],"hello",5)==5);
+    assert(p9_fd_events(p[0],POLLIN)==POLLIN);
     assert(_close(p[1])==0);
     assert(_read(p[0],bytes,5)==5 && !memcmp(bytes,"hello",5));
     assert(_write(copy,"!",1)==1);
     assert(_close(copy)==0 && region_count==2);
     assert(_read(p[0],bytes,5)==1 && bytes[0]=='!');
     assert(_read(p[0],bytes,5)==0);
+    assert(p9_fd_events(p[0],POLLIN)==(POLLIN|POLLHUP));
     assert(_fstat(p[0],&st)==0 && S_ISFIFO(st.st_mode));
     assert(_lseek(p[0],0,SEEK_SET)==-1 && errno==ESPIPE);
     assert(_close(p[0])==0 && region_count==0);

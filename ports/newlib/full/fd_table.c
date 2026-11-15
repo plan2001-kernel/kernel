@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <signal.h>
+#include <poll.h>
 #include "fd_backend.h"
 #include "plan2001_full.h"
 #include "../../unix/uxfd.h"
@@ -566,5 +567,33 @@ int pipe(int streams[2])
 {
     int result;
     p9_process_enter(); result=pipe_impl(streams); p9_process_leave();
+    return result;
+}
+
+/* Poll observes state without consuming bytes or changing file position. */
+int p9_fd_events(int fd,short events)
+{
+    Description *d=lookup(fd);
+    int result=0;
+    if(!d) return POLLNVAL;
+    if(d->pipe) {
+        UxPipe *stream=acquire(d->pipe,d->flags);
+        if(!stream) return -1;
+        unsigned long long wr=stream->data->produced,rd=stream->ack->consumed;
+        if(d->flags==O_RDONLY) {
+            if(stream->data->closed) result|=POLLHUP;
+            if((events&POLLIN) && (wr!=rd || stream->data->closed)) result|=POLLIN;
+        } else {
+            if(stream->ack->closed) result|=POLLERR;
+            else if((events&POLLOUT) && wr-rd<UXPIPE_CAPACITY) result|=POLLOUT;
+        }
+        release(d->pipe);
+        return result;
+    }
+    struct stat st;
+    if(p9_backend_fstat(d->backend,&st)<0) return POLLNVAL;
+    if(!S_ISREG(st.st_mode)) { errno=ENOTSUP; return -1; }
+    if((events&POLLIN) && (d->flags&O_ACCMODE)!=O_WRONLY) result|=POLLIN;
+    if((events&POLLOUT) && (d->flags&O_ACCMODE)!=O_RDONLY) result|=POLLOUT;
     return result;
 }

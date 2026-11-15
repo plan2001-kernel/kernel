@@ -11,7 +11,7 @@ KERNEL=$(cd "$1" && pwd)
 IMAGE=$(realpath "$2")
 REPORTS=$(cd "$3" && pwd)
 MODE=${4:-default}
-if [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ]; then
+if [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ]; then
   echo "unsupported acceptance mode: $MODE" >&2
   exit 2
 fi
@@ -68,7 +68,7 @@ qob_make_disk "$IMAGE" "$OUT/disk.img" "$OUT/esp.img" "$puuid" "$OUT/disk.layout
 # The original disk image is built once. Between boots only the QEMU
 # process and its OVMF variable overlay are reset, not the GE/O disk.
 phases=(initial reboot)
-if [ "$MODE" = newlib-supervised ]; then phases=(initial); fi
+if [ "$MODE" = newlib-supervised ] || [ "$MODE" = ash ]; then phases=(initial); fi
 for phase in "${phases[@]}"; do
   mon="$OUT/monitor-$phase.sock"
   serial="$OUT/serial-$phase.log"
@@ -76,6 +76,11 @@ for phase in "${phases[@]}"; do
   : > "$serial"
   rm -f "$mon"
   cp "$QOB_OVMF_VARS" "$vars"
+  case "${UX_HW_CONTROLLER:-virtio}" in
+    virtio) disk_device=(-device virtio-blk-pci-non-transitional,drive=d0,bootindex=0) ;;
+    ahci) disk_device=(-device ich9-ahci,id=ashsata -device ide-hd,drive=d0,bus=ashsata.0,bootindex=0) ;;
+    *) echo 'Unsupported hardware controller' >&2; exit 2 ;;
+  esac
   "$QOB_QEMU" -name "plan2001-unix-init-$phase" -nodefaults \
     -m "$QOB_MEM" -smp "$QOB_CPUS" -machine "q35,accel=$QOB_ACCEL" -cpu max \
     -drive "if=pflash,format=raw,readonly=on,file=$QOB_OVMF_CODE" \
@@ -93,6 +98,10 @@ for phase in "${phases[@]}"; do
   qob_cleanup
 done
 
+if [ "$MODE" = ash ]; then
+  echo "PASS: native ash F5 acceptance; bootable disk at $OUT/disk.img"
+  exit 0
+fi
 if [ "$MODE" = newlib-supervised ]; then
   cat > "$REPORTS/newlib-supervised-guest.md" <<'EOF'
 ## Native Newlib process over supervisor-delegated UXPIPE (real QEMU)

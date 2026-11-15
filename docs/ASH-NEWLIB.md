@@ -67,7 +67,7 @@ In `ports/newlib/full/plan2001_syscalls.c` and `posix_forward.c`:
 
 Newlib is a C library, **not a substitute for kernel-owned POSIX services**.
 Target headers for sockets, poll, termios and mmap only make the types visible.
-No socket or tty service is conjured into existence. `poll`, `mmap`, and
+No socket or tty service is conjured into existence. `poll` observes readiness of regular files and UXPIPE descriptors. `mmap` and
 terminal control requests fail with `ENOSYS`/`ENOTTY`; fake success would
 allow shell code to corrupt descriptor state or infer false privileges.
 
@@ -98,8 +98,10 @@ signal-handler `siglongjmp` returns. The native alarm service must run in
 normal kernel boots; otherwise CPU-bound processes cannot receive its notes.
 
 The ash-object undefined-symbol report is an inventory of references before
-linking, not a list of currently unimplemented APIs. Full upstream BusyBox
-`libbb` static linking and a **real ash shell in QEMU** remain separate checks.
+linking, not a list of currently unimplemented APIs. A reduced upstream ash plus its required libbb modules is now statically
+linked by `tools/ci/build_ash.py`. The [hardware boot builder](HARDWARE-BOOT.md)
+tests the real interactive ash with keyboard/VGA, arithmetic, redirection
+and a forked pipeline. This is not a full BusyBox multicall distribution.
 The F5 evaluator is still the bounded native builtin shell. Persistent-service
 inheritance, process groups, terminal job control, ARM64 and hardware remain
 outside this process adapter's validated profile.

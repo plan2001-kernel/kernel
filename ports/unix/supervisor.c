@@ -138,6 +138,9 @@ int uxsupervisor_pump(UxSupervisor *s)
         if (n<0) return -1;
         s->pending_pos=0;
         s->pending_len=(unsigned int)n;
+        /* Keyboard Enter is CR; the Unix console projects a text LF. */
+        for(unsigned int i=0;i<s->pending_len;++i)
+            if(s->pending[i]=='\r') s->pending[i]='\n';
     }
     if (s->pending_pos < s->pending_len) {
         n=uxpipe_write(&s->streams[0],s->pending+s->pending_pos,

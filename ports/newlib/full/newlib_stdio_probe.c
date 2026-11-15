@@ -273,8 +273,8 @@ int main(int argc, char **argv)
               strcmp(uts.machine,"x86_64")==0,
               "ash uname Plan2001 target identity");
         errno=0;
-        check(poll(NULL,0,0)==-1 && errno==ENOSYS,
-              "ash poll must not claim a nonexistent fd event service");
+        check(poll(NULL,0,0)==0,
+              "empty immediate poll returns no ready descriptors");
         errno=0;
         check(tcgetattr(1,&attr)==-1 && errno==ENOTTY,
               "ash must not claim tty control on native console");
