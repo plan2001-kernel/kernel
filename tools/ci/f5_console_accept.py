@@ -157,7 +157,8 @@ try:
         waitscreen("ash-ready", "PLAN2001-ASH-READY")
         # The ELF prints READY before ash_main enters its first read. Wait for
         # the actual shell prompt, not a framebuffer race with the marker.
-        waitscreen("ash-prompt", "ash$ ", 45)
+        # screen() strips trailing whitespace from each framebuffer row.
+        waitscreen("ash-prompt", "ash$", 45)
         enter("echo visible")
         typed = waitscreen("ash-input-echo", "visible")
         assert "echo visible" in typed, "typed command was not echoed"
