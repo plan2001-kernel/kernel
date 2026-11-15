@@ -1,9 +1,13 @@
 # Portable object payload framing (v1)
 
-This is the stable byte-level framing contract for a *framed* persistent
-Plan2001 object, independent of the GE/O B-tree keys. It does **not**
+This is the stable byte-level framing contract for persistent Plan2001
+object values, independent of the GE/O B-tree keys. The **target state** is
+that all newly published persistent values use this structure; metadata
+may be empty or opaque, but the footer is always present. It does **not**
 reinterpret GE/O OIDs as file types or add a kernel pathname namespace.
-Existing GE/O v2 values stay unframed until an explicit migration.
+**Implementation status:** the target is not yet activated in GE/O. Existing
+GE/O v2 values stay unframed until explicit migration, and this change does
+not silently alter readers, ELF loading or boot provisioning.
 
 ## Normative binary layout
 
