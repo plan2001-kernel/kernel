@@ -133,12 +133,13 @@ def two_process_pipe():
     try:
         # Both pages are zeroed by kernel region creation. Format the
         # initial protocol headers while this trusted bootstrap owns RW.
+        # UXPIPE_VERSION=2 in ports/unix/uxpipe.h; v1 headers fail bind.
         data_rw = plan9.region_map(data)
         ack_rw = plan9.region_map(ack)
         plan9.region_write(data_rw,
-            le64(0x3154414450505855) + le64(1) + le64(0) + le64(0))
+            le64(0x3154414450505855) + le64(2) + le64(0) + le64(0))
         plan9.region_write(ack_rw,
-            le64(0x314b434150505855) + le64(1) + le64(0) +
+            le64(0x314b434150505855) + le64(2) + le64(0) +
             le64(0) + le64(0))
         plan9.region_unmap(ack_rw)
         ack_rw = None
@@ -158,6 +159,9 @@ def two_process_pipe():
 
         a = plan9.process_wait(sending, 30000)
         b = plan9.process_wait(receiving, 30000)
+        if (a[1] != "" or b[1] != ""):
+            print("PLAN2001-UXPIPE-SEND-STATUS:", a)
+            print("PLAN2001-UXPIPE-RECV-STATUS:", b)
         for state in (a, b):
             if state[3] != plan9.OBJ_PROC_COMPLETED:
                 raise RuntimeError("native pipe child did not complete")
