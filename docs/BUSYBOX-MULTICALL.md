@@ -50,8 +50,8 @@ bash tools/ci/guest_busybox_multicall.sh ../deps/kernel ../reports/busybox-multi
 
 Use Finnish `keymap=fi` and QEMU `-k fi` when testing with a Finnish keyboard.
 Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. This shortcut
-requires kernel PR #66 for Win console shortcuts and the stacked SPAWN
-capacity change for native 1024-Handle inheritance. This integration gate
+requires kernel PR #66 for Win console shortcuts and stacked kernel PR #67
+(tested commit `9ac37be`) for native 1024-Handle inheritance. This integration gate
 uses that kernel branch; moving-main compatibility is not yet established.
 The console acceptance test uses the new shortcut, so that PR must be integrated
 before the moving-main interactive CI gate can pass.
