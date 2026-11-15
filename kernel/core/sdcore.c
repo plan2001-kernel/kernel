@@ -366,15 +366,22 @@ sdunitput(SDunit *unit)
 int
 sdunitready(SDunit *unit)
 {
-	int ok;
+	int ok, i;
 
 	qlock(&unit->ctl);
 	if(waserror()){
 		qunlock(&unit->ctl);
 		return 0;
 	}
-	if(unit->sectors == 0)
-		sdinitpart(unit);
+	/* Some native controllers, notably AHCI, publish their SDev before the
+	 * asynchronous IDENTIFY worker has populated inquiry/geometry. Retry the
+	 * initial probe briefly so early boot volume opens do not report a
+	 * transient "bad disk" as permanent absence. */
+	for(i = 0; unit->sectors == 0 && i < 30; i++){
+		(void)sdinitpart(unit);
+		if(unit->sectors == 0 && i < 29)
+			tsleep(&up->sleep, return0, nil, 100);
+	}
 	ok = unit->sectors != 0 && unit->secsize != 0;
 	poperror();
 	qunlock(&unit->ctl);
@@ -389,7 +396,7 @@ sdunitready(SDunit *unit)
 long
 sdblockrw(SDunit *unit, int write, void *a, long len, uvlong off)
 {
-	int allocd, locked, nchange;
+	int allocd, locked, nchange, i;
 	long l;
 	uchar *b;
 	ulong max, nb, offset;
@@ -407,7 +414,12 @@ sdblockrw(SDunit *unit, int write, void *a, long len, uvlong off)
 		qunlock(&unit->ctl);
 		nexterror();
 	}
-	if(unit->sectors == 0 && !sdinitpart(unit))
+	for(i = 0; unit->sectors == 0 && i < 30; i++){
+		(void)sdinitpart(unit);
+		if(unit->sectors == 0 && i < 29)
+			tsleep(&up->sleep, return0, nil, 100);
+	}
+	if(unit->sectors == 0)
 		error(Eio);
 	if(unit->secsize == 0)
 		error(Eio);

@@ -14,16 +14,16 @@ from PIL import Image
 mon, serial, out, fontfile = map(Path, sys.argv[1:])
 out.mkdir(parents=True, exist_ok=True)
 source = fontfile.read_text()
-table = source.split("static const ushort fbconsolefont[101][24] = {", 1)[1]
+table = source.split("static const ushort fbconsolefont[108][24] = {", 1)[1]
 rows = re.findall(r"\{([^{}]+)\}", table)
 font = []
 for row in rows:
     nums = re.findall(r"0x[0-9a-fA-F]+", row)
     if len(nums) == 24:
         font.append(tuple(int(x, 16) for x in nums))
-assert len(font) == 101, f"invalid console font: {len(font)} glyphs"
+assert len(font) == 108, f"invalid console font: {len(font)} glyphs"
 dictionary = {bits: chr(32 + i) for i, bits in enumerate(font[:95])}
-dictionary.update({bits: chr(128 + i) for i, bits in enumerate(font[95:])})
+dictionary.update({bits: "äÄöÖåÅ£€¨´§½¤"[i] for i, bits in enumerate(font[95:])})
 
 deadline = time.monotonic() + 45
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

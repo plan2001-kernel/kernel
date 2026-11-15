@@ -15,4 +15,5 @@ void p9_console_probe(void);
 int p9_console_is_session(void);
 unsigned long long p9_console_msec(void);
 void p9_console_exit(int failed);
+unsigned int p9_console_columns(void);
 #endif

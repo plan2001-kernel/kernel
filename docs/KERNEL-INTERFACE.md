@@ -322,6 +322,19 @@ mirrored to serial. The framebuffer path is only as available as the
 hardware framebuffer and kernel; full panic-interactive recovery is not
 implemented.
 
+Physical PS/2 set-1 input is translated once by the kernel. `keymap=fi`
+(the default) and `keymap=us` select built-in Unicode tables in plan9.ini.
+Fi accent keys emit their literal characters immediately. Navigation emits
+the escape sequences understood by MicroPython readline; Ctrl+Alt+F1–F9
+are consumed by kernel focus handling. USB keyboard input is not implemented.
+
+`ObjOpConsoleInfo=59` requires Vmeta on a console input region and returns
+`ObjConsoleInfo` (version 1, columns, rows, reserved=0), all 32-bit fields.
+Other objects reject the operation. Columns and rows describe fixed text cells.
+The MicroPython editor uses this width for a horizontally scrolling input
+line. The kernel draws a steady Plan 9 text tick and retains independent
+text/parser state for hidden sessions. No framebuffer authority is delegated.
+
 Slot 0 also has a bounded kernel-resident command prompt. It reads the
 currently focused keyboard in kernel context, never delegates to a user
 process, and adds no syscall or IPC primitive. The initial commands are

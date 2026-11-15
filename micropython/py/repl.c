@@ -159,6 +159,11 @@ static bool test_qstr(mp_obj_t obj, qstr name) {
         // try object member
         mp_obj_t dest[2];
         mp_load_method_protected(obj, name, dest, true);
+        // Top-level names also resolve through builtins, just as execution does.
+        if (dest[0] == MP_OBJ_NULL && obj == MP_OBJ_FROM_PTR(&mp_module___main__)) {
+            return mp_map_lookup((mp_map_t *)&mp_module_builtins_globals.map,
+                MP_OBJ_NEW_QSTR(name), MP_MAP_LOOKUP) != NULL;
+        }
         return dest[0] != MP_OBJ_NULL;
     } else {
         // try builtin module

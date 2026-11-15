@@ -13,7 +13,6 @@
 
 enum {
     Consoles = 8,
-    History = 16384,
     Input = 0,
     Output = 1,
     Diagnostic = 2,
@@ -25,8 +24,6 @@ struct Vconsole {
     char name[32];
     Vobj *region[3];
     uvlong iseq, oseq, dseq;
-    char history[History];
-    int nhistory;
     ulong pid;
     int defined, ready, alive, bound;
 };
@@ -34,7 +31,6 @@ static Vconsole sessions[Consoles+1];
 static int nsessions, current, consolemanagerready;
 /* Only the manager switches the framebuffer or mutates the history. */
 static volatile int requestedview = -1;
-static int keyboardclaimed;
 /* SystemConsole command prompt: kernel-owned, independent of all processes. */
 static char cmdline[Cmdline];
 static int ncmdline;
@@ -56,23 +52,6 @@ vconsoledefine(int slot, char *name)
     c->defined = 1;
     if(slot > nsessions)
         nsessions = slot;
-}
-
-static void
-historyappend(Vconsole *c, char *buf, ulong n)
-{
-    if(n >= History){
-        buf += n - History;
-        n = History;
-        c->nhistory = 0;
-    }
-    if(c->nhistory + n > History){
-        int cut = c->nhistory + n - History;
-        memmove(c->history, c->history + cut, c->nhistory - cut);
-        c->nhistory -= cut;
-    }
-    memmove(c->history + c->nhistory, buf, n);
-    c->nhistory += n;
 }
 
 /* SystemConsole command transcript.  It is separate from kmesg so that
@@ -269,39 +248,17 @@ selectview(int slot)
         return;
     }
     c = &sessions[slot];
-    fbconsoleselect(slot, c->history, c->nhistory);
+    fbconsoleselect(slot, nil, 0);
     print("console: focus %s slot=%d\n", c->name, slot);
 }
 
-/* Scan-code set 1, minimal US layout.  Raw bytes never go to a second
- * session and switching chords are swallowed by the kernel. */
-static uchar keys[128] = {
-    [0x02]='1', [0x03]='2', [0x04]='3', [0x05]='4', [0x06]='5',
-    [0x07]='6', [0x08]='7', [0x09]='8', [0x0a]='9', [0x0b]='0',
-    [0x0c]='-', [0x0d]='=', [0x0e]='\b', [0x0f]='\t',
-    [0x10]='q', [0x11]='w', [0x12]='e', [0x13]='r', [0x14]='t',
-    [0x15]='y', [0x16]='u', [0x17]='i', [0x18]='o', [0x19]='p',
-    [0x1a]='[', [0x1b]=']', [0x1c]='\r',
-    [0x1e]='a', [0x1f]='s', [0x20]='d', [0x21]='f', [0x22]='g',
-    [0x23]='h', [0x24]='j', [0x25]='k', [0x26]='l',
-    [0x27]=';', [0x28]='\'', [0x29]='`', [0x2b]='\\',
-    [0x2c]='z', [0x2d]='x', [0x2e]='c', [0x2f]='v',
-    [0x30]='b', [0x31]='n', [0x32]='m', [0x33]=',', [0x34]='.',
-    [0x35]='/', [0x39]=' ',
-};
-static uchar shifted[128] = {
-    [0x02]='!', [0x03]='@', [0x04]='#', [0x05]='$', [0x06]='%',
-    [0x07]='^', [0x08]='&', [0x09]='*', [0x0a]='(', [0x0b]=')',
-    [0x0c]='_', [0x0d]='+', [0x1a]='{', [0x1b]='}',
-    [0x27]=':', [0x28]='"', [0x29]='~', [0x2b]='|',
-    [0x33]='<', [0x34]='>', [0x35]='?',
-};
+#include "consolekbd.h"
 
 static void
 keyboardproc(void *arg)
 {
-    uchar sc, b;
-    int shift = 0, ctl = 0, alt = 0, target, n;
+    uchar sc, bytes[8];
+    int n, b, count, target;
     Vconsole *c;
     USED(arg);
     for(;;){
@@ -310,50 +267,29 @@ keyboardproc(void *arg)
             tsleep(&up->sleep, return0, nil, 10);
             continue;
         }
-        if((sc & 0x7f) == 0x2a || (sc & 0x7f) == 0x36){
-            shift = (sc & 0x80) == 0;
+        if(!kbd_e0 && kbd_skip == 0 && kbd_alt &&
+           (kbd_ctll || kbd_ctlr) && sc >= 0x3b && sc <= 0x43){
+            requestedview = sc - 0x3b;
+            coherence();
+            while(requestedview >= 0)
+                tsleep(&up->sleep, return0, nil, 1);
             continue;
         }
-        if((sc & 0x7f) == 0x1d){
-            ctl = (sc & 0x80) == 0;
-            continue;
-        }
-        if((sc & 0x7f) == 0x38){
-            alt = (sc & 0x80) == 0;
-            continue;
-        }
-        if(sc & 0x80)
-            continue;
-        if(ctl && alt && sc >= 0x3b && sc <= 0x43){
-            target = sc - 0x3b;
-            if(target <= nsessions){
-                requestedview = target;
-                coherence();
-            }
-            continue;
-        }
-        b = keys[sc];
-        if(shift){
-            if(shifted[sc] != 0)
-                b = shifted[sc];
-            else if(b >= 'a' && b <= 'z')
-                b -= 'a' - 'A';
-        }
-        if(ctl && sc == 0x2e)
-            b = 3;
-        else if(ctl && sc == 0x20)
-            b = 4;
+        b = keydecode(sc);
+        if(b < 0) continue;
+        count = 0;
+        bytes[count++] = b;
+        while(ipend < npend) bytes[count++] = pend[ipend++];
         target = current;
         if(target == 0){
-            /* Slot 0 is the kernel command prompt, never a user process. */
-            if(!ctl && !alt)
-                kconskey(b);
+            if(!kbd_ctll && !kbd_ctlr && !kbd_alt)
+                for(n=0; n<count; n++) kconskey(bytes[n]);
             continue;
         }
-        if(target < 0 || target > nsessions || !sessions[target].alive)
+        if(target < 1 || target > nsessions || !sessions[target].alive)
             continue;
         c = &sessions[target];
-        if(b != 0 && vobjregionringpublish(c->region[Input], &c->iseq, &b, 1) < 0)
+        if(vobjregionringpublish(c->region[Input], &c->iseq, bytes, count) < 0)
             print("console: input publish failed slot=%d\n", target);
     }
 }
@@ -374,9 +310,7 @@ drain(Vconsole *c, int which, uvlong *seq)
         s = ++*seq;
         if(!vobjregionringconsume(r, s, payload, sizeof payload, &n))
             continue;
-        historyappend(c, payload, n);
-        if(current == (int)(c - sessions))
-            fbconsoleappend(current, payload, n);
+        fbconsoleappend((int)(c - sessions), payload, n);
         vobjregionringack(r, s);
     }
 }
@@ -404,8 +338,13 @@ vconsolemanager(void *arg)
         coherence();
         c->ready = 1;
     }
+    {
+        char *map = getconf("keymap");
+        kbd_us = map != nil && strcmp(map, "us") == 0;
+        if(map != nil && !kbd_us && strcmp(map, "fi") != 0)
+            print("console: unknown keymap %s; using fi\n", map);
+    }
     if(kbdscancodeacquire() == 0){
-        keyboardclaimed = 1;
         kproc("*consolekbd*", keyboardproc, nil);
     }else
         print("console: PS/2 unavailable; SystemConsole remains visible\n");
@@ -416,8 +355,9 @@ vconsolemanager(void *arg)
     for(;;){
         if(requestedview >= 0){
             k = requestedview;
-            requestedview = -1;
             selectview(k);
+            coherence();
+            requestedview = -1;
             lastkmesg = kmesg.n;
         }
         if(current > 0 && !sessions[current].alive){
@@ -491,4 +431,13 @@ vconsoleexit(Proc *p)
      * framebuffer/history race against a simultaneous output drain. */
     print("console: session %s pid=%lud exited\n", c->name, p->pid);
     p->console_slot = 0;
+}
+
+int
+vconsoleisinput(Vobj *o)
+{
+    int i;
+    for(i=1; i<=nsessions; i++)
+        if(sessions[i].region[Input] == o) return 1;
+    return 0;
 }

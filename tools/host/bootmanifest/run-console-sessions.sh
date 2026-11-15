@@ -24,6 +24,7 @@ puuid=$(python3 -c 'import uuid; print(uuid.uuid4())')
 printf '%s\n' "$puuid" > "$QOB_OUT/disk.partuuid"
 qob_new_o_image "$QOB_OUT/o.img" "$QOB_OUT/ream"
 qob_write_ini "$QOB_OUT/plan9.ini" "$puuid" /9pc64.elf 0
+printf 'keymap=%s\n' "${CONSOLE_KEYMAP:-us}" >> "$QOB_OUT/plan9.ini"
 printf 'bootmanifest=/processes.conf\n' >> "$QOB_OUT/plan9.ini"
 cat > "$QOB_OUT/processes.conf" <<EOF
 version=1

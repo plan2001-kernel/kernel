@@ -325,6 +325,13 @@ sysobjinvoke(sysva_list list)
 		vobjinfo(handle, (VobjInfo*)c.out);
 		c.result = 0;
 		break;
+    case ObjOpConsoleInfo:
+        if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
+           c.out == nil || c.outlen != sizeof(ObjConsoleInfo))
+            error(Ebadarg);
+        vobjconsoleinfo(handle, (ObjConsoleInfo*)c.out);
+        c.result = 0;
+        break;
     case ObjOpOwnerInfo:
 		if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
 		   c.out == nil || c.outlen != sizeof(ObjOwnerInfo))

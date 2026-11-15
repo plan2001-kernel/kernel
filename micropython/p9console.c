@@ -1,16 +1,10 @@
-/* The console: native keyboard input and the native output streams. */
+/* Kernel console session input; explicitly granted raw PS/2 only for legacy -I boot. */
 #include "p9compat.h"
 #include <keyboard.h>
 #include "../../runtime/abi/obj.h"
 #include "../../runtime/abi/vobj.h"
 #include "p9console.h"
 
-/*
- * The kernel grants the native output authority to the O-server process via
- * its Proc iomask (or an explicit stdout Pipe).  This round replaces the
- * retired IOWRITE(62) syscall with one OBJ console Handle per stream; the
- * Handle carries Vwrite and is opened with OBJOPEN(ObjOpenConsole).
- */
 enum {
 	Iohout	= 1,
 	Iohdiag	= 2,
@@ -23,8 +17,8 @@ static int outh = -1;
 static int diagh = -1;
 
 /* Region session transport.  The input region is read-only here (the console
- * owner is its only writer); the output and diagnostic regions are writable
- * here (the owner maps them read-only).  Each region carries an ObjRingHeader
+ * kernel is its only writer); the output and diagnostic regions are writable
+ * here (the kernel maps them read-only).  Each region carries an ObjRingHeader
  * and fixed slots. */
 static int sessin = -1, sessout = -1, sessdiag = -1;
 static char sesserr[128];
@@ -195,9 +189,9 @@ p9_console_native(int on)
 void
 p9_console_probe(void)
 {
-	/* The trusted kernel installs exactly three region capabilities after
-	 * OEXECUTE: RO input, writable stdout and writable diagnostics.
-	 * No process searches for or claims the physical keyboard here. */
+	/* Manifest sessions receive exactly three kernel-granted region Handles.
+	 * Do not claim a physical keyboard while probing those capabilities.
+	 * A legacy -I boot explicitly requests the device later if needed. */
 	VobjListRec list[96];
 	long count, i;
 	int inh = -1, out = -1, diag = -1;
@@ -261,6 +255,11 @@ void p9_console_raw(int on) {
     (void)on;
 }
 
+/* Non-manifest -I boots have no kernel-owned session. Preserve the explicit
+ * exclusive PS/2 capability path for those interactive boot probes; manifest
+ * sessions always consume kernel-decoded bytes from their delegated ring.
+ * No raw keyboard Handle or fallback is used for a session-bound process.
+ */
 // Bytes still to hand out: a key's escape sequence, or a rune passed on.
 static char pend[8];
 static int npend, ipend;
@@ -590,4 +589,19 @@ unsigned long long p9_console_msec(void) {
 void p9_console_exit(int failed) {
     p9_console_restore();
     exits(failed ? "micropython" : nil);
+}
+
+unsigned int
+p9_console_columns(void)
+{
+    ObjCall c;
+    ObjConsoleInfo info;
+    memset(&c, 0, sizeof c);
+    c.version = OBJ_ABI_VERSION;
+    c.op = ObjOpConsoleInfo;
+    c.out = &info;
+    c.outlen = sizeof info;
+    if(sessin < 0 || obj_invoke(sessin, &c, sizeof c) < 0 ||
+       info.version != 1 || info.columns < 8) return 0;
+    return info.columns;
 }

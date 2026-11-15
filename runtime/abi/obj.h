@@ -124,6 +124,7 @@ enum {
 	ObjOpSpaceResolve = 55,	/* binding id -> attenuated target handle */
 	ObjOpSpaceEnumerate = 56,	/* paged stable-snapshot metadata */
 	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
+	ObjOpConsoleInfo = 59, /* Vmeta on a console input region: geometry */
 	ObjOpSpaceSave = 58,	/* durable, atomic graph snapshot (GE/O v2) */
 };
 
@@ -638,5 +639,10 @@ long obj_device_usb_ep_ctl(int endpoint, unsigned int request, void *data,
 		unsigned long long len);
 long obj_device_usb_clear_halt(int device);
 long obj_device_ether_detach(int device);
+
+/* Console geometry v1: character cells, not framebuffer pixels. */
+typedef struct ObjConsoleInfo {
+    unsigned int version, columns, rows, reserved;
+} ObjConsoleInfo;
 
 #endif /* PLAN2001_ABI_OBJ_H */

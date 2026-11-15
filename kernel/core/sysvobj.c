@@ -4194,3 +4194,21 @@ vobjopenhandle(int src, uvlong rights, VobjId *id)
 	return handle;
 }
 
+
+void
+vobjconsoleinfo(int handle, ObjConsoleInfo *out)
+{
+    Vhand *h;
+    ObjConsoleInfo info;
+    validaddr((uintptr)out, sizeof *out, 1);
+    h = vlookup(handle, Vmeta);
+    if(!vconsoleisinput(h->obj)){
+        vhandput(h);
+        error(Ebadarg);
+    }
+    memset(&info, 0, sizeof info);
+    info.version = 1;
+    fbconsolegeometry(&info.columns, &info.rows);
+    vhandput(h);
+    memmove(out, &info, sizeof info);
+}
