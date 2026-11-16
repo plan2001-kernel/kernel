@@ -45,6 +45,7 @@ enum {
 
 static volatile u32int *fbmem;
 static int redrawpending;
+static int graphicview = -1;
 static ulong fbwidth, fbstride, fbheight, texttop, textrows, textcols;
 static int inited;
 typedef struct Textview Textview;
@@ -509,6 +510,7 @@ fbconsoleselect(int slot, char *history, int len)
 	lock(&fbconsolelock);
     fbtick(0);
     activeview = slot;
+    graphicview = -1;
     view = &views[slot];
     hidden = 0;
     if(slot == 0){
@@ -529,13 +531,13 @@ fbconsoleappend(int slot, char *bytes, int len)
 	if(!inited || slot < 0 || slot >= 9 || bytes == nil || len <= 0)
 		return;
 	lock(&fbconsolelock);
-	if(activeview == slot) fbtick(0);
+	if(activeview == slot && graphicview != slot) fbtick(0);
     view = &views[slot];
-    hidden = activeview != slot;
+    hidden = activeview != slot || graphicview == slot;
     fbconsolebytes(bytes, len);
     hidden = 0;
     view = &views[activeview];
-    if(activeview == slot) fbtick(1);
+    if(activeview == slot && graphicview != slot) fbtick(1);
 	unlock(&fbconsolelock);
 }
 
@@ -597,4 +599,28 @@ fbconsoleinit(void)
 
 	screenputs = fbconsoleputs;
 	inited = 1;
+}
+
+/* No user physical mapping: copy only a selected session's bounded surface,
+ * below the kernel-owned boot marker strip. Inactive sessions cannot draw. */
+int
+fbconsolepixelgeometry(uint *w, uint *h)
+{
+    if(!inited || fbwidth == 0 || fbheight <= texttop)return 0;
+    *w=fbwidth;*h=fbheight-texttop;return 1;
+}
+void
+fbconsolepixels(int slot, u32int *pixels, uint w, uint h)
+{
+    uint x,y;int swap;
+    if(!inited || slot<1 || slot>=9 || pixels==nil || w!=fbwidth || h!=fbheight-texttop)return;
+    lock(&fbconsolelock);
+    if(activeview!=slot || panicking){unlock(&fbconsolelock);return;}
+    graphicview=slot;swap=bootfbisbgr();
+    for(y=0;y<h;y++)for(x=0;x<w;x++){
+        u32int rgb=pixels[y*w+x]&0x00ffffff;
+        if(swap)rgb=(rgb&0x00ff00)|((rgb>>16)&0xff)|((rgb&0xff)<<16);
+        fbmem[(texttop+y)*fbstride+x]=rgb;
+    }
+    unlock(&fbconsolelock);
 }

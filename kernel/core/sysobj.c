@@ -142,7 +142,10 @@ sysobjopen(sysva_list list)
 			error(Ebadarg);
 		return vobjopenstream(VopenGeOid, req, (long)sizeof(VobjGeOidReq),
 			rights, (VobjId*)id);
-	case ObjOpenConsole:
+	case ObjOpenConsoleSurface:
+        if(req!=nil || len!=0)error(Ebadarg);
+        return vobjsurfaceopen(rights,(VobjId*)id);
+    case ObjOpenConsole:
 		if(req == nil || len != sizeof(ObjOpenConsoleReq))
 			error(Ebadarg);
 		return vobjconsoleopen(req, len, rights, (VobjId*)id);
@@ -312,6 +315,12 @@ sysobjinvoke(sysva_list list)
 		vobjinfo(handle, (VobjInfo*)c.out);
 		c.result = 0;
 		break;
+    case ObjOpSurfaceInfo:
+        if(c.in!=nil || c.inlen!=0 || c.arg0!=0 || c.arg1!=0 || c.out==nil || c.outlen!=sizeof(ObjSurfaceInfo))error(Ebadarg);
+        vobjsurfaceinfo(handle,(ObjSurfaceInfo*)c.out);c.result=0;break;
+    case ObjOpSurfacePresent:
+        if(c.in!=nil || c.inlen!=0 || c.out!=nil || c.outlen!=0 || c.arg0!=0 || c.arg1!=0)error(Ebadarg);
+        vobjsurfacepresent(handle);c.result=0;break;
     case ObjOpConsoleInfo:
         if(c.in != nil || c.inlen != 0 || c.arg0 != 0 || c.arg1 != 0 ||
            c.out == nil || c.outlen != sizeof(ObjConsoleInfo))

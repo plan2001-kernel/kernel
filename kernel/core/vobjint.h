@@ -222,3 +222,12 @@ int vobjprojectresolve(int,uvlong,uvlong);
 int vobjprojectenumerate(int,uvlong,uvlong,ObjSpaceEntry*,int,uvlong*);
 
 long osreadhandmetak(Ohand*,uvlong,void*,long,uvlong*);
+
+int vobjsurfaceopen(uvlong, VobjId*);
+void vobjsurfaceinfo(int, ObjSurfaceInfo*);
+void vobjsurfacepresent(int);
+void vobjregionreadkern(Vobj*, uvlong, void*, ulong);
+int vobjregionhaswriter(Vobj*);
+Vobj *vconsolesurfaceopen(void);
+int vconsolesurfaceinfo(Vobj*, ObjSurfaceInfo*);
+void vconsolesurfacepresent(Vobj*);

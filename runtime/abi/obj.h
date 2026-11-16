@@ -39,6 +39,7 @@ enum {
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
 	ObjOpenProject = 18,
+    ObjOpenConsoleSurface = 19, /* bound manifest session only; no slot selector */
 };
 
 /* obj_create kinds.  ObjKindBytes is volatile immutable content and
@@ -127,6 +128,8 @@ enum {
 	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
 	ObjOpConsoleInfo = 59, /* Vmeta on a console input region: geometry */
 	ObjOpProject = 60,
+    ObjOpSurfaceInfo = 61,
+    ObjOpSurfacePresent = 62,
 };
 
 /* ObjOpRegionMap arg1 flags. */
@@ -643,5 +646,16 @@ long obj_device_ether_detach(int device);
 typedef struct ObjConsoleInfo {
     unsigned int version, columns, rows, reserved;
 } ObjConsoleInfo;
+
+
+/* Slot-bound pixel region: immutable geometry is queried, never trusted from
+ * writable shared memory. Pixels are uint32 0x00RRGGBB, packed rows. The mapped
+ * region may include page padding after pixel_bytes; it is never displayed. */
+typedef struct ObjSurfaceInfo {
+    unsigned int version, slot, width, height, stride, format;
+    unsigned long long pixel_bytes;
+} ObjSurfaceInfo;
+#define OBJ_SURFACE_VERSION 1
+#define OBJ_SURFACE_XRGB8888 1
 
 #endif /* PLAN2001_ABI_OBJ_H */

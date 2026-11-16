@@ -8,6 +8,7 @@
 #include "mem.h"
 #include "dat.h"
 #include "fns.h"
+#include "../core/error.h"
 #include "../core/vobjint.h"
 #include "../../runtime/abi/obj.h"
 
@@ -23,6 +24,11 @@ typedef struct Vconsole Vconsole;
 struct Vconsole {
     char name[32];
     Vobj *region[3];
+    Vobj *surface;
+    QLock surfacelock;
+    ObjSurfaceInfo surfaceinfo;
+    u32int *pixels;
+    int hasframe;
     uvlong iseq, oseq, dseq;
     ulong pid;
     int defined, ready, alive, bound;
@@ -249,6 +255,9 @@ selectview(int slot)
     }
     c = &sessions[slot];
     fbconsoleselect(slot, nil, 0);
+    qlock(&c->surfacelock);
+    if(c->hasframe)fbconsolepixels(slot,c->pixels,c->surfaceinfo.width,c->surfaceinfo.height);
+    qunlock(&c->surfacelock);
     print("console: focus %s slot=%d\n", c->name, slot);
 }
 
@@ -366,6 +375,12 @@ vconsolemanager(void *arg)
         }
         for(i=1; i<=nsessions; i++){
             c = &sessions[i];
+            qlock(&c->surfacelock);
+            if(c->surface && c->hasframe && !vobjregionhaswriter(c->surface)){
+                c->hasframe=0;
+                if(current==i)fbconsoleselect(i,nil,0);
+            }
+            qunlock(&c->surfacelock);
             if(c->ready){
                 drain(c, Output, &c->oseq);
                 drain(c, Diagnostic, &c->dseq);
@@ -425,7 +440,11 @@ vconsoleexit(Proc *p)
     if(p == nil || p->console_slot == 0)
         return;
     c = &sessions[p->console_slot];
-    c->alive = 0;
+    qlock(&c->surfacelock);
+    c->alive = 0;c->hasframe=0;
+    if(c->surface){vobjput(c->surface);c->surface=nil;}
+    free(c->pixels);c->pixels=nil;
+    qunlock(&c->surfacelock);
     vobjregionwriterrelease(c->region[Input]);
     /* The manager does the fallback in its own context, avoiding a
      * framebuffer/history race against a simultaneous output drain. */
@@ -440,4 +459,59 @@ vconsoleisinput(Vobj *o)
     for(i=1; i<=nsessions; i++)
         if(sessions[i].region[Input] == o) return 1;
     return 0;
+}
+
+static Vconsole*
+surfaceconsole(Vobj *o)
+{
+    for(int i=1;i<=nsessions;i++)if(sessions[i].surface==o && sessions[i].alive)return &sessions[i];
+    return nil;
+}
+Vobj*
+vconsolesurfaceopen(void)
+{
+    Vconsole *c;uint w,h;uvlong bytes;Vobj *o;
+    if(up==nil || up->console_slot<1 || up->console_slot>nsessions)error(Eperm);
+    c=&sessions[up->console_slot];
+    if(!c->alive || !c->bound || c->pid!=up->pid)error(Eperm);
+    qlock(&c->surfacelock);
+    if(waserror()){qunlock(&c->surfacelock);nexterror();}
+    if(!c->surface){
+        if(!fbconsolepixelgeometry(&w,&h) || w>4096 || h>2160)error("surface: unavailable geometry");
+        bytes=(uvlong)w*h*4;
+        if(!bytes || bytes>64*1024*1024)error(Ebadarg);
+        c->pixels=mallocz(bytes,1);if(c->pixels==nil)error(Enomem);
+        if(waserror()){free(c->pixels);c->pixels=nil;nexterror();}
+        o=vobjregionalloc(PGROUND(bytes));
+        poperror();
+        c->surfaceinfo.version=OBJ_SURFACE_VERSION;c->surfaceinfo.slot=up->console_slot;
+        c->surfaceinfo.width=w;c->surfaceinfo.height=h;c->surfaceinfo.stride=w;
+        c->surfaceinfo.format=OBJ_SURFACE_XRGB8888;c->surfaceinfo.pixel_bytes=bytes;
+        c->surface=o;
+    }
+    o=c->surface;incref(&o->ref);
+    poperror();qunlock(&c->surfacelock);
+    return o;
+}
+int
+vconsolesurfaceinfo(Vobj *o, ObjSurfaceInfo *out)
+{
+    Vconsole *c=surfaceconsole(o);
+    if(c==nil)return 0;
+    qlock(&c->surfacelock);
+    if(c->surface!=o || !c->alive){qunlock(&c->surfacelock);return 0;}
+    *out=c->surfaceinfo;qunlock(&c->surfacelock);return 1;
+}
+void
+vconsolesurfacepresent(Vobj *o)
+{
+    Vconsole *c=surfaceconsole(o);
+    if(c==nil || !vobjregionhaswriter(o))error(Eperm);
+    qlock(&c->surfacelock);
+    if(waserror()){qunlock(&c->surfacelock);nexterror();}
+    if(!c->alive || c->surface!=o)error(Eperm);
+    coherence();vobjregionreadkern(o,0,c->pixels,c->surfaceinfo.pixel_bytes);
+    c->hasframe=1;
+    fbconsolepixels(c->surfaceinfo.slot,c->pixels,c->surfaceinfo.width,c->surfaceinfo.height);
+    poperror();qunlock(&c->surfacelock);
 }

@@ -406,3 +406,7 @@ long		zerofill(void*, long);
 void envsetval(Egrp*, char*, char*);
 
 void fbconsolegeometry(uint*, uint*);
+
+int bootfbisbgr(void);
+int fbconsolepixelgeometry(uint*, uint*);
+void fbconsolepixels(int, u32int*, uint, uint);

@@ -192,3 +192,9 @@ bootfbmem(u32int **base, ulong *width, ulong *stride, ulong *height)
 		*height = fbheight;
 	return 1;
 }
+
+int
+bootfbisbgr(void)
+{
+    return bgr;
+}
