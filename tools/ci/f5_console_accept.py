@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "toolchain-initial", "toolchain-reboot", "f6-initial", "f6-reboot", "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
+                "gui-initial", "gui-reboot", "toolchain-initial", "toolchain-reboot", "f6-initial", "f6-reboot", "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -141,6 +141,20 @@ def waitscreen(label, expected, timeout=100, occurrences=1):
     raise AssertionError(f"{label}: missing {expected!r}\n{last[-2200:]}")
 
 
+def wait_gui(label, color, minimum=5000, timeout=120):
+    end=time.monotonic()+timeout
+    while time.monotonic()<end:
+        file=out/(label+".ppm");command(f"screendump {file}")
+        img=Image.open(file).convert("RGB")
+        count=sum(1 for pixel in img.getdata() if pixel==color)
+        if count>=minimum:
+            (out/(label+".txt")).write_text(f"PASS: {count} pixels of {color}\n")
+            return
+        if "panic:" in serial.read_text(errors="replace"):raise AssertionError("kernel panic during GUI")
+        time.sleep(1)
+    raise AssertionError(f"{label}: missing GUI color {color}, count={count}")
+
+
 try:
     reply()  # QEMU monitor greeting.
     # Check the live QEMU device tree, not merely the intended command array.
@@ -155,7 +169,30 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode in ("toolchain-initial", "toolchain-reboot"):
+    if mode in ("gui-initial", "gui-reboot"):
+        waitscreen("f5-ready", "ash$")
+        enter("tcc -v");waitscreen("f5-no-toolchain", "tcc: not found")
+        focus(6);waitscreen("f6-ready", "ash$")
+        enter("tcc -c /home/hello.c -o /home/gui.o && echo GUI-COMPILE")
+        waitscreen("gui-shell-compile", "\nGUI-COMPILE\n", 120)
+        enter("tcc /home/gui.o -o /home/gui-program && echo GUI-LINK")
+        waitscreen("gui-shell-link", "\nGUI-LINK\n", 180)
+        enter("tcc --register /home/gui-program && /home/gui-program")
+        waitscreen("gui-shell-program", "\nnative: 9\n", 120)
+        enter("tcc /usr/share/examples/nuklear_demo.c -o /home/nuklear && echo GUI-BUILD")
+        waitscreen("guest-nuklear-build", "\nGUI-BUILD\n", 240)
+        enter("tcc --register /home/nuklear && /home/nuklear")
+        wait_gui("gui-ready", (49,95,165))
+        focus(5);waitscreen("f5-gui-isolation", "ash$")
+        key("ret")
+        focus(1);waitscreen("f1-gui-isolation", "kernel>")
+        focus(6);wait_gui("gui-focus-restore", (49,95,165))
+        key("ret");wait_gui("gui-approved", (20,150,70))
+        enter("q")
+        result=waitscreen("gui-exit", "GUI-EXIT", 60)
+        assert "GUI-APPROVED" in result and "ash$" in result,result
+        print("PASS: Nuklear GUI approval, surface capability denial and F1/F5/F6 isolation: " + mode)
+    elif mode in ("toolchain-initial", "toolchain-reboot"):
         waitscreen("f5-ready", "ash$")
         enter("tcc -v")
         waitscreen("f5-no-toolchain", "tcc: not found")

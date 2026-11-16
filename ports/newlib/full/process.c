@@ -13,6 +13,7 @@
 #include "process.h"
 #include "project_fs.h"
 #include "program.h"
+#include "surface.h"
 #include "plan2001_full.h"
 #include "obj.h"
 #include "vobj.h"
@@ -454,7 +455,7 @@ static int fork_impl(void)
     P9Plan plan={0};
     P9FdImage image;
     struct Rforkex options={0};
-    int childbox, parentindex, selfindex, handles[P9_GRANTS], oldpid;
+    int surfaceindex, childbox, parentindex, selfindex, handles[P9_GRANTS], oldpid;
     unsigned i,slot;
     long result;
     P9Context *ctx;
@@ -472,6 +473,8 @@ static int fork_impl(void)
     if(selfindex<0 || parentindex<0 || p9_fd_export(&image,&plan,0)<0) goto fail;
     for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].handle>0 &&
        p9_plan_add(&plan,executables[i].handle,Vexecute|Vdelegate)<0) goto undo;
+    surfaceindex=p9_surface_export(&plan,0);
+    if(surfaceindex==-2)goto undo;
     options.version=RFORKEX_VERSION;
     options.count=plan.count;
     for(i=0;i<plan.count;++i) {
@@ -494,6 +497,7 @@ static int fork_impl(void)
             if(j==plan.count) _exits("inherit executable");
             executables[i].handle=handles[j];
         }
+        if(p9_surface_bind(surfaceindex<0?0:handles[surfaceindex]))_exits("inherit surface");
         if(p9_fd_import(&image,handles,plan.count)<0) _exits("inherit descriptors");
         ctx=box(mailbox,1);
         if(!ctx) _exits("inherit mailbox");
@@ -612,6 +616,8 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     image.pid=unix_pid; image.ppid=parent_pid; image.blocked=blocked;
     image.alarm_deadline=alarm_deadline;
     image.self=p9_plan_add(&plan,mailbox,Vread|Vwrite|Vdelegate);
+    image.surface=p9_surface_export(&plan,1);
+    if(image.surface==-2)goto undo;
     /* The exec proxy forwards parent signals while it waits for the
      * replacement process, preserving the Unix process identity. */
     image.parent=-1;
@@ -714,6 +720,8 @@ int p9_process_startup(void)
     if(image.grants!=(int)n || p9_plan_resolve(handles,(unsigned)n)<0 ||
        image.self!=0 || image.pid<=0 || image.parent<-1 || image.parent>=n ||
        image.environment_size>P9_ENV_BYTES) { errno=EACCES; return -1; }
+    if(image.surface < -1 || image.surface>=n ||
+       p9_surface_bind(image.surface<0?0:handles[image.surface]))return -1;
     mailbox=first; unix_pid=image.pid; parent_pid=image.ppid;
     parent_mailbox=image.parent<0 ? 0 : handles[image.parent];
     parent_proxy=image.parent<0 && parent_pid>0;

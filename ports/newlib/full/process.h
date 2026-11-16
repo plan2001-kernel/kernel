@@ -8,7 +8,7 @@
 #define P9_EXECUTABLES 4
 #define P9_CHILDREN 1024
 #define P9_ENV_BYTES 4096
-#define P9_CONTEXT_ABI_VERSION 4
+#define P9_CONTEXT_ABI_VERSION 5
 #define P9_CONTEXT_MAGIC UINT64_C(0x3158544358553950)
 typedef struct { int handle; uint64_t rights; } P9Grant;
 typedef struct { unsigned count; P9Grant grants[P9_GRANTS]; } P9Plan;
@@ -37,7 +37,7 @@ typedef struct {
     P9FdImage fds;
     P9Executable executables[P9_EXECUTABLES];
     P9Child children[P9_CHILDREN];
-    int grants, self, parent;
+    int grants, self, parent, surface;
     char environment[P9_ENV_BYTES];
     unsigned environment_size;
 } P9Context;

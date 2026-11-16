@@ -227,7 +227,7 @@ def main():
              '-o', elf, kernel / 'build/gcc/mpy/mpyobj/rt_startup.o',
              runtime / 'startup.o', main_obj, aliases_obj,
              *[runtime / (x + '.o') for x in
-               ('syscalls', 'process', 'program', 'elf_validate', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
+               ('syscalls', 'process', 'surface', 'program', 'elf_validate', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
                 'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxobject', 'objtail', 'uxshell', 'uxservice',
                 'uxfd', 'project_native', 'project_record', 'rt_stubs-newlib')],
              '-Wl,--start-group', archive, newlib / 'libc.a', newlib / 'libm.a',
@@ -253,7 +253,7 @@ def main():
                 '-o', out / 'guest-probe.elf', kernel / 'build/gcc/mpy/mpyobj/rt_startup.o',
                 runtime / 'startup.o', probe, aliases_obj,
                 *[runtime / (x + '.o') for x in
-                  ('syscalls', 'process', 'program', 'elf_validate', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
+                  ('syscalls', 'process', 'surface', 'program', 'elf_validate', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
                    'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxobject', 'objtail', 'uxshell', 'uxservice',
                    'uxfd', 'project_native', 'project_record', 'rt_stubs-newlib')],
                 '-Wl,--start-group', newlib / 'libc.a', newlib / 'libm.a',

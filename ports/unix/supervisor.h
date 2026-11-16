@@ -22,5 +22,5 @@ int uxsupervisor_pump(UxSupervisor *supervisor);
 void uxsupervisor_release(UxSupervisor *supervisor);
 int uxsupervisor_run(unsigned long long child_oid,
                      unsigned long long manifest_oid,
-                     unsigned long long project_oid);
+                     unsigned long long project_oid, int with_surface);
 #endif

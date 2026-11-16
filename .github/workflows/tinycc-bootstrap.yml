@@ -1,4 +1,4 @@
-name: Native TinyCC and Newlib bootstrap
+name: Native compiler and Nuklear GUI
 on:
   pull_request:
     paths: ['ports/**', 'tests/**', 'tools/ci/**', 'config/**', '.github/workflows/tinycc-bootstrap.yml']
@@ -26,6 +26,7 @@ jobs:
         run: |
           python3 tools/ci/fetch_sources.py --lock config/sources.json --dest "$RUNNER_TEMP/deps" --reports "$RUNNER_TEMP/reports"
           python3 tools/ci/fetch_toolchain.py --dest "$RUNNER_TEMP/tinycc" --reports "$RUNNER_TEMP/reports"
+          python3 tools/ci/fetch_gui.py --dest "$RUNNER_TEMP/nuklear" --reports "$RUNNER_TEMP/reports"
           bash tools/ci/build_newlib_libc.sh "$RUNNER_TEMP/newlib" "$RUNNER_TEMP/reports"
       - name: Select explicitly requested pending kernel integration
         if: ${{ inputs.integration_kernel_sha != '' && github.event_name == 'workflow_dispatch' }}
@@ -43,6 +44,8 @@ jobs:
         run: |
           python3 -m unittest discover -s tools/ci -p 'test_*.py' -v
           bash tools/ci/test_tinycc_host.sh "$PLAN2001_KERNEL"
+          bash tools/ci/test_surface_host.sh "$PLAN2001_KERNEL"
+          bash tools/ci/test_unix_stages.sh 6 "$PLAN2001_KERNEL"
           bash tools/ci/test_newlib_fd.sh "$PLAN2001_KERNEL"
       - name: Build native kernel and image tools
         working-directory: ${{ runner.temp }}/deps/kernel
@@ -56,7 +59,7 @@ jobs:
       - name: Require guest compilation, static linking, persistence and F6 shell use
         run: |
           bash tools/ci/build_toolchain_image.sh "$RUNNER_TEMP/deps/kernel" "$RUNNER_TEMP/deps/busybox" \
-            "$RUNNER_TEMP/tinycc" "$RUNNER_TEMP/newlib" "$RUNNER_TEMP/reports" "$RUNNER_TEMP/toolchain-image"
+            "$RUNNER_TEMP/tinycc" "$RUNNER_TEMP/newlib" "$RUNNER_TEMP/reports" "$RUNNER_TEMP/toolchain-image" "$RUNNER_TEMP/nuklear"
           (cd "$RUNNER_TEMP/toolchain-image" && sha256sum -c SHA256SUMS)
       - name: Upload source provenance and guest evidence
         if: always()
@@ -66,6 +69,7 @@ jobs:
           path: |
             ${{ runner.temp }}/reports/sources.json
             ${{ runner.temp }}/reports/toolchain-sources.json
+            ${{ runner.temp }}/reports/gui-sources.json
             ${{ runner.temp }}/reports/kernel-integration.json
             ${{ runner.temp }}/reports/*.log
             ${{ runner.temp }}/toolchain-image/toolchain/build.log
@@ -74,6 +78,7 @@ jobs:
             ${{ runner.temp }}/toolchain-image/compile/result.json
             ${{ runner.temp }}/toolchain-image/console/**/*.log
             ${{ runner.temp }}/toolchain-image/console/**/screens/**/*.txt
+            ${{ runner.temp }}/toolchain-image/console/**/screens/**/*.ppm
       - name: Upload native image with corresponding sources
         uses: actions/upload-artifact@v4
         with:

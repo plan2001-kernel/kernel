@@ -64,6 +64,7 @@ POSIX completeness, compiler self-hosting, or general execution compatibility be
 Scoped execution requires the kernel's scoped-GE SPAWN support. The ordinary
 workflow continues to fetch kernel main. A manually selected integration SHA
 is recorded separately and establishes compatibility only with that pending
-kernel revision, not moving main. The process context ABI is version 4 and
+kernel revision, not moving main. The process context ABI is version 5 and
 records the provider kind of each inherited executable capability; old
-context layouts are rejected.
+context layouts are rejected. The optional graphical profile also propagates
+its explicitly delegated surface; see [native graphics](NATIVE-GRAPHICS.md).
