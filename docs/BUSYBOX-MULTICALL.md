@@ -74,7 +74,7 @@ The supervisor already delegates an execute-only volume and passes the selected
 child OID as an argument. The multicall entry validates that explicit launch grant
 and binds its own selected object to `/bin/busybox`, then runs upstream interactive
 ash. Subsequent fork/exec inherits the registry through the existing native context.
-The path resolver uses the current PVD cwd; it preserves the caller's argv[0].
+The path resolver uses the retained project view; it preserves the caller's argv[0].
 Other native POSIX applications need the same generated `aliases.o` linked into
 their runtime to expose this catalog; the legacy ash-only profile has no catalog.
 Actual ash builtins remain; basename and absolute commands exercise external exec.
@@ -102,25 +102,32 @@ exec and exact-child wait; system exit status is preserved. No host shell or
 vfork is used. Source builds avoid the BusyBox shell's private `math.h`
 shadowing target Newlib's standard math header.
 
-`mkdir` creates individual directories; `rm -r` now removes empty directories
-from both UXFS and PVD and reuses freed PVD slots. Fixed bootstrap view
-anchors are protected with EBUSY so saved manifests remain restorable. `mv` supports regular-file
-renames and updates open source descriptions. Overwriting an open destination
-or unlinking an open file returns EBUSY until detached inode lifetime exists.
+`mkdir` creates persistent ObjectSpaces. `rm` removes bindings; an open
+file remains usable after unlink. `mv` atomically changes one or two namespace
+records and preserves both an open source and an overwritten open destination.
+Each directory and file has its own durable `(VolumeUUID, OID)` identity.
 
 The versioned `config/busybox-native-limitations.json` supplies per-applet
 missing interfaces and restrictions. In particular `mkdir -p`/`-m` and `sed -i`
 are not implemented by this profile. They fail with errors; the in-place sed
 failure leaves the original content intact. Stream editing and redirection
-remain usable. Directory moves and Unix permission/ownership preservation are
-also unsupported.
+remain usable. Unix permission/ownership preservation remains unsupported.
 
-The volatile UXFS service supports 2048 metadata nodes and a shared 8 MiB
-content arena. Files grow into the available arena instead of reserving a
-fixed per-file buffer. Offset I/O and 4 KiB RPC transfers avoid whole-file
-stack buffers. Deleted/truncated content is compacted and reused. The
-pointer-free shared snapshot fits the native 16 MiB region ceiling. Manifest
-v2 uses the expanded inventory; the original 64-node v1 remains readable. SPAWN and RFORKEX
+The default UXFS adapter operates directly on persistent ObjectSpace records,
+shared live with MicroPython's `namespace` API and explicit `posix.open_filesystem` view. No file-content arena, fixed node
+table or per-process namespace snapshot is authoritative. Names may have 255
+bytes; allocation and the native 64 MiB transaction budget bound operations.
+Objects keep descriptive name and birth metadata across binding renames.
+Open descriptors share offsets through regions; file data stays in GE/O.
+The current GE/O API replaces a whole framed file on write; small repeated
+writes amplify storage traffic. Automatic orphan collection is not implemented.
+Cwd retains the caller's capability route across rename and fork/exec; `..`
+follows that route and cannot escape the delegated project. Its display path
+records the caller's selected route, not a unique native parent.
+Union and intersection use live references, reject ambiguous labels and default
+to read-only. An explicit source receives writes without copy-up.
+
+SPAWN and RFORKEX
 share the native 1024-Handle capacity, based on Linux's initial RLIMIT_NOFILE
 soft limit. The C inheritance plan has the same capacity. External pipelines
 preserve stdin, stdout, stderr and other open descriptors without requiring

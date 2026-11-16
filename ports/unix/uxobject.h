@@ -21,4 +21,7 @@ int uxobject_metadata(const UxMeta *,const unsigned char *,unsigned,
 int uxobject_decode(const unsigned char *,unsigned,UxMeta *);
 int uxobject_split(const void *,unsigned,unsigned *,unsigned *);
 int uxobject_footer(unsigned char *,unsigned,unsigned);
+
+int uxobject_text_field(const unsigned char *,unsigned,const char *,char *,unsigned);
+int uxobject_int_field(const unsigned char *,unsigned,const char *,long long *);
 #endif

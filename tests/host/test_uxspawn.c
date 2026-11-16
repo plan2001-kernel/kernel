@@ -4,6 +4,7 @@
 #include "obj.h"
 #include "vobj.h"
 static unsigned int launches, waits;
+static unsigned long long first_rights=Vread;
 long obj_ospawn(int volume, unsigned long long oid, char **argv,
                 int argc, struct Ospawn *options)
 {
@@ -11,7 +12,7 @@ long obj_ospawn(int volume, unsigned long long oid, char **argv,
     assert(volume==7 && oid==99 && argc==2 && argv[0][0]=='l');
     assert(abi[0]==~0ULL && abi[1]==0 && abi[2]==2);
     assert(abi[3]==2); /* explicit stdin and stdout grant count */
-    assert(abi[4]==11 && abi[5]==Vread);
+    assert(abi[4]==11 && abi[5]==first_rights);
     assert(abi[6]==12 && abi[7]==Vwrite);
     ++launches;
     return 55; /* opaque Process Handle, not PID */
@@ -40,11 +41,13 @@ int main(void)
     h=uxspawn_start(&launch,argv,2);
     assert(h==55 && launches==1);
     assert(uxspawn_wait(h,1000,&success)==0 && success && waits==1);
-    launch.grant[0].rights=Vcreate; /* cannot delegate arbitrary authority */
+    launch.grant[0].rights=~0ULL; /* invalid rights vocabulary */
     assert(uxspawn_start(&launch,argv,2)<0 && launches==1);
     launch.grant[0].rights=Vread;
+    first_rights=Vread|Vcontrol;launch.grant[0].rights=first_rights;
+    assert(uxspawn_start(&launch,argv,2)==55 && launches==2);
     launch.executable_volume=0; /* no ambient executable authority */
-    assert(uxspawn_start(&launch,argv,2)<0 && launches==1);
+    assert(uxspawn_start(&launch,argv,2)<0 && launches==2);
     puts("PASS: native Ospawn/Oinheritv layout, attenuated fd grants, Process Handle");
     return 0;
 }

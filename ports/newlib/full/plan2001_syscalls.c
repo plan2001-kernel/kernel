@@ -263,6 +263,8 @@ int p9_full_bind_inherited_uxpipe(void)
                r->rights != (rights[streams]|Vdelegate)) ||
                r->handle == 0) goto denied;
             handles[streams++] = (int)r->handle;
+        } else if(r->kind == VkindObjectSpace) {
+            /* Explicit project root; backing volume is not delegated. */
         } else if(r->kind == VkindGeVolume &&
                   (r->rights == Vexecute || r->rights == (Vexecute|Vdelegate))) {
             if(++executable_volumes != 1) goto denied;

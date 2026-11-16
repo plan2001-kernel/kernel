@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Two real Plan2001 AMD64 QEMU boots: trusted Unix supervisor at manifest F5; Unix init is SPAWNed.
-# Run twice with the SAME disposable GE/O disk. Session view is RAM-only.
+# Run twice with the SAME disposable GE/O disk. The project mode verifies a shared persistent namespace across cold boots.
 set -euo pipefail
 if [ "$#" -ne 3 ] && [ "$#" -ne 4 ]; then
   echo "usage: guest_busybox_f5.sh KERNEL_SOURCE SEEDED_GE_O_IMAGE REPORT_DIR" >&2
@@ -11,7 +11,7 @@ KERNEL=$(cd "$1" && pwd)
 IMAGE=$(realpath "$2")
 REPORTS=$(cd "$3" && pwd)
 MODE=${4:-default}
-if [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ] && [ "$MODE" != multicall-pipeline ]; then
+if [ "$MODE" != project ] && [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ] && [ "$MODE" != multicall-pipeline ]; then
   echo "unsupported acceptance mode: $MODE" >&2
   exit 2
 fi
@@ -99,11 +99,11 @@ for phase in "${phases[@]}"; do
 
   timeout 240 python3 "$ROOT/tools/ci/f5_console_accept.py" \
     "$mon" "$serial" "$OUT/screens/$phase" \
-    "$KERNEL/kernel/core/fbconsolefont.h" "$([ "$MODE" = default ] && printf "%s" "${UX_GEO_PERSIST:+persist-}$phase" || printf "%s" "$MODE")"
+    "$KERNEL/kernel/core/fbconsolefont.h" "$([ "$MODE" = project ] && printf "%s" "project-$phase" || { [ "$MODE" = default ] && printf "%s" "${UX_GEO_PERSIST:+persist-}$phase" || printf "%s" "$MODE"; })"
   qob_cleanup
 done
 
-if [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
+if [ "$MODE" = project ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
   echo "PASS: native ash F5 acceptance; bootable disk at $OUT/disk.img"
   exit 0
 fi
