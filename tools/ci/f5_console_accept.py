@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
+                "f6-initial", "f6-reboot", "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -155,7 +155,26 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode in ("project-initial", "project-reboot"):
+    if mode in ("f6-initial", "f6-reboot"):
+        for slot, value, other in ((5, "FIVE", "SIX"), (6, "SIX", "FIVE")):
+            focus(slot)
+            waitscreen(f"f{slot}-ready", "PLAN2001-MULTICALL-READY")
+            waitscreen(f"f{slot}-prompt", "ash$")
+            if mode == "f6-initial":
+                enter(f"echo {value} > same")
+            enter("cat same; echo ROOT-END")
+            result=waitscreen(f"f{slot}-root", "ROOT-END", occurrences=2)
+            assert f"\n{value}\nROOT-END\n" in result, result
+            assert f"\n{other}\n" not in result, result
+        focus(5)
+        enter("cat same; echo CHECK-END")
+        result=waitscreen("f5-after-f6", "CHECK-END", occurrences=2)
+        assert "\nFIVE\nCHECK-END\n" in result, result
+        focus(1)
+        result=waitscreen("f1-isolation", "kernel>")
+        assert "ash$" not in result, result
+        print("PASS: F5/F6 independent console sessions and durable roots: " + mode)
+    elif mode in ("project-initial", "project-reboot"):
         waitscreen("project-ready", "PLAN2001-MULTICALL-READY")
         waitscreen("project-prompt", "ash$", 45)
         if mode=="project-initial":

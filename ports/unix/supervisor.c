@@ -212,7 +212,8 @@ void uxsupervisor_release(UxSupervisor *s)
     }
 }
 int uxsupervisor_run(unsigned long long child_oid,
-                     unsigned long long manifest_oid)
+                     unsigned long long manifest_oid,
+                     unsigned long long project_oid)
 {
     const char *stage="console proxy";
     static UxSupervisor proxy;
@@ -225,7 +226,8 @@ int uxsupervisor_run(unsigned long long child_oid,
     unsigned long long id;
     const char digits[]="0123456789abcdef";
     static const char start[]="PLAN2001-UNIX-SUPERVISOR-READY\n";
-    if (!child_oid || child_oid==manifest_oid) return -1;
+    if (!child_oid || child_oid==manifest_oid ||
+        (manifest_oid && project_oid) || (!manifest_oid && !project_oid)) return -1;
     if (uxsupervisor_prepare(&proxy)!=0) return -1;
     /* Only an actual boot process can mint these authorized GE/O handles.
      * Exec and storage are separate capability derivation paths. */
@@ -271,7 +273,7 @@ int uxsupervisor_run(unsigned long long child_oid,
         stage="project volume";
         int vol=(int)obj_open(ObjOpenVolume,0,0,0,0);
         if(vol<=0)goto cleanup;
-        ObjProjectOpen req={0};req.volume=vol;req.oid=0x4f45584543000007ULL;
+        ObjProjectOpen req={0};req.volume=vol;req.oid=project_oid;
         req.rights=Vread|Vmeta|Vcontrol|Vdelegate|Vwrite|Vcreate|Vcommit|Vexecute;
         stage="project root";
         project=(int)obj_open(ObjOpenProject,&req,sizeof req,0,0);obj_close(vol);

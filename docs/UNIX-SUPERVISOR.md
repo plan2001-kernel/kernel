@@ -114,3 +114,26 @@ buffers are bounded. Storage QEMU restart requires the caller to provision
 a durable manifest OID and intentionally grant write authority; the default
 F5 fixture only delegates execute rights. The supervisor does not silently
 format GE/O or obtain any kernel volume access through a guessed OID.
+
+## Independent F5 and F6 project roots
+
+A trusted manifest may start the same supervisor ELF in slots 4 (Win+F5)
+and 5 (Win+F6). Each supervisor retains its own kernel console grants and
+creates separate proxy regions. Its child receives only that session's
+proxy grants, executable volume and selected ObjectSpace root.
+
+The explicit supervisor argument form is `CHILD_OID project ROOT_OID`.
+The existing one-argument form selects the F5 root at `0x4f45584543000007`;
+the two-OID form selects the separate UXFS manifest protocol. A project
+selector is interpreted only by the trusted supervisor, using its existing
+boot-volume authority. An OID alone grants no access to a child.
+
+`seed_busybox_spawn.py --project-root --f6-project` provisions two empty,
+framed durable roots at OIDs `0x4f45584543000007` and
+`0x4f45584543000008` in a fresh disposable image. It uses the formatter's
+existing single-object and raw-record seed inputs without changing the
+kernel ABI or disk format. Existing seed inputs and disk images are never
+overwritten. `guest_busybox_f5.sh ... f6` boots both sessions and checks
+same-name file isolation and persistence over a cold reboot of the same disk.
+This separates the child file views; trusted boot supervisors and boot
+MicroPython processes still hold their explicitly configured authority.

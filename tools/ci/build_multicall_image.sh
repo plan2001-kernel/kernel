@@ -20,6 +20,7 @@ bash "$ROOT/tools/ci/guest_busybox_multicall.sh" "$KERNEL" "$REPORTS/busybox-mul
 python3 "$ROOT/tools/ci/seed_busybox_spawn.py" --kernel "$KERNEL" \
   --elf "$REPORTS/busybox-target/unix-supervisor-f5-plan2001.elf" \
   --extra-elf "$REPORTS/busybox-multicall/busybox.elf" \
+  --project-root --f6-project \
   --init "$ROOT/tests/guest/busybox_spawn_init.py" --reports "$OUT" --image "$OUT/multicall-o.img"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT" multicall
 mkdir -p "$OUT/eof-console"
@@ -28,10 +29,12 @@ mkdir -p "$OUT/essentials-console"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/essentials-console" multicall-essentials
 mkdir -p "$OUT/pipeline-console"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/pipeline-console" multicall-pipeline
+mkdir -p "$OUT/f6-console"
+bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT/f6-console" f6
 AHCI_STATUS=PASS
 if ! UX_HW_CONTROLLER=ahci bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/multicall-o.img" "$OUT" multicall; then
   AHCI_STATUS=FAIL
   echo 'FAIL: AHCI compatibility check; virtio image remains separately verified.' >&2
 fi
-printf '{"virtio":"PASS","ahci":"%s","hardware":"NOT RUN","arm64":"NOT RUN"}\n' "$AHCI_STATUS" > "$OUT/verification.json"
+printf '{"virtio":"PASS","f6_roots":"PASS","ahci":"%s","hardware":"NOT RUN","arm64":"NOT RUN"}\n' "$AHCI_STATUS" > "$OUT/verification.json"
 bash "$ROOT/tools/ci/package_multicall_image.sh" "$KERNEL" "$BUSYBOX" "$NEWLIB" "$REPORTS" "$OUT"

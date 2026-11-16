@@ -11,7 +11,7 @@ KERNEL=$(cd "$1" && pwd)
 IMAGE=$(realpath "$2")
 REPORTS=$(cd "$3" && pwd)
 MODE=${4:-default}
-if [ "$MODE" != project ] && [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ] && [ "$MODE" != multicall-pipeline ]; then
+if [ "$MODE" != f6 ] && [ "$MODE" != project ] && [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ] && [ "$MODE" != multicall-pipeline ]; then
   echo "unsupported acceptance mode: $MODE" >&2
   exit 2
 fi
@@ -65,6 +65,15 @@ owner=unixSupervisorF5
 args=0x4f45584543000006${UX_GEO_PERSIST:+ 0x4f45584543000007}
 required=true
 EOF
+if [ "$MODE" = f6 ]; then
+  cat >> "$OUT/processes.conf" <<EOF
+[process.unixInitF6]
+source=geo:PARTUUID=$puuid:OID=0x4f45584543000005
+owner=unixSupervisorF6
+args=0x4f45584543000006 project 0x4f45584543000008
+required=true
+EOF
+fi
 if [ "${UX_AHCI_DEBUG:-0}" = 1 ]; then printf '*ahcidebug=1\n' >> "$OUT/plan9.ini"; fi
 qob_make_esp "$OUT/plan9.ini" "$OUT/esp.img"
 mcopy -i "$OUT/esp.img" "$OUT/processes.conf" ::/processes.conf
@@ -97,14 +106,19 @@ for phase in "${phases[@]}"; do
     -no-reboot > "$OUT/qemu-$phase.log" 2>&1 &
   QOB_CURRENT_PID=$!
 
+  case "$MODE" in
+    f6|project) accept_mode="$MODE-$phase" ;;
+    default) accept_mode="${UX_GEO_PERSIST:+persist-}$phase" ;;
+    *) accept_mode="$MODE" ;;
+  esac
   timeout 240 python3 "$ROOT/tools/ci/f5_console_accept.py" \
     "$mon" "$serial" "$OUT/screens/$phase" \
-    "$KERNEL/kernel/core/fbconsolefont.h" "$([ "$MODE" = project ] && printf "%s" "project-$phase" || { [ "$MODE" = default ] && printf "%s" "${UX_GEO_PERSIST:+persist-}$phase" || printf "%s" "$MODE"; })"
+    "$KERNEL/kernel/core/fbconsolefont.h" "$accept_mode"
   qob_cleanup
 done
 
-if [ "$MODE" = project ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
-  echo "PASS: native ash F5 acceptance; bootable disk at $OUT/disk.img"
+if [ "$MODE" = f6 ] || [ "$MODE" = project ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
+  echo "PASS: native ash $MODE acceptance; bootable disk at $OUT/disk.img"
   exit 0
 fi
 if [ "$MODE" = newlib-supervised ]; then

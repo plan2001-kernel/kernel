@@ -21,5 +21,6 @@ int uxsupervisor_prepare(UxSupervisor *supervisor);
 int uxsupervisor_pump(UxSupervisor *supervisor);
 void uxsupervisor_release(UxSupervisor *supervisor);
 int uxsupervisor_run(unsigned long long child_oid,
-                     unsigned long long manifest_oid);
+                     unsigned long long manifest_oid,
+                     unsigned long long project_oid);
 #endif
