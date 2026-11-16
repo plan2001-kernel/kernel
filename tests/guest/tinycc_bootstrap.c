@@ -9,10 +9,13 @@
 #include <sys/wait.h>
 #include "project_fs.h"
 #include "install.h"
+#include "program.h"
 extern long objopen(unsigned long long,void *,long,unsigned long long,void *);
 extern long objinvoke(int,void *,long);
 extern long objclose(int);
 static int report;
+static char last_output[4096];
+extern long spawn(int,unsigned long long,char **,int,void *);
 static void emit(const char *s)
 {
     ObjCall c={0};c.version=OBJ_ABI_VERSION;c.op=ObjOpWrite;c.in=(void*)s;c.inlen=strlen(s);
@@ -31,6 +34,7 @@ static void source(const char *path,const char *text)
 }
 static void run(char *const args[],int success)
 {
+    size_t captured=0;last_output[0]=0;
     int stream[2],status;check(pipe(stream)==0,"compiler output pipe");
     int pid=fork();check(pid>=0,"fork compiler");
     if(!pid){
@@ -38,12 +42,14 @@ static void run(char *const args[],int success)
         if(dup2(stream[1],1)<0 || dup2(stream[1],2)<0)_exit(121);
         if(stream[1]>2)close(stream[1]);
         char *env[]={"PATH=/usr/bin:/bin","HOME=/home",NULL};
-        execve("/usr/bin/tcc",args,env);_exit(122);
+        execve(args[0][0]=='/'?args[0]:"/usr/bin/tcc",args,env);_exit(122);
     }
     close(stream[1]);char buf[1024];int n;
     while((n=read(stream[0],buf,sizeof buf-1))!=0){
         if(n<0 && errno==EINTR)continue;
         check(n>0,"read compiler output");buf[n]=0;emit(buf);
+        size_t keep=(size_t)n;if(keep>sizeof last_output-1-captured)keep=sizeof last_output-1-captured;
+        memcpy(last_output+captured,buf,keep);captured+=keep;last_output[captured]=0;
     }
     close(stream[0]);int got;
     do{got=waitpid(pid,&status,0);}while(got<0 && errno==EINTR);
@@ -112,6 +118,9 @@ int main(void)
     /* Boot diagnostic consoles are nondelegable; children receive only the
      * fresh output pipe created for each compiler invocation. */
     close(0);close(1);close(2);
+    if(cold){char *persisted[]={"/home/hello",NULL};run(persisted,1);
+        check(strstr(last_output,"replacement")!=NULL,"registered executable survived cold reboot");
+        emit("PASS: admitted snapshot executable survived cold reboot\n");}
     check(mkdir("/home",0700)==0 || errno==EEXIST,"home directory");
     source("/home/hello.c","#include <stdio.h>\n#include <stdint.h>\n#include <math.h>\n#ifdef __linux__\n#error Linux target leaked\n#endif\n#ifndef __plan2001__\n#error missing native target\n#endif\nint main(void){uint64_t n=81;printf(\"native: %.0f\\n\",sqrt((double)n));return 0;}\n");
     char *compile[]={"tcc","-c","/home/hello.c","-o","/home/hello.o",NULL};run(compile,1);elf("/home/hello.o",1);
@@ -122,8 +131,28 @@ int main(void)
     char *missing[]={"tcc","-c","/home/bad.c","-o","/home/bad.o",NULL};run(missing,0);
     check(stat("/home/bad.o",&st)<0,"failed compilation publishes no object");
     char *jit[]={"tcc","-run","/home/hello.c",NULL};run(jit,0);
-    char *program[]={"/home/hello",NULL};char *env[]={NULL};
-    check(execve(program[0],program,env)<0 && errno==ENOENT,"new output gains no implicit execution authority");
+    char *env[]={NULL};
+    char *unregistered[]={"/home/not-registered",NULL};
+    char *fresh[]={"tcc","/home/hello.o","-o","/home/not-registered",NULL};run(fresh,1);
+    check(execve(unregistered[0],unregistered,env)<0 && errno==ENOENT,"new ELF gains no implicit execution authority");
+    char *admit[]={"tcc","--register","/home/hello",NULL};run(admit,1);
+    char *program[]={"/home/hello",NULL};run(program,1);
+    check(strstr(last_output,"native: 9")!=NULL,"run guest-compiled Newlib program");
+    source("/home/replacement.c","#include <stdio.h>\nint main(void){puts(\"replacement\");return 0;}\n");
+    char *replace[]={"tcc","/home/replacement.c","-o","/home/hello",NULL};run(replace,1);
+    run(program,1);check(strstr(last_output,"native: 9")!=NULL,"mutable output cannot change admitted snapshot");
+    run(admit,1);run(program,1);check(strstr(last_output,"replacement")!=NULL,"explicit readmission replaces snapshot");
+    char *bad_admit[]={"tcc","--register","/home/bad.c",NULL};run(bad_admit,0);
+    int scoped=p9_program_lookup("/home/hello");check(scoped>0,"resolve scoped executable capability");
+    check(spawn(scoped,P2001_TCC_OID,program,1,NULL)<0,"scoped capability rejects OID substitution");
+    ObjOpenHandleReq derive={scoped,0};
+    int nonexec=objopen(ObjOpenHandle,&derive,sizeof derive,Vread|Vmeta|Vdelegate,NULL);
+    check(nonexec>0 && spawn(nonexec,0,program,1,NULL)<0,"native loader rejects non-executable capability");objclose(nonexec);
+    int revoked=objopen(ObjOpenHandle,&derive,sizeof derive,Vexecute|Vdelegate,NULL);
+    ObjCall revoke={0};revoke.version=OBJ_ABI_VERSION;revoke.op=ObjOpCapRevoke;
+    check(revoked>0 && objinvoke(scoped,&revoke,sizeof revoke)>=0 && spawn(revoked,0,program,1,NULL)<0,"native loader rejects revoked scoped capability");
+    objclose(revoked);objclose(scoped);
+    emit("PASS: scoped execution, snapshot integrity, explicit readmission and native capability denial\n");
     emit("PLAN2001-TINYCC-PASS\n");
     for(;;)sleep(60); /* Keep the boot root alive until the host ends QEMU. */
 }

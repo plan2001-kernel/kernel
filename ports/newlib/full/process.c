@@ -12,6 +12,7 @@
 #include <setjmp.h>
 #include "process.h"
 #include "project_fs.h"
+#include "program.h"
 #include "plan2001_full.h"
 #include "obj.h"
 #include "vobj.h"
@@ -469,8 +470,8 @@ static int fork_impl(void)
     selfindex=p9_plan_add(&plan,childbox,Vread|Vwrite|Vdelegate);
     parentindex=p9_plan_add(&plan,mailbox,Vread|Vwrite|Vdelegate);
     if(selfindex<0 || parentindex<0 || p9_fd_export(&image,&plan,0)<0) goto fail;
-    for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].volume>0 &&
-       p9_plan_add(&plan,executables[i].volume,Vexecute|Vdelegate)<0) goto undo;
+    for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].handle>0 &&
+       p9_plan_add(&plan,executables[i].handle,Vexecute|Vdelegate)<0) goto undo;
     options.version=RFORKEX_VERSION;
     options.count=plan.count;
     for(i=0;i<plan.count;++i) {
@@ -487,11 +488,11 @@ static int fork_impl(void)
         parent_pid=oldpid; unix_pid=p9_native_getpid(); parent_proxy=0;
         memset(children,0,sizeof children);
         pending=0; interrupt_seen=0; dispatching=0; atomic_depth=1; note_frame=NULL; alarm_deadline=0;
-        for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].volume>0) {
+        for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].handle>0) {
             unsigned j;
-            for(j=0;j<plan.count;++j) if(plan.grants[j].handle==executables[i].volume) break;
+            for(j=0;j<plan.count;++j) if(plan.grants[j].handle==executables[i].handle) break;
             if(j==plan.count) _exits("inherit executable");
-            executables[i].volume=handles[j];
+            executables[i].handle=handles[j];
         }
         if(p9_fd_import(&image,handles,plan.count)<0) _exits("inherit descriptors");
         ctx=box(mailbox,1);
@@ -530,8 +531,8 @@ int p9_process_bind_executable(const char *path,int volume,uint64_t oid)
     if(!path || !*path || strlen(path)>=sizeof executables[0].path || volume<=0 || !oid) {
         errno=EINVAL; return -1;
     }
-    for(i=0;i<P9_EXECUTABLES;++i) if(!executables[i].volume || !strcmp(path,executables[i].path)) {
-        strcpy(executables[i].path,path); executables[i].volume=volume; executables[i].oid=oid;
+    for(i=0;i<P9_EXECUTABLES-1;++i) if(!executables[i].handle || !strcmp(path,executables[i].path)) {
+        strcpy(executables[i].path,path); executables[i].handle=volume; executables[i].kind=VkindGeVolume; executables[i].oid=oid;
         return 0;
     }
     errno=ENOSPC; return -1;
@@ -555,12 +556,21 @@ int p9_process_executable(const char *path,uint64_t *oid)
         const char *alias=p9_multicall_resolve(target);
         if(alias) target=alias;
     }
-    for(i=0;i<P9_EXECUTABLES;++i)
-        if(executables[i].volume>0 && !strcmp(target,executables[i].path)) {
+    for(i=0;i<P9_EXECUTABLES-1;++i)
+        if(executables[i].handle>0 && !strcmp(target,executables[i].path)) {
             if(oid) *oid=executables[i].oid;
             return (int)i+1;
         }
-    return 0;
+    i=P9_EXECUTABLES-1;
+    if(executables[i].handle>0)objclose(executables[i].handle);
+    memset(&executables[i],0,sizeof executables[i]);
+    if(strlen(target)>=sizeof executables[i].path)return 0;
+    int scoped=p9_program_lookup(target);
+    if(scoped<=0)return 0;
+    strcpy(executables[i].path,target);executables[i].handle=scoped;
+    executables[i].kind=VkindGe;executables[i].oid=0;
+    if(oid)*oid=0;
+    return (int)i+1;
 }
 
 void p9_process_exit(int code)
@@ -614,10 +624,10 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     }
     image.environment_size=envsize;
     if(p9_fd_export(&image.fds,&plan,1)<0) return -1;
-    for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].volume>0) {
+    for(i=0;i<P9_EXECUTABLES;++i) if(executables[i].handle>0) {
         image.executables[i]=executables[i];
-        image.executables[i].volume=p9_plan_add(&plan,executables[i].volume,Vexecute|Vdelegate);
-        if(image.executables[i].volume<0) goto undo;
+        image.executables[i].handle=p9_plan_add(&plan,executables[i].handle,Vexecute|Vdelegate);
+        if(image.executables[i].handle<0) goto undo;
     }
     for(i=0;i<P9_CHILDREN;++i) if(children[i].pid) {
         image.children[i]=children[i];
@@ -639,7 +649,7 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     }
     /* The caller remains intact until the native loader has validated and
      * published a real replacement. No descriptors close on SPAWN failure. */
-    child=spawn(executables[selected].volume,executables[selected].oid,
+    child=spawn(executables[selected].handle,executables[selected].oid,
                 (char **)argv,(int)argc,&options);
     if(child<0) {
         ctx=box(mailbox,1);
@@ -710,10 +720,12 @@ int p9_process_startup(void)
     blocked=(unsigned long)image.blocked&~unmaskable();
     alarm_deadline=image.alarm_deadline;
     for(i=1;i<NSIG;++i) if(image.ignored&bit((int)i)) actions[i].sa_handler=SIG_IGN;
-    for(i=0;i<P9_EXECUTABLES;++i) if(image.executables[i].oid) {
-        int index=image.executables[i].volume;
-        if(index<0 || index>=n || !memchr(image.executables[i].path,0,256)) return -1;
-        executables[i]=image.executables[i]; executables[i].volume=handles[index];
+    for(i=0;i<P9_EXECUTABLES;++i) if(image.executables[i].kind) {
+        int index=image.executables[i].handle;
+        if(index<0 || index>=n || !memchr(image.executables[i].path,0,256) ||
+           (image.executables[i].kind!=VkindGe && image.executables[i].kind!=VkindGeVolume) ||
+           (image.executables[i].kind==VkindGe && image.executables[i].oid!=0)) return -1;
+        executables[i]=image.executables[i]; executables[i].handle=handles[index];
     }
     for(i=0;i<P9_CHILDREN;++i) if(image.children[i].pid) {
         int h=image.children[i].handle,m=image.children[i].mailbox;

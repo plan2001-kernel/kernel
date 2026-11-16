@@ -154,13 +154,13 @@ static int mutate(PjObject *parent,ObjProjectReq *r)
         return rc;
     }
 }
-static int native_create(PjObject *parent,const char *label,unsigned kind,const void *data,size_t n,PjObject *out)
+static int native_create(PjObject *parent,const char *label,unsigned kind,const void *data,size_t n,unsigned rights,PjObject *out)
 {
     UxMeta m;uxmeta_init(&m,label,kind==VkindObjectSpace?1:2,_nsec());
     unsigned char *p;size_t len;
     if(kind==VkindObjectSpace){if(pj_empty(&m,&p,&len))return -1;}
     else if(framed(data,n,&m,NULL,0,&p,&len))return -1;
-    ObjProjectReq r={0};r.operation=ProjectCreate;r.kind=kind;r.rights=parent->rights;
+    ObjProjectReq r={0};r.operation=ProjectCreate;r.kind=kind;r.rights=rights;
     if(name(&r,label)){release(p);return -1;}
     r.data=p;r.length=len;int rc=mutate(parent,&r);release(p);
     if(rc<0)return -1;return out?pj_resolve(parent,label,out):0;
@@ -253,7 +253,13 @@ retry:
 }
 
 int pj_create(PjObject *parent,const char *label,unsigned kind,const void *data,size_t n,PjObject *out)
-{PjObject w={0};if(write_parent(parent,&w))return -1;int rc=native_create(&w,label,kind,data,n,out);pj_close(&w);return rc;}
+{PjObject w={0};if(write_parent(parent,&w))return -1;int rc=native_create(&w,label,kind,data,n,w.rights,out);pj_close(&w);return rc;}
+int pj_create_attenuated(PjObject *parent,const char *label,unsigned kind,const void *data,size_t n,unsigned rights,PjObject *out)
+{
+    PjObject w={0};if(write_parent(parent,&w))return -1;
+    if(!rights || (rights&~w.rights)){pj_close(&w);errno=EACCES;return -1;}
+    int rc=native_create(&w,label,kind,data,n,rights,out);pj_close(&w);return rc;
+}
 int pj_link(PjObject *parent,const char *label,PjObject *target)
 {PjObject w={0};if(write_parent(parent,&w))return -1;int rc=native_link(&w,label,target);pj_close(&w);return rc;}
 int pj_remove(PjObject *parent,const char *label,int directory)

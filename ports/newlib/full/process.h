@@ -8,7 +8,7 @@
 #define P9_EXECUTABLES 4
 #define P9_CHILDREN 1024
 #define P9_ENV_BYTES 4096
-#define P9_CONTEXT_ABI_VERSION 3
+#define P9_CONTEXT_ABI_VERSION 4
 #define P9_CONTEXT_MAGIC UINT64_C(0x3158544358553950)
 typedef struct { int handle; uint64_t rights; } P9Grant;
 typedef struct { unsigned count; P9Grant grants[P9_GRANTS]; } P9Plan;
@@ -27,7 +27,7 @@ typedef struct {
     unsigned cwd_count;
     int cwd_handles[P9_FDS];
 } P9FdImage;
-typedef struct { char path[256]; int volume; uint64_t oid; } P9Executable;
+typedef struct { char path[256]; int handle, kind; uint64_t oid; } P9Executable;
 typedef struct { int pid, handle, mailbox, reported, status, stop_seen, stop_notified; } P9Child;
 typedef struct {
     uint64_t magic, version, pending, blocked, ignored, parent_pending;

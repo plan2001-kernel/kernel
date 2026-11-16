@@ -22,7 +22,15 @@ The `--toolchain` multicall profile explicitly registers only the seeded
 compiler when it is installed in the delegated root. The F6 root contains
 the toolchain; the F5 root remains independent. An installed path or raw OID
 never grants execution authority. Newly generated ELF output remains
-unregistered; admission and execution of those programs belongs to P4.
+unregistered until an explicit `tcc --register PATH` operation. Registration
+validates the native ELF, publishes a fresh read/execute snapshot in the
+root's `/.programs` admission catalog, and never changes the caller's native
+authority. Write access to that catalog is program admission authority.
+Later edits to the compiler output do not change the admitted version;
+explicit readmission atomically selects the replacement. `execve` resolves
+the scoped GE Handle and the kernel obtains its OID from that capability,
+rejecting OID substitution, missing execute rights and revoked grants.
+The catalog and admitted versions persist across cold boots.
 
 TinyCC defines `__plan2001__`, uses native startup and Newlib archives, and
 produces static AMD64 ELF by default. It does not select Linux startup
@@ -37,6 +45,8 @@ With a provisioned F6 root, compile and link using the installed files:
 ```sh
 tcc -c /home/hello.c -o /home/hello.o
 tcc /home/hello.o -o /home/hello
+tcc --register /home/hello
+/home/hello
 ```
 
 `tools/ci/build_toolchain_image.sh KERNEL BUSYBOX TINYCC NEWLIB_SOURCE REPORTS
@@ -49,4 +59,11 @@ persistence and PS/2/VGA acceptance of compiler commands in the genuine F6
 ash process. The image is bundled with pinned upstream sources, port source,
 relinking recipes, runtime objects, license files and checksums. Passing this
 AMD64 fixture does not establish physical hardware or ARM64 support, general
-POSIX completeness, compiler self-hosting, or execution of newly linked ELF.
+POSIX completeness, compiler self-hosting, or general execution compatibility beyond the tested native programs.
+
+Scoped execution requires the kernel's scoped-GE SPAWN support. The ordinary
+workflow continues to fetch kernel main. A manually selected integration SHA
+is recorded separately and establishes compatibility only with that pending
+kernel revision, not moving main. The process context ABI is version 4 and
+records the provider kind of each inherited executable capability; old
+context layouts are rejected.

@@ -147,7 +147,8 @@ static uint64_t *offset_lock(OpenFile *f)
 static void offset_unlock(uint64_t *p){int saved=errno;p9_full_region_unmap((uintptr_t)p);errno=saved;}
 int p9_backend_open(const char *path,int flags,...)
 {
-    if(p9_process_executable(path,NULL) &&
+    int executable=p9_process_executable(path,NULL);
+    if(executable && executable<P9_EXECUTABLES &&
        ((flags&O_ACCMODE)!=O_RDONLY || (flags&(O_CREAT|O_TRUNC)))){errno=EACCES;return -1;}
     int fd;for(fd=0;fd<UXFD_SLOTS && files[fd].object.handle;fd++);if(fd==UXFD_SLOTS){errno=EMFILE;return -1;}
     PjObject o={0};int found=p9_project_resolve(path,&o)==0;

@@ -165,6 +165,8 @@ try:
         waitscreen("shell-compile", "\nSHELL-COMPILE\n", 120)
         enter("tcc /home/shell.o -o /home/shell && echo SHELL-LINK")
         waitscreen("shell-link", "\nSHELL-LINK\n", 180)
+        enter("tcc --register /home/shell && /home/shell")
+        waitscreen("shell-run", "\nnative: 9\n", 120)
         print("PASS: F6 ash invokes installed native TinyCC and links with Newlib: " + mode)
     elif mode in ("f6-initial", "f6-reboot"):
         for slot, value, other in ((5, "FIVE", "SIX"), (6, "SIX", "FIVE")):

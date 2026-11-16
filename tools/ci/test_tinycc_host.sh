@@ -11,3 +11,5 @@ flags=(-std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined -fno-omit-fr
 "$OUT/input"
 "${CC:-gcc}" "${flags[@]}" "$ROOT/tests/host/test_toolchain_install.c" "$ROOT/ports/tinycc/install.c" -o "$OUT/install"
 "$OUT/install"
+"${CC:-gcc}" "${flags[@]}" "$ROOT/tests/host/test_elf_admission.c" "$ROOT/ports/newlib/full/elf_validate.c" -o "$OUT/elf"
+"$OUT/elf"
