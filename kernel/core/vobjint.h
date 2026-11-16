@@ -59,8 +59,6 @@ int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
 /* ObjectSpace graph is independent of Pgrp, GE SpaceID, and process ancestry. */
 int	vobjspacecreate(VobjId *id);
-void	vobjspacesave(int spacehandle, ObjSpaceDiskReq*, uvlong *version);
-int	vobjspaceload(ObjSpaceDiskReq*, VobjId *id);
 uvlong	vobjspacebind(int spacehandle, ObjSpaceBindReq *req);
 void	vobjspaceunbind(int spacehandle, uvlong bindingid);
 int	vobjspaceresolve(int spacehandle, uvlong bindingid, uvlong rights);

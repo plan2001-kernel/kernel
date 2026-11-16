@@ -592,7 +592,7 @@ oscopycap(Ohand *src, uvlong oid)
 		free(n);
 		error("O: capability open failed");
 	}
- if(!src->bootstrap && src->caps != 2){
+ if(!src->bootstrap){
   n->origin = src->origin ? src->origin : src;
   incref(&n->origin->ref);
  }

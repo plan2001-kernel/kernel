@@ -50,8 +50,8 @@ AMD64 or claim that ARM64 userspace and drivers already work.
 - GE/O volume handles authorize flat OID operations; ObjectSpace graph
   capabilities authorize graph relations and are separate from the store.
   No named GE/O storage subspace or implicit `init` selector exists.
-  Persistent ObjectSpace metadata still needs atomic GE/O transactions and
-  trusted capability reconstruction; these are not yet implemented.
+  Persistent ObjectSpaces use atomic GE/O publication and scoped capability
+  reconstruction; see docs/PROJECT-NAMESPACES.md.
 - Pgrp/OContext process-root handling was replaced by explicit ObjectSpace
   capabilities. OwnerID equality access gates have already been removed. Do not
   reintroduce them or add compatibility wrappers.

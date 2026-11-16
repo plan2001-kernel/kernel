@@ -237,6 +237,13 @@ class Namespace(Object):
             else:target.close()
 
 def from_handle(handle):return Namespace(handle)
+def current():
+    roots=_p.space_roots()
+    if len(roots)!=1:raise OSError('one explicitly delegated project root required')
+    return Namespace(roots[0])
+def open_project(oid,rights=_READONLY):
+    """Trusted boot/installer operation; ordinary processes use current/from_handle."""
+    return Namespace(_p.project_boot(oid,rights))
 def _import(name,globals=None,locals=None,fromlist=(),level=0):
     context=globals.get('__project_context__') if globals else None
     if context is None:context=_active

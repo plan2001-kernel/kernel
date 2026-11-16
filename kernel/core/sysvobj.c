@@ -225,10 +225,6 @@ struct Vspace {
     Ohand *project;
     uvlong projectoid;
 	int nbindings, revoked;
-	/* A restored root owns the otherwise weak nested ObjectSpace nodes.
-	 * Bindings remain weak, preventing graph cycles from leaking objects. */
-	int npersist_children;
-	Vobj *persist_children[16];
 	int capacity;
     VspaceBinding *entries;
 };
@@ -466,8 +462,6 @@ vobjput(Vobj *o)
 			if(s->entries[i].target != nil)
 				vobjput(s->entries[i].target);
 		}
-		for(i = 0; i < s->npersist_children; i++)
-			vobjput(s->persist_children[i]);
 		oshandput(s->project);
         free(s->entries);
         free(s);
@@ -4201,7 +4195,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 }
 
 /* The persistent ObjectSpace engine lives next to the Vhand/Vcap internals. */
-#include "vspacepersist.inc"
+#include "vprojectboot.inc"
 
 /*
  * OPEN(Handle): duplicate an existing authorized capability with an equal or

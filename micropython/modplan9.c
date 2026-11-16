@@ -616,6 +616,15 @@ static mp_obj_t p9_projectopen(size_t n,const mp_obj_t *a){
  return check(obj_open(ObjOpenProject,&r,sizeof r,0,NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectopen_obj,3,4,p9_projectopen);
+static mp_obj_t p9_projectboot(size_t n,const mp_obj_t *a){
+ long volume=obj_open(ObjOpenVolume,NULL,0,0,NULL);if(volume<0)raise_err();
+ ObjProjectOpen r={0};r.volume=volume;r.oid=mp_obj_get_int_truncated(a[0]);
+ r.rights=n>1?mp_obj_get_int(a[1]):Vread|Vmeta|Vdelegate|Vexecute;
+ long h=obj_open(ObjOpenProject,&r,sizeof r,0,NULL);
+ if(h<0){char error[128];rerrstr(error,sizeof error);obj_close(volume);werrstr("%s",error);raise_err();}
+ obj_close(volume);return mp_obj_new_int(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectboot_obj,1,2,p9_projectboot);
 static mp_obj_t p9_projectsnapshot(mp_obj_t handle){
  ObjProjectReq r={0};ObjCall c={0};r.operation=ProjectRead;
  c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
@@ -720,34 +729,6 @@ p9_spacenew(void)
     return check(obj_create(0, ObjKindObjectSpace, NULL, 0, NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_spacenew_obj, p9_spacenew);
-/* GE/O graph snapshots: explicit volume capability, never an ambient OID. */
-static mp_obj_t
-p9_spacesave(mp_obj_t space, mp_obj_t volume, mp_obj_t oid)
-{
-    ObjSpaceDiskReq r;
-    ObjCall c = p9_spacecall(ObjOpSpaceSave);
-    memset(&r, 0, sizeof r);
-    r.volume = mp_obj_get_int(volume);
-    r.oid = (unsigned long long)mp_obj_get_uint(oid);
-    c.in = &r;
-    c.inlen = sizeof r;
-    check(obj_invoke(mp_obj_get_int(space), &c, sizeof c));
-    return mp_obj_new_int_from_ull(c.aux);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(p9_spacesave_obj, p9_spacesave);
-
-static mp_obj_t
-p9_spaceload(mp_obj_t volume, mp_obj_t oid)
-{
-    ObjSpaceDiskReq r;
-    memset(&r, 0, sizeof r);
-    r.volume = mp_obj_get_int(volume);
-    r.oid = (unsigned long long)mp_obj_get_uint(oid);
-    return check(obj_open(ObjOpenSpaceGraph, &r, sizeof r, 0, NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_spaceload_obj, p9_spaceload);
-
-
 static mp_obj_t
 p9_spacebind(size_t n, const mp_obj_t *a)
 {
@@ -1336,6 +1317,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_boot), MP_ROM_PTR(&p9_projectboot_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_snapshot), MP_ROM_PTR(&p9_projectsnapshot_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_identity), MP_ROM_PTR(&p9_projectidentity_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_module), MP_ROM_PTR(&p9_projectnewmodule_obj) },
@@ -1351,8 +1333,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_cap_revoke), MP_ROM_PTR(&p9_caprevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_roots), MP_ROM_PTR(&p9_spaceroots_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_new), MP_ROM_PTR(&p9_spacenew_obj) },
-    { MP_ROM_QSTR(MP_QSTR_space_save), MP_ROM_PTR(&p9_spacesave_obj) },
-    { MP_ROM_QSTR(MP_QSTR_space_load), MP_ROM_PTR(&p9_spaceload_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_bind), MP_ROM_PTR(&p9_spacebind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_unbind), MP_ROM_PTR(&p9_spaceunbind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_resolve), MP_ROM_PTR(&p9_spaceresolve_obj) },
@@ -1390,8 +1370,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_UNBIND), MP_ROM_INT(ObjOpSpaceUnbind) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_RESOLVE), MP_ROM_INT(ObjOpSpaceResolve) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_ENUMERATE), MP_ROM_INT(ObjOpSpaceEnumerate) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_SAVE), MP_ROM_INT(ObjOpSpaceSave) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE_GRAPH), MP_ROM_INT(ObjOpenSpaceGraph) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_NAMES), MP_ROM_INT(ObjSpaceRelationNames) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_CONTAINS), MP_ROM_INT(ObjSpaceRelationContains) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_IMPORTS), MP_ROM_INT(ObjSpaceRelationImports) },

@@ -39,7 +39,6 @@ enum {
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
 	ObjOpenProject = 18,
-	ObjOpenSpaceGraph	= 17,	/* authorized restore from GE/O snapshot OID */
 };
 
 /* obj_create kinds.  ObjKindBytes is volatile immutable content and
@@ -128,7 +127,6 @@ enum {
 	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
 	ObjOpConsoleInfo = 59, /* Vmeta on a console input region: geometry */
 	ObjOpProject = 60,
-	ObjOpSpaceSave = 58,	/* durable, atomic graph snapshot (GE/O v2) */
 };
 
 /* ObjOpRegionMap arg1 flags. */
