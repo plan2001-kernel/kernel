@@ -121,7 +121,7 @@ void vobjprojectcall(int handle,ObjCall *c)
     uchar add[32+255];long addlen=0;int rights,dir,need;
     if(c->in==nil || c->inlen!=sizeof r)error(Ebadarg);
     validaddr((uintptr)c->in,sizeof r,0);memmove(&r,c->in,sizeof r);
-    if(r.flags || r.reserved || r.length>64*1024*1024)error(Ebadarg);
+    if((r.flags && !(r.operation==ProjectLink && r.flags==1)) || r.reserved || r.length>64*1024*1024)error(Ebadarg);
     need=(r.operation==ProjectRead || r.operation==ProjectResolve)?Vread:
          r.operation==ProjectAttenuate?Vdelegate:r.operation==ProjectPut?Vwrite:Vcontrol;
     h=vlookup(handle,need);
@@ -160,15 +160,16 @@ void vobjprojectcall(int handle,ObjCall *c)
         c->result=pjinstall(oh,pjget(p+at+8,8),pjget(p+at+24,4),rights,h->cap);goto done;
     }
     tx=oscopycapdelegate(oh,oshandrights(oh));
-    if(r.operation==ProjectCreate || r.operation==ProjectLink){
-        pjname(r.name);if(pjfind(p,raw,0,r.name)>=0)error("namespace: exists");
+    if(r.operation==ProjectCreate || r.operation==ProjectDetached || r.operation==ProjectLink){
+        if(r.operation!=ProjectDetached){pjname(r.name);if((r.operation==ProjectCreate || r.flags==1) && pjfind(p,raw,0,r.name)>=0)error("namespace: exists");}
         rights=r.rights?r.rights:h->rights;if(rights&~h->rights)error(Eperm);
-        if(r.operation==ProjectCreate){
+        if(r.operation==ProjectCreate || r.operation==ProjectDetached){
             if(!(h->rights&Vcreate) || r.data==nil || !r.length ||
                (r.kind!=VkindGe && r.kind!=VkindObjectSpace))error(Eperm);
             validaddr((uintptr)r.data,r.length,0);payload=mallocz(r.length,1);if(payload==nil)error(Enomem);
             memmove(payload,r.data,r.length);if(r.kind==VkindObjectSpace){pjcheck(payload,r.length);if(pjget(payload+24,8)!=0)error("namespace: new directory must be empty");}else pjraw(payload,r.length);
             oscreatehandowner(tx,payload,r.length,&newid,up->owner?up->owner:ownerroot());
+            if(r.operation==ProjectDetached){c->result=pjinstall(oh,newid,r.kind,rights,h->cap);goto done;}
         }else{
             other=vlookup(r.other,Vdelegate);oh2=pjbackend(other->obj,&newid);
             uchar a[16],b[16];osvolumeid(oh,a);osvolumeid(oh2,b);if(memcmp(a,b,16))error("namespace: cross volume");

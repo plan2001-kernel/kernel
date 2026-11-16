@@ -76,12 +76,31 @@ class Namespace(Object):
         return Namespace(h) if kind==19 else Object(h)
     def _view(self):return self.metadata().get('project_view')
     def _sources(self):return [self._native(binding=e[4]) for e in self._entries()]
-    def entries(self):
+    def compose(self,name,sources,operation='union',write_source=None):
+        if operation not in ('union','intersection') or not sources:raise ValueError('invalid composition')
+        if write_source is not None and not 0<=write_source<len(sources):raise ValueError('invalid write source')
+        meta=_meta(name,True);meta['project_view']=operation;meta['write_source']=write_source
+        h=_p.project_call(self.handle,10,None,0,0,_empty(meta),19,_p.obj_info(self.handle)[10])
+        view=Namespace(h)
+        try:
+            for i,source in enumerate(sources):view.link(str(i),source)
+            self.link(name,view)
+            return view
+        except:
+            view.close();raise
+    def _writer(self):
+        if not self._view():return self
+        index=self.metadata().get('write_source')
+        if index is None:raise OSError('read-only composed namespace')
+        return self._native(str(index))._writer()
+    def entries(self,_seen=()):
         mode=self._view()
         if not mode:return self._entries()
+        identity=self.identity()
+        if identity in _seen:raise OSError('cyclic namespace composition')
         sources=self._sources()
         try:
-            rows=[s.entries() for s in sources];table={}
+            rows=[s.entries(_seen+(identity,)) for s in sources];table={}
             for row in rows:
                 for e in row:
                     key=(e[0],e[1]);table[key]=e
@@ -91,23 +110,37 @@ class Namespace(Object):
         finally:
             for s in sources:s.close()
     def names(self):return [e[0] for e in self.entries()]
-    def resolve(self,name):
+    def resolve(self,name,_seen=()):
         if '/' in name:return self.open(name)
         mode=self._view()
         if not mode:return self._native(name)
+        identity=self.identity()
+        if identity in _seen:raise OSError('cyclic namespace composition')
         sources=self._sources();matches=[]
         try:
             for source in sources:
                 if name not in source.names():
                     if mode=='intersection':raise OSError('not found in intersection')
                     continue
-                matches.append(source.resolve(name))
+                matches.append(source.resolve(name,_seen+(identity,)))
             if not matches:raise OSError('not found')
             if any(o.identity()!=matches[0].identity() for o in matches):raise OSError('ambiguous name')
             rights=_READONLY
             for o in matches:rights&=_p.obj_info(o.handle)[10]
-            h=_p.project_call(matches[0].handle,8,None,0,0,None,0,rights)
-            return Namespace(h) if isinstance(matches[0],Namespace) else Object(h)
+            grant=matches[0];selected=None
+            index=self.metadata().get('write_source')
+            try:
+                if index is not None:
+                    writer=self._native(str(index))
+                    try:
+                        if name in writer.names():selected=writer.resolve(name)
+                    finally:writer.close()
+                    if selected is not None and selected.identity()==grant.identity():
+                        grant=selected;rights=_p.obj_info(grant.handle)[10]
+                h=_p.project_call(grant.handle,8,None,0,0,None,0,rights)
+                return Namespace(h) if isinstance(matches[0],Namespace) else Object(h)
+            finally:
+                if selected is not None:selected.close()
         finally:
             for o in matches:o.close()
             for source in sources:source.close()
@@ -125,18 +158,34 @@ class Namespace(Object):
             return current
         except:
             current.close();raise
-    def link(self,name,target):return _p.project_call(self.handle,3,name,target.handle,0,None,0,_p.obj_info(target.handle)[10])
+    def link(self,name,target):
+        # Source links during composition are native bindings in the descriptor.
+        return _p.project_call(self.handle,3,name,target.handle,0,None,0,_p.obj_info(target.handle)[10]&_p.obj_info(self.handle)[10])
     def create(self,name,data=b'',directory=False):
+        if self._view():
+            writer=self._writer()
+            try:return writer.create(name,data,directory)
+            finally:writer.close()
         meta=_meta(name,directory)
         payload=_empty(meta) if directory else _frame(data,meta)
         _p.project_call(self.handle,2,name,0,0,payload,19 if directory else 3,_p.obj_info(self.handle)[10])
         return self.resolve(name)
     def mkdir(self,name):return self.create(name,directory=True)
     def remove(self,name):
+        if self._view():
+            writer=self._writer()
+            try:return writer.remove(name)
+            finally:writer.close()
         matches=[e for e in self._entries() if e[0]==name]
         if len(matches)!=1:raise OSError('not found or ambiguous')
         return _p.project_call(self.handle,4,None,0,matches[0][4])
     def rename(self,name,destination,newname,replace=False):
+        if self._view() or destination._view():
+            src=self._writer();dst=destination._writer()
+            try:return src.rename(name,dst,newname,replace)
+            finally:
+                if src is not self:src.close()
+                if dst is not destination:dst.close()
         matches=[e for e in self._entries() if e[0]==name]
         if len(matches)!=1:raise OSError('not found or ambiguous')
         return _p.project_call(self.handle,5,newname,destination.handle,matches[0][4],None,0,0,0,replace)
