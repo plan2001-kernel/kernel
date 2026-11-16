@@ -643,6 +643,9 @@ static mp_obj_t p9_projectcall(size_t n,const mp_obj_t *a){
  if(n>5 && a[5]!=mp_const_none){mp_get_buffer_raise(a[5],&b,MP_BUFFER_READ);r.data=b.buf;r.length=b.len;}
  if(n>6)r.kind=mp_obj_get_int(a[6]);if(n>7)r.rights=mp_obj_get_int(a[7]);
  if(n>8)r.epoch=mp_obj_get_int_truncated(a[8]);if(n>9)r.replace=mp_obj_get_int_truncated(a[9]);
+ if(n>10 && a[10]!=mp_const_none){mp_buffer_info_t m;mp_get_buffer_raise(a[10],&m,MP_BUFFER_READ);r.metadata=m.buf;r.metadata_length=m.len;}
+ if(n>11 && a[11]!=mp_const_none){mp_buffer_info_t m;mp_get_buffer_raise(a[11],&m,MP_BUFFER_READ);r.other_metadata=m.buf;r.other_metadata_length=m.len;}
+ if(n>12)r.other_epoch=mp_obj_get_int_truncated(a[12]);
  c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
  int h=mp_obj_get_int(a[0]);
  if(obj_invoke(h,&c,sizeof c)<0)raise_err();
@@ -650,7 +653,7 @@ static mp_obj_t p9_projectcall(size_t n,const mp_obj_t *a){
   if(obj_invoke(h,&c,sizeof c)<0){vstr_clear(&v);raise_err();}return mp_obj_new_bytes_from_vstr(&v);}
  return mp_obj_new_int_from_ll(c.result);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectcall_obj,2,10,p9_projectcall);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectcall_obj,2,13,p9_projectcall);
 /* Persistent GE/O through the five-operation ABI only. */
 static mp_obj_t p9_objopenvolume(void){
  return check(obj_open(ObjOpenVolume,NULL,0,0,NULL));

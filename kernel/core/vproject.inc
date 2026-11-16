@@ -97,6 +97,16 @@ static uchar *pjedit(uchar *p,long n,long remove,uchar *add,long addlen,long *ne
     memmove(q+newraw,p+raw,meta);objtail_pack(q+newraw+meta,newraw,meta);
     *newn=newraw+meta+32;return q;
 }
+static void pjmetadata(uchar **blob,long *n,const void *metadata,uvlong length)
+{
+    if(metadata==nil && length==0)return;
+    if(metadata==nil || length>1024*1024)error(Ebadarg);
+    validaddr((uintptr)metadata,length,0);
+    long raw=pjraw(*blob,*n);if(raw+length+32>64*1024*1024)error("namespace: transaction size");
+    uchar *p=mallocz(raw+length+32,1);if(p==nil)error(Enomem);
+    memmove(p,*blob,raw);memmove(p+raw,metadata,length);objtail_pack(p+raw+length,raw,length);
+    free(*blob);*blob=p;*n=raw+length+32;
+}
 /* Per-volume namespace reference index, published in the same GE transaction
  * as the changed bindings. An index OID grants no access to its targets. */
 #define PJREFINDEX 0x4e53524546494e44ULL
@@ -219,27 +229,35 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
         if(pjget(p+16,8)==~(uvlong)0)error("namespace: binding IDs exhausted");
         memset(add,0,sizeof add);pjput(add,pjget(p+16,8)+1,8);pjput(add+8,newid,8);
         pjput(add+16,rights,4);pjput(add+20,r.relation,4);pjput(add+24,r.kind,4);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
-        q=pjedit(p,n,-1,add,addlen,&qn);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=r.operation==ProjectLink?pjget(add,8):0;goto done;
+        q=pjedit(p,n,-1,add,addlen,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=r.operation==ProjectLink?pjget(add,8):0;goto done;
     }
     at=pjfind(p,raw,r.binding,nil);if(at<0)error("namespace: not found");
     if(r.operation==ProjectUnlink){
-        q=pjedit(p,n,at,nil,0,&qn);oswritehandk(tx,oid,q,qn);pjrefchange(tx,pjget(p+at+8,8),-1);oscommithand(tx,&ver);c->aux=ver;goto done;
+        if(r.kind){
+            if(r.kind!=pjget(p+at+24,4))error("namespace: target kind changed");
+            if(r.kind==VkindObjectSpace){long bytes;payload=pjload(oh,pjget(p+at+8,8),&bytes,1);if(pjget(payload+24,8))error("namespace: target not empty");}
+        }
+        q=pjedit(p,n,at,nil,0,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);oswritehandk(tx,oid,q,qn);pjrefchange(tx,pjget(p+at+8,8),-1);oscommithand(tx,&ver);c->aux=ver;goto done;
     }
     if(r.operation!=ProjectRename)error(Ebadarg);
     pjname(r.name);other=vlookup(r.other,Vcontrol);oh2=pjbackend(other->obj,&oid2);
     if(other->obj->kind!=VkindObjectSpace)error(Ebadarg);
     uchar a[16],b[16];osvolumeid(oh,a);osvolumeid(oh2,b);if(memcmp(a,b,16))error("namespace: cross volume");
-    p2=pjload(oh2,oid2,&n2,1);raw2=pjraw(p2,n2);at2=pjfind(p2,raw2,0,r.name);
+    p2=pjload(oh2,oid2,&n2,1);raw2=pjraw(p2,n2);if(r.other_epoch && r.other_epoch!=pjget(p2+8,8))error("namespace: epoch changed");at2=pjfind(p2,raw2,0,r.name);
     if(at2>=0 && pjget(p2+at2+8,8)==pjget(p+at+8,8))goto done;
     if(at2>=0 && !r.replace)error("namespace: exists");
+    if(r.kind && at2>=0){
+        if(pjget(p+at+24,4)!=r.kind || pjget(p2+at2+24,4)!=r.kind)error("namespace: target kind changed");
+        if(r.kind==VkindObjectSpace){long bytes;payload=pjload(oh2,pjget(p2+at2+8,8),&bytes,1);if(pjget(payload+24,8))error("namespace: target not empty");}
+    }
     if((pjget(p+at+16,4)&~other->rights)!=0)error(Eperm);
     memmove(add,p+at,32);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
-    q=pjedit(p,n,at,nil,0,&qn);
+    q=pjedit(p,n,at,nil,0,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);
     if(oid==oid2){
         if(at2>=0){long z=pjfind(q,pjraw(q,qn),pjget(p2+at2,8),nil);q2=pjedit(q,qn,z,nil,0,&q2n);free(q);q=q2;q2=nil;qn=q2n;}
         pjput(add,pjget(q+16,8)+1,8);q2=pjedit(q,qn,-1,add,addlen,&q2n);oswritehandk(tx,oid,q2,q2n);
     }else{
-        pjput(add,pjget(p2+16,8)+1,8);q2=pjedit(p2,n2,at2,add,addlen,&q2n);
+        pjput(add,pjget(p2+16,8)+1,8);q2=pjedit(p2,n2,at2,add,addlen,&q2n);pjmetadata(&q2,&q2n,r.other_metadata,r.other_metadata_length);
         oswritehandk(tx,oid,q,qn);oswritehandk(tx,oid2,q2,q2n);
     }
     if(at2>=0)pjrefchange(tx,pjget(p2+at2+8,8),-1);

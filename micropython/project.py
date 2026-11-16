@@ -37,9 +37,10 @@ def _empty(meta):
     return _frame(raw+_u(_hash(raw)),meta)
 
 def _meta(name,directory=False):
+    now=_p.time_ns()
     return {'profile':'plan2001.unix.v1','name':name,'name_bytes':name.encode(),
-            'created':None,'media_type':'inode/directory' if directory else 'application/octet-stream',
-            'unix':{'mode':0o40700 if directory else 0o100600,'uid':0,'gid':0}}
+            'created':now,'media_type':'inode/directory' if directory else 'application/octet-stream',
+            'unix':{'mode':0o40700 if directory else 0o100600,'uid':0,'gid':0,'birthtime_ns':now,'mtime_ns':now,'ctime_ns':now,'atime_ns':now}}
 
 class Object:
     def __init__(self,handle):self.handle=handle
@@ -56,7 +57,10 @@ class Object:
         if not isinstance(data,bytes):raise TypeError('bytes required')
         blob,version=_p.project_snapshot(self.handle)
         raw,encoded=_split(blob);meta=_cbor.loads(encoded)
-        if isinstance(meta,dict):meta['raw_sha256']=None;encoded=_cbor.dumps(meta)
+        if isinstance(meta,dict):
+            meta['raw_sha256']=None
+            if isinstance(meta.get('unix'),dict):meta['unix']['mtime_ns']=_p.time_ns();meta['unix']['ctime_ns']=meta['unix']['mtime_ns']
+            encoded=_cbor.dumps(meta)
         payload=data+encoded+b'P2OTAIL1'+_u(1,4)+_u(0,4)+_u(len(data))+_u(len(encoded))
         _p.project_call(self.handle,6,None,0,0,payload,0,0,version)
     def text(self):return self.raw().decode('utf-8')
@@ -82,6 +86,20 @@ class Namespace(Object):
         return Namespace(h) if kind==19 else Object(h)
     def _view(self):return self.metadata().get('project_view')
     def _sources(self):return [self._native(binding=e[4]) for e in self._entries()]
+    def _directory_metadata(self):
+        blob,epoch=_p.project_snapshot(self.handle);raw,encoded=_split(blob)
+        meta=_cbor.loads(encoded)
+        if isinstance(meta,dict):
+            unix=meta.get('unix')
+            if isinstance(unix,dict):unix['mtime_ns']=_p.time_ns();unix['ctime_ns']=unix['mtime_ns']
+            encoded=_cbor.dumps(meta)
+        return encoded,epoch
+    def _change(self,op,name=None,other=0,binding=0,data=None,kind=0,rights=0,replace=False,destination=None):
+        meta,epoch=self._directory_metadata();othermeta=None;otherepoch=0
+        if destination is not None:othermeta,otherepoch=destination._directory_metadata()
+        return _p.project_call(self.handle,op,name,other,binding,data,kind,rights,epoch,replace,meta,othermeta,otherepoch)
+    def _native_link(self,name,target):
+        return self._change(3,name,target.handle,rights=_p.obj_info(target.handle)[10]&_p.obj_info(self.handle)[10])
     def compose(self,name,sources,operation='union',write_source=None):
         if operation not in ('union','intersection') or not sources:raise ValueError('invalid composition')
         if write_source is not None and not 0<=write_source<len(sources):raise ValueError('invalid write source')
@@ -89,7 +107,7 @@ class Namespace(Object):
         h=_p.project_call(self.handle,10,None,0,0,_empty(meta),19,_p.obj_info(self.handle)[10])
         view=Namespace(h)
         try:
-            for i,source in enumerate(sources):view.link(str(i),source)
+            for i,source in enumerate(sources):view._native_link(str(i),source)
             self.link(name,view)
             return view
         except:
@@ -165,8 +183,11 @@ class Namespace(Object):
         except:
             current.close();raise
     def link(self,name,target):
-        # Source links during composition are native bindings in the descriptor.
-        return _p.project_call(self.handle,3,name,target.handle,0,None,0,_p.obj_info(target.handle)[10]&_p.obj_info(self.handle)[10])
+        if self._view():
+            writer=self._writer()
+            try:return writer.link(name,target)
+            finally:writer.close()
+        return self._native_link(name,target)
     def create(self,name,data=b'',directory=False):
         if self._view():
             writer=self._writer()
@@ -174,7 +195,7 @@ class Namespace(Object):
             finally:writer.close()
         meta=_meta(name,directory)
         payload=_empty(meta) if directory else _frame(data,meta)
-        _p.project_call(self.handle,2,name,0,0,payload,19 if directory else 3,_p.obj_info(self.handle)[10])
+        self._change(2,name,data=payload,kind=19 if directory else 3,rights=_p.obj_info(self.handle)[10])
         return self.resolve(name)
     def mkdir(self,name):return self.create(name,directory=True)
     def remove(self,name):
@@ -184,7 +205,7 @@ class Namespace(Object):
             finally:writer.close()
         matches=[e for e in self._entries() if e[0]==name]
         if len(matches)!=1:raise OSError('not found or ambiguous')
-        return _p.project_call(self.handle,4,None,0,matches[0][4])
+        return self._change(4,binding=matches[0][4])
     def rename(self,name,destination,newname,replace=False):
         if self._view() or destination._view():
             src=self._writer();dst=destination._writer()
@@ -194,7 +215,7 @@ class Namespace(Object):
                 if dst is not destination:dst.close()
         matches=[e for e in self._entries() if e[0]==name]
         if len(matches)!=1:raise OSError('not found or ambiguous')
-        return _p.project_call(self.handle,5,newname,destination.handle,matches[0][4],None,0,0,0,replace)
+        return self._change(5,newname,destination.handle,matches[0][4],replace=replace,destination=destination)
     def links(self,target):return _p.project_call(self.handle,11,None,target.handle)
     def activate(self):
         global _active

@@ -20,6 +20,10 @@ typedef struct ObjProjectReq {
     unsigned long long binding, replace, epoch;
     const void *data;
     unsigned long long length;
+    const void *metadata;
+    unsigned long long metadata_length;
+    const void *other_metadata;
+    unsigned long long other_metadata_length, other_epoch;
     char name[256];
 } ObjProjectReq;
 /* Raw namespace: BE magic, epoch, BindingID high-water, count (4*uint64).
