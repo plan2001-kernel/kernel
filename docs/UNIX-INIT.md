@@ -1,5 +1,11 @@
 # Stage 3: Unix init and F5 boot handoff
 
+> **Historical stage-3 fixture.** The single-process builtin shell and
+> volatile PVD below are specific to this boot test, not the current
+> standalone upstream ash or 30-name native multicall profiles. See
+> [ASH-NEWLIB.md](ASH-NEWLIB.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
+
 ## Boot model
 
 On AMD64, the Plan2001 kernel remains the boot-session and keyboard owner.

@@ -49,12 +49,13 @@ bash tools/ci/guest_busybox_multicall.sh ../deps/kernel ../reports/busybox-multi
 ## Interactive console
 
 Use Finnish `keymap=fi` and QEMU `-k fi` when testing with a Finnish keyboard.
-Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. This shortcut
-requires kernel PR #66 for Win console shortcuts and stacked kernel PR #67
-(tested commit `9ac37be`) for native 1024-Handle inheritance. This integration gate
-uses that kernel branch; moving-main compatibility is not yet established.
-The console acceptance test uses the new shortcut, so that PR must be integrated
-before the moving-main interactive CI gate can pass.
+Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. Kernel
+PR #66 (Win console switching) and PR #67 (1024-Handle inheritance) were
+merged into kernel `main` on **2026-11-16**. Earlier tests on PR #67's
+`9ac37be` commit are historical evidence, not a claim about newer revisions.
+The multicall workflow resolves kernel `main` at fetch time and records the
+exact SHA; current compatibility must be established from that workflow's
+actual native QEMU result, not merely from the merged PR status.
 
 Ctrl+D on an empty input line produces one EOF read, allowing `cat` to finish
 and ash to read the next command. On a nonempty line it flushes the pending text
@@ -113,7 +114,7 @@ are not implemented by this profile. They fail with errors; the in-place sed
 failure leaves the original content intact. Stream editing and redirection
 remain usable. Unix permission/ownership preservation remains unsupported.
 
-The default UXFS adapter operates directly on persistent ObjectSpace records,
+The current multicall project-file adapter operates directly on persistent ObjectSpace records,
 shared live with MicroPython's `namespace` API and explicit `posix.open_filesystem` view. No file-content arena, fixed node
 table or per-process namespace snapshot is authoritative. Names may have 255
 bytes; allocation and the native 64 MiB transaction budget bound operations.

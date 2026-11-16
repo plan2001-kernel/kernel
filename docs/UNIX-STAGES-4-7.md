@@ -1,5 +1,14 @@
 # Unix stages 4–7: capability-aware file projection and stream boundary
 
+> **Historical milestone report.** Stage-5 compiler failures, 64-node UXFS
+> limits and missing fork/exec/ash statements in this document apply to the
+> original stages 4–7, not today's `main`. The current code includes Newlib
+> fork/exec/wait, upstream ash, a 30-name multicall profile, and persistent
+> ObjectSpace projects. See [ASH-NEWLIB.md](ASH-NEWLIB.md),
+> [UNIX-PROCESS.md](UNIX-PROCESS.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md). Historical test results are
+> not assertions of current CI success.
+
 This branch builds on the Stage 3 F5 Unix init (PR #9). The implementation
 is intentionally incremental; CI separates **implemented code**, a **host
 compatibility/mocked-storage test**, and **native QEMU acceptance**. A green
@@ -9,8 +18,11 @@ compiler is not equivalent to a working BusyBox ash or persistent Unix root.
 
 `ports/unix/uxfs.[ch]` implements a small in-memory directory/file view.
 It normalizes relative paths against the existing PVD and bounds `..` at
-the root. Initial limits are 64 total nodes, 16 PVD path levels, 47-byte
-labels, and 1024 bytes per regular file. These are not POSIX limits.
+the root. **At this milestone**, limits were 64 total nodes, 16 PVD path
+levels, 47-byte labels and 1024 bytes per regular file. These were not
+POSIX limits. Current legacy `UxFs` sources define 2048 nodes and an
+8 MiB shared content arena; the multicall project provider uses a
+separate persistent ObjectSpace representation.
 
 Commands in the F5 evaluator are `mkdir`, `cat`, `cp`, `mv`, `rm`, `ls`,
 `pwd`, `cd` and `echo`. Files appear in the memory-only view **now**.
@@ -30,7 +42,7 @@ CI exercises a transactional GE/O *mock*, then constructs a fresh RAM view
 and restores from the same mock committed storage. **Real QEMU GE/O file
 persistence across reboot: NOT RUN.** Real hardware: NOT RUN.
 
-## Stage 5: upstream BusyBox ash (blocked)
+## Stage 5: upstream BusyBox ash (blocked in this historical stage)
 
 The pinned BusyBox 1.36.1 is compiled by the existing native build for
 upstream `true.c`, `false.c`, and `echo.c` plus a Plan2001-specific native

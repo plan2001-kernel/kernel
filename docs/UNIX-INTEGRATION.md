@@ -1,5 +1,14 @@
 # Integrated Plan2001 Unix userland: Newlib, GE/O and UXPIPE
 
+> **Historical integration-branch report.** The statements below about
+> missing fork/exec/wait, signals, upstream ash and concurrent pipelines
+> describe this earlier milestone, **not current `main`**. Current code and
+> limits are documented in [UNIX-PROCESS.md](UNIX-PROCESS.md),
+> [ASH-NEWLIB.md](ASH-NEWLIB.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md). The 30-name multicall profile
+> uses durable ObjectSpace project files instead of this in-memory UXFS
+> manifest view. No prior historical CI result proves a later revision.
+
 Integration branch: `feature/unix-newlib-geo-integration`. Parent is the Unix
 supervisor/stages branch. Kernel unchanged; GitHub Actions builds and boots
 the REAL Plan2001 kernel rather than emulating Linux syscalls.
@@ -30,7 +39,7 @@ the REAL Plan2001 kernel rather than emulating Linux syscalls.
 - Host tests verify two descriptor views sharing one in-process UxService,
   path confinement, redirection, and shell invocation.
 
-## Boundaries / unfinished
+## Boundaries at this historical integration revision
 
 UXFS uses 2048 metadata nodes and a shared 8 MiB content arena. The service
 has a single owner per process; separate Unix client processes do not yet
@@ -44,7 +53,7 @@ supported simple pipeline expressions retain a bounded sequential buffer.
 No kernel Unix VFS, Pipe, or syscall API has been introduced. No real
 hardware tests have run.
 
-## CI
+## CI evidence from this milestone
 
 - `.github/workflows/newlib-libc.yml` native Newlib ELF + UXPIPE + files.
 - `.github/workflows/unix-geo-persistence.yml` two real kernel cold boots
@@ -53,5 +62,7 @@ hardware tests have run.
 - `.github/workflows/unix-stages-4-7.yml` host tests; independent stage5
   upstream ash compile dependency audit still **FAIL** (no sys/times.h).
 
-The integration PR is a draft: CI must distinguish implemented tests from
-missing POSIX features and no merge is implied.
+At the time this document was written, the integration PR was a draft.
+Its test outcomes and missing-feature statements are preserved as historical
+context; consult current workflow runs and the resolved kernel SHA for a
+new integration assessment.

@@ -7,8 +7,10 @@ regular files only; it never selects or overwrites a physical disk.
 
 Prerequisites: build the native AMD64 kernel, EFI loader, MicroPython/startup,
 formatter and mpy-cross in the kernel tree. Build Newlib using
-`tools/ci/build_newlib_libc.sh`. The kernel needs the normal alarm-service
-startup fix (kernel PR 64). Source inputs stay outside userland. Then run:
+`tools/ci/build_newlib_libc.sh`. The kernel needs the normal alarm-service startup, now merged into kernel
+`main` via PR #64 (2026-11-15). A pinned integration checkout may retain
+the pre-merge review SHA; record the exact kernel revision. Source inputs
+stay outside userland. Then run:
 
 ```sh
 bash tools/ci/build_hw_boot.sh KERNEL_SOURCE BUSYBOX_SOURCE NEWLIB_REPORTS FRESH_OUTPUT
@@ -51,10 +53,13 @@ The linked `ls` builtin lists the process-local PVD directories one name per
 line, including the projected `/`, `/bin`, `/dev`, `/etc`, `/home`, `/tmp`,
 `/usr`, `/usr/bin`, and `/var` tree.
 
-This is an ash/builtin test profile, not a full Unix distribution. External
-coreutils, networking, POSIX PTYs/job control, Unix identity/permissions and
-persistent file-service inheritance are not supplied. `/tmp` and the projected
-filesystem are volatile and reset on reboot. Do not interpret the GE/O-backed
-executable image as persistent Unix file storage. An actual hardware run is
+This is the standalone ash/builtin test profile, **not** the separate
+30-name native BusyBox multicall profile and not a full Unix distribution.
+External coreutils in this standalone image, networking, POSIX PTYs/job
+control, Unix identity/permissions and persistent `UxService` inheritance
+are not supplied. `/tmp` and the projected filesystem **in this ash-only image** are volatile
+and reset on reboot. Do not interpret the GE/O-backed executable image as
+persistent Unix file storage; the newer multicall ObjectSpace file profile
+has distinct persistence tests and guarantees. An actual hardware run is
 NOT RUN by the automated builder; retain serial output and record the exact
 machine, firmware and storage controller when reporting hardware results.

@@ -2,7 +2,8 @@
 
 This document defines the **recommended** Unix-facing metadata profile for
 the portable object footer. The fixed binary envelope layout is specified
-by the kernel's docs/OBJECT-TAIL.md (draft PR #68). It is the **only**
+by the kernel's [docs/OBJECT-TAIL.md](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECT-TAIL.md)
+(PR #68, merged 2026-11-15). The binary envelope layout is the **only**
 binding part of the envelope contract: raw bytes start at offset zero,
 optional metadata follows raw bytes, and the final 32 bytes locate it.
 

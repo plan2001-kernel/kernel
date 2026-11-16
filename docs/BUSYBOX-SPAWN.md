@@ -1,5 +1,11 @@
 # Launch native BusyBox as a MicroPython child process
 
+> **Three-applet child-process regression.** This MicroPython launch test
+> deliberately does not exercise the later Newlib/ash/multicall environment.
+> Statements about missing pipes or broader POSIX adapters below apply
+> only to the child fixture; see [UNIX-PROCESS.md](UNIX-PROCESS.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md) for current implementations.
+
 GitHub Actions: [busybox-spawn.yml](../.github/workflows/busybox-spawn.yml).
 
 The boot executable remains the **normal native MicroPython** process.

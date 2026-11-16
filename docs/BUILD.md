@@ -1,6 +1,6 @@
 # Live-kernel build and test workspace
 
-This is the **working source/build mechanism** for the Plan2001 userland project. It is not yet a complete Plan2001 BusyBox port. The host-control workflow produces a **statically linked Linux-host reference BusyBox**. A separate [libc ABI audit](libc-audit.md) builds the native libc archive and links the upstream BusyBox `true.c` applet as a diagnostic, without claiming a multicall port.
+This document describes the **source-fetching and host-control workflow**, not the entire native port. The separate [native multicall workflow](BUSYBOX-MULTICALL.md) builds 30 upstream BusyBox command names on Plan2001; full POSIX and full BusyBox support are still incomplete. The host-control workflow produces a **statically linked Linux-host reference BusyBox**. A separate [libc ABI audit](libc-audit.md) builds the native libc archive and links the upstream BusyBox `true.c` applet as a diagnostic, without claiming a multicall port.
 
 ## Separation of repositories
 
@@ -33,12 +33,14 @@ $RUNNER_TEMP/plan2001-reports/  reports/artifacts
 `busybox.repository=mirror/busybox` with one immutable 40-digit commit
 (BusyBox **1.36.1**, upstream tag `1_36_1`).
 
-Every job fetches the **current kernel `main` at source-fetch time**,
-resolves it to its precise 40-character commit, then checks out the commit
-detached. The SHA is written to the uploaded `reports/sources.json`
+Workflows that call `tools/ci/fetch_sources.py` fetch **kernel `main` at
+source-fetch time**, resolve its 40-character commit and check it out
+detached. The `ash-integration.yml` regression is an explicit exception:
+it checks out the fixed `INTEGRATION_KERNEL_SHA`. Do not infer that every
+workflow tested the same kernel revision. The SHA is written to the uploaded `reports/sources.json`
 alongside the fixed BusyBox SHA, so the run is auditable and repeatable
-*by manually checking out that recorded kernel SHA*. The next job fetches
-`main` afresh. No stale kernel revision lock is maintained.
+*by manually checking out that recorded kernel SHA*. The next source-fetching job fetches
+`main` afresh; pinned integration jobs do not. No stale kernel revision lock is maintained.
 
 BusyBox stays pinned; changing its commit requires review and a license and
 compatibility check. The mirror is only a fetch location; original BusyBox
@@ -114,15 +116,19 @@ The static Linux executable is **not** uploaded as a Plan2001 deliverable. It is
 
 Host-control build logs and the test summary are available under the workflow run's **Artifacts** and **Step summary**. Failure of the host control is a real CI failure; success must not be advertised as target compatibility.
 
-## Transition to a real Plan2001 target build
+## Historical native-target transition checklist
 
-Once the missing compatibility interfaces have been audited and implemented:
+The following steps described the original transition from host control to
+the native target. Native `true`/`false`/`echo`, ash and the 30-name multicall
+now have separate build and QEMU fixtures; this checklist is **not** the
+current list of unimplemented features. For current support see
+[BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
 
 1. Add a separate `tools/ci/build_target.py` or equivalent that explicitly invokes the verified Plan2001 user toolchain, target startup code, and the adapted native C runtime.
 2. Ensure target objects use no Linux headers, Linux startup objects, Linux syscalls, or host libc.
 3. Produce a statically linked ELF and audit its ABI, entry point, PT_INTERP/dynamic section and undefined symbols.
 4. Add a distinct, clearly named GitHub Actions job that uses the pinned kernel's boot/install/QEMU fixture to prove execution on the **real Plan2001 AMD64 kernel**.
-5. Only after the guest test passes add persistent ObjectSpace paths, shell pipes and wider POSIX functionality. Treat ARM64 as a separate future port.
+5. The separate native profiles now add persistent ObjectSpace paths, shell pipes and a bounded POSIX adapter. ARM64 remains a separate future userland port.
 
 Changes needed in native kernel ABI belong to [kernel](https://github.com/plan2001-kernel/kernel), with a separately reviewed PR. Do not introduce POSIX path syscalls into the kernel to satisfy this userspace goal.
 

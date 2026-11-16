@@ -1,5 +1,12 @@
 # Trusted Unix supervisor and F5 capability delegation
 
+> **Supervisor contract and historical F5 fixture.** This document focuses
+> on capability-safe console delegation, not the child program's complete
+> Unix feature set. The original F5 child was a builtin evaluator; the
+> standalone ash and multicall profiles now provide genuine upstream ash.
+> See [HARDWARE-BOOT.md](HARDWARE-BOOT.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
+
 The F5 console slot is owned by a **trusted userland supervisor**, not by a
 Unix kernel service or an ambient POSIX process. The supervisor is launched by
 the existing kernel boot manifest (the explicitly trusted `up->boot` process)

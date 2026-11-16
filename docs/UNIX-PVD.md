@@ -1,9 +1,15 @@
 # Stage 2: userspace PVD and volatile Unix tree
 
+> **Historical memory-only stage fixture.** This document describes
+> the initial volatile F5 PVD, not the persistent ObjectSpace file view
+> used by current BusyBox multicall. See
+> [ARCHITECTURE.md](ARCHITECTURE.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
+
 The Present View Descriptor (PVD) is a **process-local, bounded projection**
 of Unix directory names. It is not a kernel VFS, not a native ObjectSpace
 namespace, and not a source of authority. This first implementation contains
-only memory-resident directory nodes. Later stages will attach explicitly
+only memory-resident directory nodes. Later profiles added explicitly
 delegated ObjectSpace Handles and GE/O-backed file metadata; *never* infer
 object access from the pathname, a raw OID, or matching OwnerID.
 
@@ -31,8 +37,10 @@ start at its current directory. Both "." and ".." are supported; ".." at
 the delegated root stays at that root. Failed chdir leaves cwd unchanged.
 Unknown names fail with ENOENT-style diagnostics; multiple equal labels
 under one parent fail closed as ambiguous rather than picking a BindingID.
-Limits are 64 memory nodes, 16 selected directory levels, 47 bytes per
-label, and 255 bytes per input path. Directory creation is currently only
+The original stage-2 fixture had 64 memory nodes. Current `pvd.h`
+sets `PVD_MAX_NODES=2048`, `PVD_MAX_DEPTH=16`, `PVD_LABEL_MAX=47` and
+`PVD_PATH_MAX=256` (255 input bytes plus NUL). These bounded PVD values
+are **not** the 255-byte native ObjectSpace-label limit. Directory creation is currently only
 the memory-bootstrap API (pvd_mkdir_memory), **not** a user-facing mkdir.
 
 The stage-2 F5 launcher recognizes pwd, cd PATH and ls [PATH]. These are

@@ -1,5 +1,12 @@
 # Newlib stdin/stdout/stderr over trusted Unix supervisor UXPIPE
 
+> **Scope: supervised stdio integration fixture.** This documents the
+> six-region console handoff and its native QEMU test, not a complete Unix
+> shell or project filesystem. Genuine ash and persistent ObjectSpace
+> multicall files are tested separately in
+> [ASH-NEWLIB.md](ASH-NEWLIB.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
+
 The Plan2001 Unix supervisor retains the kernel's three **non-delegable**
 console grants and creates three SPSC UXPIPE streams, each backed by two
 independently mapped capability regions. A Newlib executable spawned with

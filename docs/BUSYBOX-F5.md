@@ -1,5 +1,12 @@
 # Native BusyBox F5 console adapter
 
+> **Early native F5 regression fixture.** This tests console transport,
+> an upstream `echo_main` and the historical builtin shell, **not** the
+> separately implemented upstream ash or 30-name multicall ELF. Its scope
+> exclusions are specific to this fixture. See
+> [ASH-NEWLIB.md](ASH-NEWLIB.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md) for newer profiles.
+
 CI: [BusyBox F5](../.github/workflows/busybox-f5.yml).
 The kernel and userland are separate repositories: CI **always fetches the
 current kernel `main` branch** at the time of each run, records that
@@ -84,8 +91,9 @@ Unix directory projection with a bounded PVD. Stage 3 moves that construction
 into the explicit Unix-init entry. Its small pwd/cd/ls builtins
 are tested in the same genuine PS/2 keyboard and VGA QEMU acceptance. No
 native ObjectSpace/GE/O Handle is created from a directory name. See
-[UNIX-PVD.md](UNIX-PVD.md) for semantics and limits. The F5 launcher is
-still not BusyBox ash, and persistent paths remain absent.
+[UNIX-PVD.md](UNIX-PVD.md) for semantics and limits. The F5 launcher in **this early fixture** is not BusyBox ash, and its
+PVD paths are volatile. The separate native ash/multicall profiles do not
+share those restrictions.
 
 ## Stage-3 boot and restart verification
 

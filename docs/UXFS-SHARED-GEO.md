@@ -1,5 +1,12 @@
 # Shared GE/O-backed Unix file service over UXPIPE
 
+> **Historical integration profile, not the current multicall filesystem.**
+> This document records the bounded `UxService`/UXPIPE RPC fixture. The
+> native BusyBox multicall profile uses persistent ObjectSpace project
+> Handles directly; see [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md) and
+> [ARCHITECTURE.md](ARCHITECTURE.md). Limits and statements about missing
+> upstream ash below refer only to this earlier test configuration.
+
 ## Implemented topology
 
 The trusted native F5 Unix supervisor retains the kernel session authority.
@@ -89,12 +96,17 @@ explicit in-process `p9_full_bind_files(UxService*)`; automatic remote
 Newlib fd dispatch is **not yet implemented**. The RPC client is an ordinary
 Plan2001-native executable, not a Newlib program.
 
-UXFS v1 is bounded to 64 total nodes and 1024 bytes per file; one
-RPC request and one response are each bounded. `uxfile` exposes only
+The original UXFS v1 acceptance profile had 64 nodes and 1024 bytes per
+file. Those are **historical test limits**, not the current source limits:
+`ports/unix/uxfs.h` defines `UXFS_VERSION=4`, `UXFS_NODES=PVD_MAX_NODES`
+(2048 in `pvd.h`) and an 8 MiB shared content arena. The newer persistent
+ObjectSpace project adapter does not use this legacy file-content arena.
+One RPC request and one response remain protocol-bounded. `uxfile` exposes only
 `get`, `put`, `append` and `rm` in this milestone, with the
-`/tmp` prefix policy. No upstream BusyBox ash, arbitrary open descriptor
-inheritance, POSIX permissions/tty, hardware test, or crash-recovery
-certification is implied.
+`/tmp` prefix policy. The original `uxfile` RPC fixture alone does not demonstrate upstream
+BusyBox ash, arbitrary POSIX remote-file descriptor inheritance, terminal
+control, physical hardware or crash-recovery certification. Upstream ash
+and the separate multicall filesystem have newer native tests.
 
 The kernel's existing ObjectSpace/GE/O capability model and
 REGIONWAIT/REGIONWAKE implementation are unchanged. All new path and fd

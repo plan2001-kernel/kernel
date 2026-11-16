@@ -112,14 +112,20 @@ Private scheduling notes do not by themselves interrupt Unix sleep or pipe I/O.
 
 ## Bounds and scope
 
-The profile has 19 descriptors, eight tracked children, four executable
-registrations, 64 arguments and 4096 environment bytes. Native RFORKEX permits
-16 grants; SPAWN permits eight. Repeated resources are coalesced, and excess
-inheritance returns E2BIG. All three independent stdio streams fit a normal
-exec together with one context and one executable volume. Additional distinct
-file services, volumes or child capabilities can exceed that native bound.
+The current profile defines **1024 Unix descriptor slots** (`P9_FDS`),
+**1024 tracked children** (`P9_CHILDREN`), **1024 inheritance grants**
+(`P9_GRANTS`) and four executable registrations (`P9_EXECUTABLES`), with
+64 arguments and 4096 environment bytes. Native `RFORKEX` and `SPAWN`
+share the kernel's **1024-Handle** capacity, rather than the obsolete
+16/8-grant limits. Inheritance coalesces repeated resources; plans that
+exceed the relevant table, Handle or memory budget fail with an error.
+The nominal limit is not a guarantee that 1024 simultaneous descriptors
+or processes can always be allocated.
 
 This adapter is single-threaded and AMD64-specific. It does not implement
 process groups, terminal job control, Linux syscalls or a persistent Unix file
-server. The process probe exercises these APIs with real native executables;
-it does not establish that the complete upstream ash/libbb binary is linked.
+server. The native process probe exercises these APIs with real executables, but
+is not by itself a test of the shell. The independent ash integration and
+[native multicall](BUSYBOX-MULTICALL.md) workflows build and exercise
+upstream ash/libbb. They are distinct test profiles and do not establish
+full POSIX conformance.

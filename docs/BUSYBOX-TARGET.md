@@ -1,5 +1,11 @@
 # Native BusyBox target subset and QEMU smoke
 
+> **Initial three-applet regression profile.** This is the original
+> `true`/`false`/`echo` native-target test, retained alongside newer upstream
+> ash and 30-name multicall builds. Its missing-feature statements apply
+> to this small executable, not the entire userland. Current capabilities:
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
+
 This is the **first executable stage** of the Plan2001 BusyBox port.
 The GitHub Actions workflow is [busybox-target.yml](../.github/workflows/busybox-target.yml).
 This stage **does not** claim a complete upstream BusyBox multicall build or

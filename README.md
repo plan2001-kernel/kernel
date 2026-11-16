@@ -2,7 +2,7 @@
 
 A small Unix-like userspace built on the experimental [Plan2001 kernel](https://github.com/plan2001-kernel/kernel).
 
-**Status:** AMD64 has a reduced, genuine BusyBox 1.36.1 **ash** statically linked with upstream Newlib 4.6.0 and native Plan2001 POSIX adapters. An F5 supervisor can start ash with keyboard/VGA, persistent ObjectSpace-backed UXFS files shared with MicroPython, redirection and a forked pipe. The native userland also implements bounded fork/exec/wait, descriptor inheritance and asynchronous signals through capability-based kernel primitives. A separate three-applet BusyBox target and a legacy F5 builtin-shell fixture remain regression tests. The reduced native multicall contains the configured applets; this is not a full POSIX distribution. The native process/signal profile requires the kernel alarm-startup change from kernel PR #64; CI against moving kernel `main` remains a distinct compatibility check.
+**Status:** AMD64 has a reduced, genuine BusyBox 1.36.1 **ash** statically linked with upstream Newlib 4.6.0 and native Plan2001 POSIX adapters. An F5 supervisor can start ash with keyboard/VGA, a persistent ObjectSpace-backed Unix file view shared with MicroPython, redirection and forked pipes. The native userland also implements bounded fork/exec/wait, descriptor inheritance and asynchronous signals through capability-based kernel primitives. A separate three-applet BusyBox target and a legacy F5 builtin-shell fixture remain regression tests. The reduced native multicall contains the configured applets; this is not a full POSIX distribution. The required native alarm startup fix (kernel PR #64) is merged into kernel `main`. The ash-integration regression still pins its historical kernel SHA; the separate native multicall workflow resolves current kernel `main` and must be checked independently.
 
 A separate [native upstream multicall profile](docs/BUSYBOX-MULTICALL.md) now builds 30 command names with generated executable aliases and a 434-name release inventory. It is an initial implementation of #17; the disabled-applet feasibility audit remains incomplete.
 
@@ -32,17 +32,16 @@ The familiar `/bin`, `/usr`, `/etc`, and `/tmp` directories are userland project
 
 ## Build and CI workspace
 
-The [build mechanism](docs/BUILD.md) fetches the **latest kernel `main` on every CI run**, records the resolved commit as the run's source manifest, and keeps BusyBox pinned by SHA using [`config/sources.json`](config/sources.json). Actions checks out both as **sibling source trees** outside the userland repo, audits the native ABI/libc, and builds a minimal **Linux-host static BusyBox control** (`true`, `false`, `echo`). That control is intentionally linked against the Linux runner's libc and is **not** a Plan2001 program.
+The [source-fetching build mechanism](docs/BUILD.md) resolves kernel **`main` at fetch time** and records its commit alongside pinned BusyBox in [`config/sources.json`](config/sources.json). Not every workflow uses this policy: `ash-integration.yml` checks out a fixed kernel SHA for reproducible regressions, while `busybox-multicall.yml` fetches `main`. A PASS from either workflow applies only to the revisions it actually tested. Actions checks out both as **sibling source trees** outside the userland repo, audits the native ABI/libc, and builds a minimal **Linux-host static BusyBox control** (`true`, `false`, `echo`). That control is intentionally linked against the Linux runner's libc and is **not** a Plan2001 program.
 
 The native diagnostic workflow links the upstream BusyBox `true.c` applet against Plan2001's runtime and runs separate guest checks. The [F5 console test](docs/BUSYBOX-F5.md) also builds a native BusyBox-bearing ELF, executes upstream `echo_main` on kernel manifest slot 4 and reads PS/2 keyboard input through kernel-granted console regions, with real QEMU VGA verification. The dedicated [libc ABI audit](docs/libc-audit.md) compares host-compiled BusyBox object references with native library exports. These checks are not evidence of complete POSIX compatibility.
 
-## Milestones (proposed)
+## Implementation milestones
 
-1. Debian BusyBox dependency and static-link audit.
-2. Minimal Plan2001 C runtime and POSIX adapters.
-3. Small static applets running in Plan2001 QEMU.
-4. ObjectSpace-backed paths and commands such as `ls`, `cat`, `cp`, `rm`, `mkdir`.
-5. Shell process launch, redirection, userland pipes, and a broader Unix subset.
+1. **Implemented:** dependency and static-link audit, native Newlib/POSIX adapters and small BusyBox applets in AMD64 QEMU fixtures.
+2. **Implemented with limits:** capability-backed process launch, `fork`/`execve`/`waitpid`, signals, redirection and UXPIPE pipelines.
+3. **Implemented with limits:** persistent ObjectSpace-backed file projection and a 30-name native BusyBox multicall profile (`ls`, `cat`, `mkdir`, `mv`, `rm`, `ash`, etc.). The older memory-only PVD/UXFS stage fixtures remain separate.
+4. **Outstanding:** remaining BusyBox applet families (including multicall `cp`), fuller POSIX semantics, job control/termios, cross-volume bindings, broader hardware support and physical-machine validation.
 
 ## Documentation
 
@@ -69,7 +68,7 @@ The authoritative native definitions are in the [kernel ObjectSpace architecture
 
 BusyBox is GPLv2-licensed. Record source provenance and licenses before importing BusyBox sources or kernel runtime code. No third-party sources are included at this stage.
 
-## Stage 2: volatile Unix paths
+## Historical stage 2 fixture: volatile Unix paths
 
 The F5 acceptance process now carries a bounded userspace Present View Descriptor
 (PVD) and the memory-only /bin, /dev, /etc, /home, /tmp, /usr/bin and /var
@@ -78,9 +77,9 @@ are **not** upstream BusyBox applets or ash. GitHub Actions tests path rules
 with host sanitizers and PS/2+VGA QEMU. Stage 2 alone provided no init, persisted objects, or
 native pathname authority. See [PVD design](docs/UNIX-PVD.md).
 
-## Stage 3: Unix init boot entry
+## Historical stage 3 fixture: Unix init boot entry
 
-The F5 boot-manifest executable now starts a [native Unix-init entry](docs/UNIX-INIT.md)
+The stage-3 F5 boot-manifest executable starts a [native Unix-init entry](docs/UNIX-INIT.md)
 that constructs a fresh PVD root and hands it to its statically linked builtin
 shell. The prompt starts at `unix:/$` and follows cwd. GitHub Actions verifies
 a fresh root across **two QEMU boots of the same disposable GE/O disk**.

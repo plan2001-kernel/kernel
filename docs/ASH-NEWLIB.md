@@ -61,7 +61,8 @@ In `ports/newlib/full/plan2001_syscalls.c` and `posix_forward.c`:
   operations. The target headers resolve BusyBox's incompatible
   `itoa`/`utoa` names without editing upstream ash.
 - `uname` describes the native Plan2001 userland target.
-  `getrlimit(RLIMIT_NOFILE)` exposes its actual 3+16 descriptor-slot bound;
+  `getrlimit(RLIMIT_NOFILE)` reports the current **1024** descriptor slots
+  (`3 + UXFD_SLOTS`, with `UXFD_SLOTS=1021`);
   unsupported budget queries and `setrlimit` fail with `ENOSYS`, never
   silently changing SPAWN budgets.
 
@@ -94,14 +95,20 @@ The bounded [Unix process projection](UNIX-PROCESS.md) implements `fork`,
 SPAWN, Process Handles and region capabilities. Its native probe exercises
 real fork/exec children, three-stream stdio, CLOEXEC, argv/environment, shared
 volatile files and offsets, asynchronous signals, stop/continue, and repeated
-signal-handler `siglongjmp` returns. The native alarm service must run in
-normal kernel boots; otherwise CPU-bound processes cannot receive its notes.
+signal-handler `siglongjmp` returns. The native alarm service must run in normal kernel boots; kernel PR #64,
+merged into `main` on 2026-11-15, supplies that startup. The standalone
+ash integration workflow continues to pin an older dependency SHA, whereas
+the multicall workflow resolves kernel `main`.
 
 The ash-object undefined-symbol report is an inventory of references before
 linking, not a list of currently unimplemented APIs. A reduced upstream ash plus its required libbb modules is now statically
 linked by `tools/ci/build_ash.py`. The [hardware boot builder](HARDWARE-BOOT.md)
-tests the real interactive ash with keyboard/VGA, arithmetic, redirection
-and a forked pipeline. This is not a full BusyBox multicall distribution.
-The F5 evaluator is still the bounded native builtin shell. Persistent-service
-inheritance, process groups, terminal job control, ARM64 and hardware remain
-outside this process adapter's validated profile.
+tests a standalone genuine ash profile with keyboard/VGA, arithmetic,
+redirection and a forked pipeline. A separate
+[native 30-name BusyBox multicall profile](BUSYBOX-MULTICALL.md) also builds
+and tests upstream applets; neither profile is a full BusyBox distribution.
+The older F5 stage fixture still has a bounded native builtin evaluator.
+Persistent in-process `UxService` inheritance, process groups, terminal job
+control, ARM64 and physical hardware remain outside this adapter's validated
+profile. The multicall file adapter instead uses delegated persistent
+ObjectSpace project capabilities.

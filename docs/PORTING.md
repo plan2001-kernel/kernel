@@ -1,6 +1,12 @@
 # Debian-first BusyBox compilation experiment
 
-**Current baseline:** CI source pin verification, kernel ABI/libc inventory and static Linux-host BusyBox control are implemented. A target BusyBox/Plan2001 libc link and QEMU execution are **NOT RUN**. See [build mechanism](BUILD.md).
+> **Historical initial porting plan.** The original Linux-host-only baseline
+> has been superseded. Native Plan2001 ELF links and AMD64 QEMU tests now
+> exist for small applets, genuine ash and a 30-command multicall profile.
+> See [BUILD.md](BUILD.md), [ASH-NEWLIB.md](ASH-NEWLIB.md) and
+> [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md). The text below retains the
+> early experiment's goals; a host-only smoke result must never be presented
+> as native acceptance, and full POSIX conformance remains outstanding.
 
 ## Goal
 
@@ -13,7 +19,9 @@ Discover whether a tiny BusyBox configuration can compile and statically link ag
 * BusyBox upstream: https://busybox.net/ . The initial mirror source revision (BusyBox 1.36.1) and exact SHA are pinned in [`config/sources.json`](../config/sources.json). Record origin and licensing for subsequent revisions.
 * Initial target: Plan2001 AMD64 userspace ELF. ARM64 target support must be verified separately.
 
-The automated baseline in [GitHub Actions](../.github/workflows/build.yml) builds **only a Linux-host BusyBox static control** with `CONFIG_STATIC`, `CONFIG_TRUE`, `CONFIG_FALSE`, and `CONFIG_ECHO` enabled. Its success does not imply a Plan2001 target ELF. The native Plan2001 runtime compilation/link described below is **future implementation work**.
+The automated baseline in [GitHub Actions](../.github/workflows/build.yml) builds **only a Linux-host BusyBox static control** with `CONFIG_STATIC`, `CONFIG_TRUE`, `CONFIG_FALSE`, and `CONFIG_ECHO` enabled. Its success does not imply a Plan2001 target ELF. At the time of this initial baseline, native compilation/link was future
+work; it is now implemented in separate target workflows. This host-control
+job still does not by itself prove native guest execution.
 
 ## Stage A: compile and dependency inventory on Debian
 
@@ -48,4 +56,6 @@ Create an authorized executable object, provide the necessary capabilities, boot
 
 Each implementation PR should state the upstream BusyBox revision/config, compiler and linker versions/options, kernel ABI revision, C runtime sources, exact link diagnostics, host tests, QEMU tests, hardware tests and **NOT RUN** items.
 
-The first implementation PR is the **compile/link audit**, not the entire shell or POSIX filesystem.
+The first implementation PR covered the **compile/link audit**, not the
+entire shell or POSIX filesystem. Subsequent native profiles are covered
+by their own build, runtime and QEMU evidence.
