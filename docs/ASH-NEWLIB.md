@@ -1,9 +1,12 @@
 # BusyBox ash / Newlib POSIX compatibility on Plan2001
 
 This document distinguishes a reproducible **upstream ash source compilation**
-from a functional Unix shell. The former is tested; the latter also requires
-full multicall linkage and integration beyond these compilation checks. The kernel capability ABI is
-unchanged.
+from a functional Unix shell. Compilation alone is not runtime acceptance:
+standalone genuine ash and the separate 30-name BusyBox multicall now have
+native AMD64 build/QEMU integration fixtures. Neither is a full POSIX or
+434-applet BusyBox implementation. These adapters remain in userland and
+use the current kernel object ABI (version 3); they do not introduce Unix
+pathname or pipe syscalls into the kernel.
 
 ## Pinned sources and build
 
