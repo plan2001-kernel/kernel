@@ -57,6 +57,26 @@ def run():
     try:p.project_call(rf,6,None,0,0,frame(b'forbidden'))
     except OSError:pass
     else:raise AssertionError('read-only project escalated')
+    # Metadata authority never exposes the raw payload; stale writers and
+    # malformed framing fail without altering the committed object.
+    meta_only=p.project_call(f,8,None,0,0,None,0,8|128)
+    assert p.project_call(meta_only,12)==b'\xa0'
+    try:p.project_call(meta_only,1)
+    except OSError:pass
+    else:raise AssertionError('metadata grant exposed raw bytes')
+    p.obj_close(meta_only)
+    blob,stale=p.project_snapshot(f)
+    p.project_call(f,6,None,0,0,frame(b'updated\n'),0,0,stale)
+    try:p.project_call(f,6,None,0,0,frame(b'stale'),0,0,stale)
+    except OSError:pass
+    else:raise AssertionError('stale writer overwrote current version')
+    try:p.project_call(f,6,None,0,0,b'no footer')
+    except OSError:pass
+    else:raise AssertionError('invalid footer accepted')
+    try:p.project_call(root,2,'forged',0,0,p.project_call(root,1),19,rights)
+    except OSError:pass
+    else:raise AssertionError('serialized binding minted authority')
+    print('PROJECT-METADATA-CAS-PASS')
     import project
     ns=project.from_handle(root)
     module=ns.create('hello.py',b'value=42\n');module.close()
@@ -78,6 +98,8 @@ def run():
     sharedfile=left.create('shared',b'same')
     right.link('shared',sharedfile)
     assert ns.links(sharedfile)==2
+    left.link('cycle',left)
+    with left.open('cycle/cycle/shared') as item:assert item.identity()==sharedfile.identity()
     union=ns.compose('union',[left,right])
     intersection=ns.compose('intersection',[left,right],operation='intersection')
     assert union.resolve('shared').identity()==sharedfile.identity()
