@@ -163,7 +163,7 @@ static void content(const char *path,const char *data)
 static void view(const char *label,const char *mode,int writer)
 {
     PjObject root,left,right,space;
-    check(p9_project_resolve("/tmp",&root)==0,"composition parent");
+    check(p9_project_resolve("/view-tests",&root)==0,"composition parent");
     UxMeta m;uxmeta_init(&m,label,1,0);
     unsigned char *blob;size_t n;check(pj_empty(&m,&blob,&n)==0,"composition framing");
     unsigned raw,old;check(uxobject_split(blob,(unsigned)n,&raw,&old)==0,"composition split");
@@ -179,7 +179,7 @@ static void view(const char *label,const char *mode,int writer)
     strcpy(req.name,label);req.data=out;req.length=raw+meta+32;
     check(pj_call(root.handle,&req,NULL,0)>=0,"publish composition object");free(out);
     check(pj_resolve(&root,label,&space)==0,"resolve composition object");
-    check(p9_project_resolve("/tmp/view-left",&left)==0 && p9_project_resolve("/tmp/view-right",&right)==0,"composition sources");
+    check(p9_project_resolve("/view-tests/view-left",&left)==0 && p9_project_resolve("/view-tests/view-right",&right)==0,"composition sources");
     /* Native bindings carry the enforced source ceilings. */
     for(int i=0;i<2;i++){
         PjObject *source=i?&right:&left;ObjProjectReq r={0};r.operation=ProjectLink;
@@ -190,19 +190,20 @@ static void view(const char *label,const char *mode,int writer)
 }
 static void compositions(void)
 {
-    check(mkdir("/tmp/view-left",0700)==0 && mkdir("/tmp/view-right",0700)==0,"create composition sources");
-    fixture("/tmp/view-left/shared","same");check(link("/tmp/view-left/shared","/tmp/view-right/shared")==0,"shared hard link");
-    fixture("/tmp/view-left/conflict","left");fixture("/tmp/view-right/conflict","right");
+    check(mkdir("/view-tests",0700)==0,"isolate composition fixtures");
+    check(mkdir("/view-tests/view-left",0700)==0 && mkdir("/view-tests/view-right",0700)==0,"create composition sources");
+    fixture("/view-tests/view-left/shared","same");check(link("/view-tests/view-left/shared","/view-tests/view-right/shared")==0,"shared hard link");
+    fixture("/view-tests/view-left/conflict","left");fixture("/view-tests/view-right/conflict","right");
     view("union","union",-1);view("intersection","intersection",-1);view("writable","union",0);
-    content("/tmp/union/shared","same");content("/tmp/intersection/shared","same");
-    struct stat st;check(stat("/tmp/union/conflict",&st)<0,"reject ambiguous union");
-    DIR *d=opendir("/tmp/intersection");check(d!=NULL,"enumerate intersection despite conflicting labels");
+    content("/view-tests/union/shared","same");content("/view-tests/intersection/shared","same");
+    struct stat st;check(stat("/view-tests/union/conflict",&st)<0,"reject ambiguous union");
+    DIR *d=opendir("/view-tests/intersection");check(d!=NULL,"enumerate intersection despite conflicting labels");
     struct dirent *e;unsigned count=0;while((e=readdir(d)))if(strcmp(e->d_name,".") && strcmp(e->d_name,"..")){check(!strcmp(e->d_name,"shared"),"intersection contains identical pairs only");count++;}
     check(closedir(d)==0 && count==1,"intersection deduplicates common pair");
-    check(open("/tmp/union/denied",O_WRONLY|O_CREAT,0600)<0 && errno==EROFS,"composition defaults read only");
-    fixture("/tmp/writable/created","chosen");content("/tmp/view-left/created","chosen");
-    check(stat("/tmp/view-right/created",&st)<0 && errno==ENOENT,"no copy up or alternate write source");
-    check(stat("/tmp/view-left/shared",&st)==0 && st.st_nlink==2,"real hard link count");
+    check(open("/view-tests/union/denied",O_WRONLY|O_CREAT,0600)<0 && errno==EROFS,"composition defaults read only");
+    fixture("/view-tests/writable/created","chosen");content("/view-tests/view-left/created","chosen");
+    check(stat("/view-tests/view-right/created",&st)<0 && errno==ENOENT,"no copy up or alternate write source");
+    check(stat("/view-tests/view-left/shared",&st)==0 && st.st_nlink==2,"real hard link count");
     emit("PASS: Unix live union/intersection, ambiguity and explicit write source\n");
 }
 int main(void)
@@ -260,6 +261,7 @@ int main(void)
     check(chdir("..")==0,"cwd parent follows retained caller route");
     struct stat cwd_stat;check(stat("cwd-renamed/here",&cwd_stat)==0,"cwd returns to retained parent");
     check(chdir("/../../")==0,"parent traversal stays within delegated root");
+    check(unlink("/tmp/cwd-renamed/here")==0 && rmdir("/tmp/cwd-renamed")==0,"remove cwd fixtures");
     emit("PASS: cwd capabilities survive rename and exec; caller-relative parent traversal\n");
     /* Commands inherit pipe descriptors. */
     /* Leave fourteen unrelated pipe descriptors open across real exec.
