@@ -28,6 +28,7 @@ import re
 import struct
 import subprocess
 import sys
+from object_format import pack, cbor, metadata, frame_file
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MPY = ROOT / "micropython"
@@ -118,6 +119,8 @@ def build_seed(source: pathlib.Path, seed: pathlib.Path, mpy_exec: pathlib.Path 
     (seed / "mod").mkdir(parents=True, exist_ok=True)
     mpy_path = seed / "mod" / f"{definition}.mpy"
     mpy_bytes = compile_mpy(source, mpy_path, mpy_cross)
+    mpy_bytes = pack(mpy_bytes,cbor(metadata(mpy_bytes,source.name,"application/x-micropython-bytecode",source)))
+    mpy_path.write_bytes(mpy_bytes)
     mpy_digest = sha256_hex(mpy_bytes)
 
     env = (
@@ -128,14 +131,14 @@ def build_seed(source: pathlib.Path, seed: pathlib.Path, mpy_exec: pathlib.Path 
 
     mpy_exec_bytes = None
     if mpy_exec is not None:
-        mpy_exec_bytes = mpy_exec.read_bytes()
+        mpy_exec_bytes = frame_file(mpy_exec,"application/x-elf")
         if len(mpy_exec_bytes) < 4 or mpy_exec_bytes[:4] != b"\x7fELF":
             raise SystemExit(f"oseed: {mpy_exec} is not an ELF executable")
         # Seed filenames are a formatter contract (ge/format/ream.c): keep MP.
         (seed / "mp").write_bytes(mpy_exec_bytes)
         (seed / "mpoid").write_bytes(f"{OID_MP:016x}".encode())
     if ike_exec is not None:
-        executable = ike_exec.read_bytes()
+        executable = frame_file(ike_exec,"application/x-elf")
         if executable[:4] != b"\x7fELF":
             raise SystemExit("oseed: iked is not an ELF executable")
         # Reuse the formatter's existing optional raw executable seed slots.

@@ -1,5 +1,8 @@
+#if defined(PLAN2001_GCC) && !defined(PLAN2001_GCC_USER)
+#define OBJTAIL_NATIVE_TYPES
+#endif
 #include "objtail.h"
-#include <string.h>
+
 
 static const unsigned char tailmagic[8] = { 'P', '2', 'O', 'T', 'A', 'I', 'L', '1' };
 static void put32(unsigned char *p, uint32_t v)
@@ -32,7 +35,7 @@ int objtail_pack(unsigned char out[ObjTailSize], uint64_t metadata_offset,
     if (!out || metadata_offset > UINT64_MAX - ObjTailSize ||
         metadata_length > UINT64_MAX - ObjTailSize - metadata_offset)
         return -1;
-    memcpy(out, tailmagic, sizeof tailmagic);
+    for(unsigned i=0;i<sizeof tailmagic;i++)out[i]=tailmagic[i];
     put32(out + 8, ObjTailVersion);
     put32(out + 12, 0); /* flags: reserved, must be zero */
     put64(out + 16, metadata_offset);
@@ -45,9 +48,9 @@ int objtail_parse(const unsigned char last32[ObjTailSize], uint64_t object_size,
     uint64_t available, offset, length;
     if (!last32 || !raw_length || !metadata_length ||
         object_size < ObjTailSize ||
-        memcmp(last32, tailmagic, sizeof tailmagic) != 0 ||
         get32(last32 + 8) != ObjTailVersion || get32(last32 + 12) != 0)
         return -1;
+    for(unsigned i=0;i<sizeof tailmagic;i++)if(last32[i]!=tailmagic[i])return -1;
     available = object_size - ObjTailSize;
     offset = get64(last32 + 16);
     length = get64(last32 + 24);

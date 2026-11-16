@@ -1118,7 +1118,13 @@ d = json.load(open(sys.argv[1]))
 print(d.get('objects', {}).get('4f45584543000003', {}).get('sha256', 'MISSING'))
 PY
 )
-		expected_mp=$(sha256sum "$QOB_MPY" | awk '{print $1}')
+		expected_mp=$(python3 - "$QOB_ROOT/tools/host" "$QOB_MPY" <<'PYFRAME'
+import hashlib,sys
+sys.path.insert(0,sys.argv[1])
+from object_format import frame_file
+print(hashlib.sha256(frame_file(sys.argv[2],"application/x-elf")).hexdigest())
+PYFRAME
+)
 	fi
 
 	local fails=0

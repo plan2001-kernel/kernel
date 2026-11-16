@@ -1758,6 +1758,9 @@ iariopkt(SDreq *r, Drive *d)
 			return SDeio;
 		case SDretry:
 			qunlock(&d->portm.qlk);
+			/* Reset/IDENTIFY progresses in satakproc every Nms. A
+			 * tight retry loop exhausts the budget before it can run. */
+			esleep(Nms);
 			continue;
 		}
 		r->rlen = l->len;
@@ -1805,6 +1808,7 @@ ahcibio(SDunit *u, int lun, int write, void *a, long count, uvlong lba)
 			return -1;
 		case SDretry:
 			try++;
+			esleep(Nms); /* permit the asynchronous recovery worker to run */
 			continue;
 		}
 		try = 0;
@@ -1943,6 +1947,9 @@ iaataio(SDreq *r)
 			return SDeio;
 		case SDretry:
 			qunlock(&d->portm.qlk);
+			/* Reset/IDENTIFY progresses in satakproc every Nms. A
+			 * tight retry loop exhausts the budget before it can run. */
+			esleep(Nms);
 			continue;
 		}
 		r->rlen = (r->ataproto & Pprotom) == Ppkt ? l->len : r->dlen;

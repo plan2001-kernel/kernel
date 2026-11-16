@@ -12,10 +12,9 @@ typedef struct Procstat Procstat;
 enum {
 	Vobjpaymax	= 1*1024*1024,
 	Vsubcapmax	= 1024,
-	/* One table covers volatile objects, GE/O and devices.  The low
-	 * Handle byte still addresses 255 slots; keep the table small enough
-	 * for the kernel stack arrays in vobjlist/vobjprocexit. */
-	Vhandmax	= 96,
+	/* Linux initial RLIMIT_NOFILE soft limit; shared by all native providers.
+	 * Inheritance has no smaller per-call limit. No table-sized stack arrays. */
+	Vhandmax	= VhandleLimit,
 };
 
 typedef struct Vobj Vobj;
@@ -96,7 +95,7 @@ struct Vinherit {
 		int	rights;
 		int	slot;
 		ulong	gen;
-	} e[Vhandmax];
+	} *e;
 };
 
 int	vobjinheritprepare(Vinherit*, Vinhand*, int);

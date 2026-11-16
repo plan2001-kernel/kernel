@@ -179,7 +179,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_programregister_obj, 4, 5,
 /* program_launch(name, argv=(), vhandles=(), cpu=None, membudget=0)
  * -> observation-only VkindProcess handle. */
 static mp_obj_t p9_programlaunch(size_t n, const mp_obj_t *a) {
-    struct { struct Ospawn base; struct Oinherit extra; } ext;
+    typedef struct { struct Ospawn base; union { struct Oinherit extra; struct Oinheritv caps; }; } SpawnOptions;
+    SpawnOptions *ext = m_new0(SpawnOptions, 1);
     struct Oinheritv *hv;
     char *argv[33];
     const char *name;
@@ -192,16 +193,16 @@ static mp_obj_t p9_programlaunch(size_t n, const mp_obj_t *a) {
     name = mp_obj_str_get_str(a[0]);
     if(strlen(name) == 0 || strlen(name) >= OWNER_PROGRAM_NAME_MAX)
         mp_raise_ValueError(MP_ERROR_TEXT("program_launch: bad name"));
-    memset(&ext, 0, sizeof ext);
-    ext.base.cpu = ~0ULL;
+
+    ext->base.cpu = ~0ULL;
     if(n > 3 && a[3] != mp_const_none) {
         int cpu = mp_obj_get_int(a[3]);
         if(cpu < -1)
             mp_raise_ValueError(MP_ERROR_TEXT("program_launch: cpu"));
-        if(cpu >= 0) ext.base.cpu = (unsigned long long)cpu;
+        if(cpu >= 0) ext->base.cpu = (unsigned long long)cpu;
     }
     if(n > 4 && a[4] != mp_const_none)
-        ext.base.membudget = (unsigned long long)mp_obj_get_uint(a[4]);
+        ext->base.membudget = (unsigned long long)mp_obj_get_uint(a[4]);
     argc = 0;
     total = 0;
     if(n > 1 && a[1] != mp_const_none) {
@@ -221,7 +222,7 @@ static mp_obj_t p9_programlaunch(size_t n, const mp_obj_t *a) {
     }
     argv[argc] = NULL;
     hasv = n > 2 && a[2] != mp_const_none;
-    hv = (struct Oinheritv *)&ext.extra;
+    hv = &ext->caps;
     if(hasv) {
         memset(hv, 0, sizeof *hv);
         it = mp_getiter(a[2], NULL);
@@ -236,15 +237,16 @@ static mp_obj_t p9_programlaunch(size_t n, const mp_obj_t *a) {
                 hi = pair[0];
                 rights = (unsigned long long)mp_obj_get_int(pair[1]);
             }
-            if(hv->nhandles >= 8)
+            if(hv->nhandles >= OINHERIT_MAXHANDLES)
                 mp_raise_ValueError(MP_ERROR_TEXT("program_launch: vhandle count"));
             hv->h[hv->nhandles].handle = (unsigned long long)mp_obj_get_int(hi);
             hv->h[hv->nhandles].rights = rights;
             hv->nhandles++;
         }
     }
-    ext.base.flags = hasv ? 2 : 1;
-    h = programlaunch((char*)name, strlen(name), argv, argc, &ext.base);
+    ext->base.flags = hasv ? 2 : 1;
+    h = programlaunch((char*)name, strlen(name), argv, argc, &ext->base);
+    m_del(SpawnOptions, ext, 1);
     if(h < 0) raise_err();
     return mp_obj_new_int(h);
 }
@@ -268,17 +270,15 @@ static MP_DEFINE_CONST_FUN_OBJ_1(p9_rfork_obj, p9_rfork);
  * mapping tuple is empty (the parent learns the assigned numbers).
  */
 static mp_obj_t p9_rforkex(size_t n, const mp_obj_t *a) {
-    struct Rforkex req;
-    unsigned long long map[RFORKEX_MAXHANDLES];
+    struct Rforkex *req = m_new0(struct Rforkex, 1);
+    unsigned long long *map = m_new0(unsigned long long, RFORKEX_MAXHANDLES);
     mp_obj_t it, item;
     size_t have, want, i;
     long r;
 
     if(n < 1 || n > 4)
         mp_raise_TypeError(MP_ERROR_TEXT("rforkex: 1 to 4 arguments"));
-    memset(&req, 0, sizeof req);
-    memset(map, 0, sizeof map);
-    req.version = RFORKEX_VERSION;
+    req->version = RFORKEX_VERSION;
     have = 0;
     if(n > 1 && a[1] != mp_const_none) {
         it = mp_getiter(a[1], NULL);
@@ -300,32 +300,39 @@ static mp_obj_t p9_rforkex(size_t n, const mp_obj_t *a) {
                     dstslot = (unsigned long long)mp_obj_get_int(pair[2]);
             }
             if(have < RFORKEX_MAXHANDLES) {
-                req.h[have].handle = handle;
-                req.h[have].rights = rights;
-                req.h[have].dstslot = dstslot;
+                req->h[have].handle = handle;
+                req->h[have].rights = rights;
+                req->h[have].dstslot = dstslot;
             }
             have++;
         }
     }
     if(n > 2 && a[2] != mp_const_none)
-        req.version = (unsigned int)mp_obj_get_int(a[2]);
-    req.count = (unsigned int)have;
+        req->version = (unsigned int)mp_obj_get_int(a[2]);
+    req->count = (unsigned int)have;
     if(n > 3 && a[3] != mp_const_none)
-        req.count = (unsigned int)mp_obj_get_int(a[3]);
-    r = rforkex((unsigned long)mp_obj_get_int(a[0]), &req, map);
-    if(r < 0)
-        raise_err();
+        req->count = (unsigned int)mp_obj_get_int(a[3]);
+    r = rforkex((unsigned long)mp_obj_get_int(a[0]), req, map);
+    /* Only the parent owns these allocations: RFMEM may share the heap. */
     if(r == 0)
         return mp_obj_new_tuple(2, (mp_obj_t[]){ mp_obj_new_int(0),
             mp_obj_new_tuple(0, NULL) });
+    m_del(struct Rforkex, req, 1);
+    if(r < 0){
+        m_del(unsigned long long, map, RFORKEX_MAXHANDLES);
+        raise_err();
+    }
     {
-        mp_obj_t child[RFORKEX_MAXHANDLES];
+        mp_obj_t *child = m_new(mp_obj_t, RFORKEX_MAXHANDLES);
         want = have < RFORKEX_MAXHANDLES ? have : RFORKEX_MAXHANDLES;
         for(i = 0; i < want; i++)
             child[i] = mp_obj_new_int_from_ull(map[i]);
         mp_obj_t t[2] = { mp_obj_new_int(r),
             mp_obj_new_tuple(want, child) };
-        return mp_obj_new_tuple(2, t);
+        mp_obj_t result = mp_obj_new_tuple(2, t);
+        m_del(mp_obj_t, child, RFORKEX_MAXHANDLES);
+        m_del(unsigned long long, map, RFORKEX_MAXHANDLES);
+        return result;
     }
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_rforkex_obj, 1, 4, p9_rforkex);
@@ -379,7 +386,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(p9_procinfo_obj,p9_procinfo);
 static mp_obj_t p9_objlistcap(mp_obj_t capo) {
     int cap=mp_obj_get_int(capo);VobjListRec *rec;unsigned long long copied=0;
     long total,i;mp_obj_t *t,result;
-    if(cap<0||cap>96)mp_raise_ValueError(MP_ERROR_TEXT("handle list capacity"));
+    if(cap<0||cap>VhandleLimit)mp_raise_ValueError(MP_ERROR_TEXT("handle list capacity"));
     rec=m_new(VobjListRec,cap?cap:1);
     total=obj_list_count(rec,cap,&copied);
     if(total<0){m_del(VobjListRec,rec,cap?cap:1);raise_err();}
@@ -541,15 +548,30 @@ static mp_obj_t p9_vobjio(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_vobjio_obj,3,4,p9_vobjio);
 
-/* Enumerate this process's handles in slot order (used by an OSPAWN child). */
-static mp_obj_t p9_vobjlist(void){
- VobjListRec rec[32];long n,i;mp_obj_t t[32];
- n=obj_list(rec,32);
- if(n<0)raise_err();
- if(n>32)n=32;
- for(i=0;i<n;i++)t[i]=mp_obj_new_int((mp_int_t)rec[i].handle);
- return mp_obj_new_tuple(n,t);
+/* No silent 32-entry truncation: all native Handles are enumerable. */
+static mp_obj_t native_handle_list(int kind){
+ VobjListRec *rec;
+ mp_obj_t *items, result;
+ long cap=obj_list(NULL,0), n, i, count=0;
+ if(cap<0)raise_err();
+ for(;;){
+  rec=m_new(VobjListRec,cap?cap:1);
+  n=obj_list(rec,cap);
+  if(n<0){m_del(VobjListRec,rec,cap?cap:1);raise_err();}
+  if(n<=cap)break;
+  m_del(VobjListRec,rec,cap?cap:1);
+  cap=n;
+ }
+ items=m_new(mp_obj_t,n?n:1);
+ for(i=0;i<n;i++)
+  if(kind==0 || rec[i].kind==(unsigned)kind)
+   items[count++]=mp_obj_new_int((mp_int_t)rec[i].handle);
+ result=mp_obj_new_tuple(count,items);
+ m_del(VobjListRec,rec,cap?cap:1);
+ m_del(mp_obj_t,items,n?n:1);
+ return result;
 }
+static mp_obj_t p9_vobjlist(void){return native_handle_list(0);}
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_vobjlist_obj,p9_vobjlist);
 
 /* Universal five-operation object ABI (runtime/abi/obj.h).  These are the
@@ -826,28 +848,12 @@ static mp_obj_t p9_objrevoke(mp_obj_t h){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(p9_objrevoke_obj,p9_objrevoke);
 
-static mp_obj_t p9_objlist(void){
- VobjListRec rec[32];long n,i;mp_obj_t t[32];
- n=obj_list(rec,32);
- if(n<0)raise_err();
- if(n>32)n=32;
- for(i=0;i<n;i++)t[i]=mp_obj_new_int((mp_int_t)rec[i].handle);
- return mp_obj_new_tuple(n,t);
-}
+static mp_obj_t p9_objlist(void){return native_handle_list(0);}
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_objlist_obj,p9_objlist);
 
 /* Every process gets zero or more ObjectSpace roots solely from its
  * installed Handle capabilities. No ambient root or Pgrp traversal. */
-static mp_obj_t p9_spaceroots(void){
- VobjListRec rec[32];long n,i,count=0;mp_obj_t roots[32];
- n=obj_list(rec,32);
- if(n<0)raise_err();
- if(n>32)n=32;
- for(i=0;i<n;i++)
-  if(rec[i].kind==VkindObjectSpace)
-   roots[count++]=mp_obj_new_int((mp_int_t)rec[i].handle);
- return mp_obj_new_tuple(count,roots);
-}
+static mp_obj_t p9_spaceroots(void){return native_handle_list(VkindObjectSpace);}
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_spaceroots_obj,p9_spaceroots);
 
 /* Raw INVOKE for negative/version tests: no buffers are transferred. */

@@ -1,3 +1,4 @@
+#include "objtail.h"
 /*
  * MicroPython persistent Space implementation (p9image.c): O-only.
  *
@@ -520,7 +521,10 @@ static void loadmpy(mp_obj_t envmap, qstr name, mp_obj_t mod, mp_compiled_module
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("space: O: %q: code digest is not the manifest's"), name);
     }
-    mp_raw_code_load_mem((const byte *)v.buf, v.len, cm);
+    uint64_t rawlen, metalen;
+    if(v.len<ObjTailSize || objtail_parse((const unsigned char*)v.buf+v.len-ObjTailSize,v.len,&rawlen,&metalen)<0)
+        mp_raise_ValueError(MP_ERROR_TEXT("space: missing or malformed bytecode footer"));
+    mp_raw_code_load_mem((const byte *)v.buf, (size_t)rawlen, cm);
     snprint(path, sizeof path, "<O:%s>", d->def);
     mp_store_attr(mod, MP_QSTR___file__, MP_OBJ_NEW_QSTR(qstr_from_str(path)));
     p9_dprintf("space: O: %s code OID %s, digest %s\n", qstr_str(name), oid, d->mpy);
@@ -920,7 +924,11 @@ p9_space_create_fun_code(const byte *p, size_t n)
 			MP_ERROR_TEXT("space: REPL function code exceeds the %d-byte O limit"),
 			(int)Obytemax);
 	}
-	oid = objcreate_space((void *)p, (long)n);
+	vstr_t framed;vstr_init_len(&framed,n+ObjTailSize);
+	memcpy(framed.buf,p,n);
+	if(objtail_pack((unsigned char*)framed.buf+n,n,0)<0){vstr_clear(&framed);mp_raise_ValueError(MP_ERROR_TEXT("code footer overflow"));}
+	oid = objcreate_space(framed.buf, (long)framed.len);
+	vstr_clear(&framed);
 	if (oid < 64 || oid >= OID_CODE || obytereserved(oid)) {
 		mp_raise_msg(&mp_type_ValueError,
 			MP_ERROR_TEXT("space: invalid native OID for REPL function code"));
@@ -941,6 +949,9 @@ p9_space_read_fun_code(uint64_t oid, vstr_t *v)
 		mp_raise_msg(&mp_type_ValueError,
 			MP_ERROR_TEXT("space: missing REPL function code object"));
 	}
+	uint64_t rawlen, metalen;
+	if(v->len<ObjTailSize || objtail_parse((const unsigned char*)v->buf+v->len-ObjTailSize,v->len,&rawlen,&metalen)<0){vstr_clear(v);mp_raise_ValueError(MP_ERROR_TEXT("invalid function code footer"));}
+	v->len=(size_t)rawlen;
 }
 
 static mp_obj_t
@@ -1025,6 +1036,22 @@ space_oget(mp_obj_t oidobj)
 	return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(space_oget_obj, space_oget);
+/* Full GE/O reads retain their existing opaque-byte semantics. These explicit
+ * framed views validate the footer and never infer access from metadata. */
+static mp_obj_t space_framed_view(mp_obj_t oidobj,int metadata_only)
+{
+    mp_obj_t full=space_oget(oidobj);mp_buffer_info_t b;
+    mp_get_buffer_raise(full,&b,MP_BUFFER_READ);
+    uint64_t raw,meta;
+    if(b.len<ObjTailSize || objtail_parse((const unsigned char*)b.buf+b.len-ObjTailSize,b.len,&raw,&meta)<0)
+        mp_raise_ValueError(MP_ERROR_TEXT("object has no valid footer"));
+    return mp_obj_new_bytes((const byte*)b.buf+(metadata_only?raw:0),(size_t)(metadata_only?meta:raw));
+}
+static mp_obj_t space_ometa(mp_obj_t oid){return space_framed_view(oid,1);}
+static mp_obj_t space_oraw(mp_obj_t oid){return space_framed_view(oid,0);}
+static MP_DEFINE_CONST_FUN_OBJ_1(space_ometa_obj,space_ometa);
+static MP_DEFINE_CONST_FUN_OBJ_1(space_oraw_obj,space_oraw);
+
 
 /*
  * oregister([data]) -> a fresh local native OID.  Allocation and the
@@ -1095,7 +1122,8 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     struct {
         mp_arg_val_t oid, cpu, argv, membudget, handle, roles, env, vhandles;
     } a;
-    struct { struct Ospawn base; struct Oinherit extra; } ext;
+    typedef struct { struct Ospawn base; union { struct Oinherit extra; struct Oinheritv caps; }; } SpawnOptions;
+    SpawnOptions *ext = m_new0(SpawnOptions, 1);
     struct Oinheritv *hv;
     int hasv;
     char *argv[33];
@@ -1114,9 +1142,9 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
     }
     oid = (unsigned long long)mp_obj_get_uint(a.oid.u_obj);
 
-    memset(&ext, 0, sizeof ext);
+
     if(a.handle.u_obj == mp_const_none) obyteopen();
-    ext.base.cpu = ~0ULL;
+    ext->base.cpu = ~0ULL;
     if (a.cpu.u_obj != mp_const_none) {
         int cpu = mp_obj_get_int(a.cpu.u_obj);
         if (cpu == -1) {
@@ -1125,7 +1153,7 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
             mp_raise_msg(&mp_type_ValueError,
                 MP_ERROR_TEXT("space.spawn: cpu must be >= 0, -1 or None"));
         } else {
-            ext.base.cpu = (unsigned long long)cpu;
+            ext->base.cpu = (unsigned long long)cpu;
         }
     }
 
@@ -1159,9 +1187,9 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         /* negative values raise OverflowError in mp_obj_get_uint */
         mb = (unsigned long long)mp_obj_get_uint(a.membudget.u_obj);
     }
-    ext.base.membudget = mb;
+    ext->base.membudget = mb;
     hasv = a.vhandles.u_obj != mp_const_none;
-    hv = (struct Oinheritv *)&ext.extra;
+    hv = &ext->caps;
     if (hasv) {
         if (a.roles.u_obj != mp_const_none
         || a.env.u_obj != mp_const_none) {
@@ -1180,26 +1208,26 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
                 handle_item = pair[0];
                 selected_rights = (unsigned long long)mp_obj_get_int(pair[1]);
             }
-            if (hv->nhandles >= 8) {
+            if (hv->nhandles >= OINHERIT_MAXHANDLES) {
                 mp_raise_msg(&mp_type_ValueError,
-                    MP_ERROR_TEXT("space.spawn: at most 8 vhandles"));
+                    MP_ERROR_TEXT("space.spawn: native Handle limit exceeded"));
             }
             hv->h[hv->nhandles].handle = (unsigned long long)mp_obj_get_int(handle_item);
             hv->h[hv->nhandles].rights = selected_rights;
             hv->nhandles++;
         }
     }
-    ext.base.flags = hasv ? 2 : 1;
+    ext->base.flags = hasv ? 2 : 1;
     if (!hasv) {
     /* Legacy namespace view is gone. Process roots are explicit grants. */
-    ext.extra.view = 0;
+    ext->extra.view = 0;
     if(a.roles.u_obj != mp_const_none){
         it = mp_getiter(a.roles.u_obj, NULL);
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
             s = mp_obj_str_get_str(item);
-            if(ext.extra.nroles == 32 || strlen(s) >= 32)
+            if(ext->extra.nroles == 32 || strlen(s) >= 32)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn role limit"));
-            strcpy(ext.extra.roles[ext.extra.nroles++], s);
+            strcpy(ext->extra.roles[ext->extra.nroles++], s);
         }
     }
     if(a.env.u_obj != mp_const_none){
@@ -1207,14 +1235,14 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
         while((item = mp_iternext(it)) != MP_OBJ_STOP_ITERATION){
             size_t count; mp_obj_t *pair;
             mp_obj_get_array(item, &count, &pair);
-            if(count != 2 || ext.extra.nenv == 8)
+            if(count != 2 || ext->extra.nenv == 8)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn env limit"));
             const char *key = mp_obj_str_get_str(pair[0]);
             const char *val = mp_obj_str_get_str(pair[1]);
             if(strlen(key) >= 32 || strlen(val) >= 128)
                 mp_raise_ValueError(MP_ERROR_TEXT("spawn env size"));
-            strcpy(ext.extra.env[ext.extra.nenv].name, key);
-            strcpy(ext.extra.env[ext.extra.nenv++].value, val);
+            strcpy(ext->extra.env[ext->extra.nenv].name, key);
+            strcpy(ext->extra.env[ext->extra.nenv++].value, val);
         }
     }
     }
@@ -1226,8 +1254,9 @@ static mp_obj_t space_spawn(size_t n_args, const mp_obj_t *args, mp_map_t *kw_ar
             mp_raise_msg(&mp_type_OSError,
                 MP_ERROR_TEXT("space.spawn: no open O Space"));
         }
-        pid = obj_ospawn(spaceh, oid, argv, argc, &ext.base);
+        pid = obj_ospawn(spaceh, oid, argv, argc, &ext->base);
     }
+    m_del(SpawnOptions, ext, 1);
     if (pid < 0) {
         raise_err();
     }
@@ -1580,6 +1609,8 @@ static const mp_rom_map_elem_t space_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&space_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_oid), MP_ROM_PTR(&space_oid_obj) },
     { MP_ROM_QSTR(MP_QSTR_oget), MP_ROM_PTR(&space_oget_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ometa), MP_ROM_PTR(&space_ometa_obj) },
+    { MP_ROM_QSTR(MP_QSTR_oraw), MP_ROM_PTR(&space_oraw_obj) },
     { MP_ROM_QSTR(MP_QSTR_oput), MP_ROM_PTR(&space_oput_obj) },
     { MP_ROM_QSTR(MP_QSTR_oregister), MP_ROM_PTR(&space_oregister_obj) },
     { MP_ROM_QSTR(MP_QSTR_spawn), MP_ROM_PTR(&space_spawn_obj) },

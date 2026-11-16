@@ -86,8 +86,8 @@ done
 need() { [ -e "$1" ] || die "missing $1"; }
 check_mpy() {
 	need "$mpyelf"; need "$demo"; need "$mkovol"; need "$oinspect"
-	mpy_size=$(stat -c %s "$mpyelf")
-	mpy_sha=$(sha256sum "$mpyelf" | awk '{print $1}')
+	mpy_size=$(python3 -c 'import sys;sys.path.insert(0,sys.argv[1]);from object_format import frame_file;print(len(frame_file(sys.argv[2],"application/x-elf")))' "$root/tools/host" "$mpyelf")
+	mpy_sha=$(python3 -c 'import sys,hashlib;sys.path.insert(0,sys.argv[1]);from object_format import frame_file;print(hashlib.sha256(frame_file(sys.argv[2],"application/x-elf")).hexdigest())' "$root/tools/host" "$mpyelf")
 	say "GCC MPY ELF: $mpyelf ($mpy_size bytes, $mpy_sha)"
 }
 
