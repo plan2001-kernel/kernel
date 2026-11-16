@@ -128,6 +128,7 @@ def main():
                  '-DBB_EXTRA_VERSION=""', '-Werror=implicit-function-declaration',
                  '-Werror=int-conversion', '-I' + str(out / 'include'),
                  '-I' + str(ROOT / 'ports/newlib/ash/include'),
+                 '-I' + str(kernel / 'runtime/abi'),
                  '-I' + str(busybox / 'include'),
                  '-isystem', str(newlib / 'include'), '-isystem',
                  subprocess.check_output(['gcc-14', '-print-file-name=include'],
@@ -226,7 +227,7 @@ def main():
              *[runtime / (x + '.o') for x in
                ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
                 'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxobject', 'objtail', 'uxshell', 'uxservice',
-                'uxfd', 'rt_stubs-newlib')],
+                'uxfd', 'project_native', 'project_record', 'rt_stubs-newlib')],
              '-Wl,--start-group', archive, newlib / 'libc.a', newlib / 'libm.a',
              '-lgcc', '-Wl,--end-group'])
         result = audit(elf, out, ['_start', 'p9_busybox_main', 'ash_main',
@@ -252,7 +253,7 @@ def main():
                 *[runtime / (x + '.o') for x in
                   ('syscalls', 'process', 'inherit', 'file_state', 'fd_table', 'posix', 'stdio_process',
                    'dirent', 'ash_posix', 'pipe', 'pvd', 'uxfs', 'uxobject', 'objtail', 'uxshell', 'uxservice',
-                   'uxfd', 'rt_stubs-newlib')],
+                   'uxfd', 'project_native', 'project_record', 'rt_stubs-newlib')],
                 '-Wl,--start-group', newlib / 'libc.a', newlib / 'libm.a',
                 '-lgcc', '-Wl,--end-group']
         run(link)

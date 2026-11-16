@@ -7,13 +7,15 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "../full/plan2001_full.h"
 #include "../full/process.h"
+#include "../full/project_fs.h"
 
 struct p2001_dir {
     unsigned used, next, capacity;
-    UxService *service;
-    char base[PVD_PATH_MAX];
+    char base[4096];
     struct dirent *entries;
 };
 
@@ -33,8 +35,8 @@ static int add_entry(struct p2001_dir *d,const char *name,unsigned int n,
 {
     struct dirent *e;
     unsigned int i;
-    if(!n || n>=sizeof(d->entries[0].d_name) ||
-       d->used>=d->capacity) return -1;
+    if(!n || n>=sizeof(d->entries[0].d_name))return -1;
+    if(d->used==d->capacity){unsigned cap=d->capacity?d->capacity*2:16;void *p=realloc(d->entries,cap*sizeof *d->entries);if(!p)return -1;d->entries=p;d->capacity=cap;}
     e=&d->entries[d->used];
     memset(e,0,sizeof *e);
     for(i=0;i<n;++i) e->d_name[i]=name[i];
@@ -46,53 +48,41 @@ static int add_entry(struct p2001_dir *d,const char *name,unsigned int n,
     ++d->used;
     return 0;
 }
-static int emit_child(void *context,const void *name,unsigned int n)
+static int emit_project(void *context,const char *name,unsigned n,unsigned kind)
 {
-    struct p2001_dir *d=(struct p2001_dir *)context;
-    char full[PVD_PATH_MAX];
-    unsigned int base=(unsigned int)strlen(d->base);
-    unsigned int pos=0,kind=0,size=0;
-    const unsigned char *p=(const unsigned char *)name;
-    int rc;
-    if(!n || n>PVD_LABEL_MAX || base+n+2>=sizeof full)
-        return -1;
-    memcpy(full,d->base,base);
-    pos=base;
-    if(pos>1) full[pos++]='/';
-    memcpy(full+pos,p,n);
-    full[pos+n]=0;
-    rc=uxfs_info(&d->service->fs,full,&kind,&size);
-    return rc ? -1 : add_entry(d,(const char *)p,n,kind);
+    struct p2001_dir *d=context;
+    if(d->used==d->capacity){unsigned cap=d->capacity?d->capacity*2:16;void *p=realloc(d->entries,cap*sizeof *d->entries);if(!p)return -1;d->entries=p;d->capacity=cap;}
+    if(add_entry(d,name,n,kind))return -1;
+    char full[4096];size_t base=strlen(d->base);if(base+n+2>=sizeof full)return -1;
+    memcpy(full,d->base,base);if(base>1)full[base++]='/';memcpy(full+base,name,n);full[base+n]=0;
+    struct stat st;if(stat(full,&st))return -1;d->entries[d->used-1].d_ino=st.st_ino;return 0;
 }
 DIR *opendir(const char *path)
 {
-    UxService *service=p9_full_file_service();
     struct p2001_dir *d;
-    unsigned int kind=0,size=0;
     int rc;
-    if(!service) { errno=ENOSYS; return NULL; }
+    if(!p9_project_root()) { errno=ENOSYS; return NULL; }
     if(!path) { errno=EFAULT; return NULL; }
-    rc=uxfs_info(&service->fs,path,&kind,&size);
-    if(rc) { (void)dir_error(rc); return NULL; }
-    if(kind!=UXFS_DIR) { errno=ENOTDIR; return NULL; }
+    struct stat info;
+    if(stat(path,&info))return NULL;
+    if(!S_ISDIR(info.st_mode)){errno=ENOTDIR;return NULL;}
     d=(struct p2001_dir *)malloc(sizeof(*d));
     if(!d) { errno=ENOMEM; return NULL; }
     memset(d,0,sizeof(*d));
-    d->capacity=UXFS_NODES+2;
+    d->capacity=16;
     if(p9_multicall_path) {
         unsigned i;
         for(i=0;p9_multicall_path(i);++i) {
-            if(i>=512) { free(d); errno=EOVERFLOW; return NULL; }
             ++d->capacity;
         }
     }
     d->entries=calloc(d->capacity,sizeof(*d->entries));
     if(!d->entries) { free(d); errno=ENOMEM; return NULL; }
-    d->service=service;
-    rc=uxfs_path(&service->fs,path,d->base);
+    if(strlen(path)>=sizeof d->base){free(d->entries);free(d);errno=ENAMETOOLONG;return NULL;}
+    if(path[0]=='/'){strcpy(d->base,path);rc=0;}else{rc=getcwd(d->base,sizeof d->base)?0:-1;if(!rc && strcmp(path,".")){size_t n=strlen(d->base);if(n+strlen(path)+2>=sizeof d->base)rc=-1;else{if(n>1)strcat(d->base,"/");strcat(d->base,path);}}}
     if(!rc && add_entry(d,".",1,UXFS_DIR)==0 &&
        add_entry(d,"..",2,UXFS_DIR)==0)
-        rc=uxfs_list(&service->fs,path,emit_child,d);
+        rc=p9_project_list(path,emit_project,d);
     if(!rc && p9_multicall_path) {
         unsigned i;
         const char *entry;

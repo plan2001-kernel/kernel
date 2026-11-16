@@ -7,17 +7,17 @@
 #include <string.h>
 #include <unistd.h>
 #include "../full/process.h"
+#include "../full/project_fs.h"
+#include <sys/stat.h>
 #include "../full/plan2001_full.h"
 extern int p9_busybox_main(int, char **);
 
 int main(int argc, char **argv)
 {
-    static Pvd view;
-    static UxService service;
-    if (!p9_full_file_service()) {
-        if (pvd_bootstrap(&view)) return 125;
-        uxservice_init(&service, &view);
-        if (p9_full_bind_files(&service)) return 125;
+    if(p9_project_boot())return 125;
+    const char *dirs[]={"/bin","/dev","/etc","/home","/tmp","/usr","/usr/bin","/var"};
+    for(unsigned i=0;i<sizeof dirs/sizeof dirs[0];i++){
+        struct stat st;if(stat(dirs[i],&st)<0 && mkdir(dirs[i],0700)<0)return 125;
     }
     if (setenv("HOME", "/", 0) ||
         setenv("PATH", "/bin:/usr/bin:/sbin:/usr/sbin", 0) ||
@@ -34,7 +34,7 @@ int main(int argc, char **argv)
             p9_process_bind_executable("/bin/busybox", volume, oid)) return 125;
         if (dup2(1, 2) < 0) return 125;
         char *shell[] = {"sh", "-i", NULL};
-        puts("PLAN2001-MULTICALL-READY (volatile files; external applets)");
+        puts("PLAN2001-MULTICALL-READY (persistent ObjectSpace files; external applets)");
         fflush(stdout);
         return p9_busybox_main(2, shell);
     }

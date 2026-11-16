@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include "process.h"
 #include "plan2001_full.h"
+#include "project_fs.h"
 #include "obj.h"
 #include "vobj.h"
 #include "sysctl.h"
@@ -20,6 +21,7 @@
 #include "expected_applets.h"
 extern long objopen(unsigned long long, void *, long, unsigned long long, void *);
 extern long objinvoke(int, void *, long);
+extern long objclose(int);
 static int report;
 static unsigned char covered[sizeof(expected_names)/sizeof(expected_names[0])];
 static void emit(const char *s)
@@ -156,8 +158,6 @@ static void content(const char *path,const char *data)
 }
 int main(void)
 {
-    static Pvd view;
-    static UxService service;
     ObjOpenConsoleReq req = {1, 0};
     int volume;
     report = (int)objopen(ObjOpenConsole, &req, sizeof req, 0, NULL);
@@ -165,9 +165,13 @@ int main(void)
     volume = (int)objopen(ObjOpenVolume, NULL, 0, Vexecute | Vdelegate, NULL);
     check(volume > 0, "authorized executable volume");
 
-    check(pvd_bootstrap(&view) == 0, "bootstrap view");
-    uxservice_init(&service, &view);
-    check(p9_full_bind_files(&service) == 0, "bind file service");
+    ObjProjectOpen project={0};project.volume=(int)objopen(ObjOpenVolume,NULL,0,0,NULL);project.oid=UINT64_C(0x4f45584543000007);
+    project.rights=Vread|Vmeta|Vcontrol|Vdelegate|Vwrite|Vcreate|Vcommit|Vexecute;
+    int root=(int)objopen(ObjOpenProject,&project,sizeof project,0,NULL);
+    check(root>0 && p9_file_import(root)==0,"open durable project root");
+    objclose(project.volume);
+    const char *directories[]={"/bin","/dev","/etc","/home","/tmp","/usr","/usr/bin","/var"};
+    for(unsigned i=0;i<sizeof directories/sizeof directories[0];i++)check(mkdir(directories[i],0700)==0,"create native directory");
     {
         struct stat st, target;
         unsigned count=0;
@@ -233,11 +237,12 @@ int main(void)
     {
         UxMeta before,after;struct stat st1,st2;
         fixture("/tmp/object-original","raw-file\n");
-        check(uxfs_metadata(&service.fs,"/tmp/object-original",&before)==0,"read native Unix metadata");
+        PjObject object;check(p9_project_resolve("/tmp/object-original",&object)==0 && pj_metadata(&object,&before)==0,"read native Unix metadata");pj_close(&object);
         check(!strcmp(before.name,"object-original") && (before.known&UXMETA_BIRTH),"object-owned name and real creation instant");
         check(stat("/tmp/object-original",&st1)==0 && st1.st_size==9 && st1.st_ino!=0,"raw-view stat and local inode");
         check(rename("/tmp/object-original","/tmp/unrelated-binding")==0,"rename namespace binding");
-        check(uxfs_metadata(&service.fs,"/tmp/unrelated-binding",&after)==0 && !strcmp(after.name,before.name) && after.birth_ns==before.birth_ns,"rename preserves object name and creation instant");
+        check(p9_project_resolve("/tmp/unrelated-binding",&object)==0 && pj_metadata(&object,&after)==0 && !strcmp(after.name,before.name) && after.birth_ns==before.birth_ns,"rename preserves object name and creation instant");
+        pj_close(&object);
         check(stat("/tmp/unrelated-binding",&st2)==0 && st2.st_ino==st1.st_ino && st2.st_size==9,"rename preserves Unix identity and raw size");
         check(unlink("/tmp/unrelated-binding")==0,"remove metadata fixture");
         emit("PASS: one object-owned name, independent Unix binding, creation time and raw stat projection\n");

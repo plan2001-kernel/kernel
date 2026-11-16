@@ -3,6 +3,7 @@
  */
 #ifndef PLAN2001_UXSPAWN_H
 #define PLAN2001_UXSPAWN_H
+#include "vobj.h"
 typedef unsigned long long UxRights;
 typedef struct {
     int handle;                 /* actual process-local parent Handle */
@@ -11,7 +12,7 @@ typedef struct {
 typedef struct {
     int executable_volume;      /* Vexecute-authorized GE/O volume Handle */
     unsigned long long oid;     /* executable identity, not authority */
-    UxGrant grant[8];           /* capability-bound grants, max native Oinheritv */
+    UxGrant grant[VhandleLimit];           /* capability-bound grants, max native Oinheritv */
     unsigned int grant_count;
 } UxLaunch;
 int uxspawn_start(const UxLaunch *launch, char **argv, int argc);

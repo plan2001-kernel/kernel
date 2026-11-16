@@ -15,6 +15,7 @@
 #include "../../unix/uxfd.h"
 #include "../../unix/uxpipe.h"
 #include "process.h"
+#include "project_fs.h"
 #include "vobj.h"
 
 int _close(int);
@@ -431,7 +432,7 @@ int p9_fd_export(P9FdImage *image,P9Plan *plan,int exec)
     initialize();
     memset(image,0,sizeof(*image));
     image->files=-1;
-    if(p9_backend_files()) {
+    if(p9_project_root()) {
         image->files=p9_file_export(plan);
         if(image->files<0 || !getcwd(image->cwd,sizeof image->cwd)) return -1;
     }
@@ -449,6 +450,7 @@ int p9_fd_export(P9FdImage *image,P9Plan *plan,int exec)
             if(!d->pipe && d->backend>=3) {
                 if(image->files<0) { errno=EACCES; return -1; }
                 o->kind=2; o->backend=d->backend;
+                if(p9_file_export_fd(d->backend,plan,&o->first,&o->second)<0)return -1;
             } else {
                 if(make_inheritable(d)<0) return -1;
                 o->kind=1; o->backend=-1;
@@ -501,6 +503,8 @@ int p9_fd_import(const P9FdImage *image,const int *handles,unsigned count)
         PipePair *p=NULL;
         if(o->kind==2) {
             if(image->files<0 || o->backend<3 || o->backend>=3+UXFD_SLOTS) { errno=EINVAL; return -1; }
+            if(o->first<0 || o->second<0 || (unsigned)o->first>=count || (unsigned)o->second>=count ||
+               p9_file_import_fd(o->backend,handles[o->first],handles[o->second],o->flags)<0)return -1;
             d->backend=o->backend; d->flags=o->flags;
             continue;
         }

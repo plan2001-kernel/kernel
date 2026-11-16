@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <setjmp.h>
 #include "process.h"
+#include "project_fs.h"
 #include "plan2001_full.h"
 #include "obj.h"
 #include "vobj.h"
@@ -542,13 +543,12 @@ int p9_process_bind_executable(const char *path,int volume,uint64_t oid)
  */
 int p9_process_executable(const char *path,uint64_t *oid)
 {
-    char normalized[PVD_PATH_MAX];
+    char normalized[4096];
     const char *target=path;
-    UxService *service=p9_full_file_service();
     unsigned i;
     if(!path) return 0;
-    if(service) {
-        if(uxfs_path(&service->fs,path,normalized)) return 0;
+    if(p9_project_root()) {
+        if(p9_project_normalize(path,normalized)) return 0;
         target=normalized;
     }
     if(p9_multicall_resolve) {

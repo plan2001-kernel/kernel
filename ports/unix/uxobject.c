@@ -157,3 +157,14 @@ int uxobject_split(const void*buf,unsigned size,unsigned*raw,unsigned*meta)
     *raw=(unsigned)r;*meta=(unsigned)m;return 0;
 }
 int uxobject_footer(unsigned char*out,unsigned raw,unsigned meta){return objtail_pack(out,raw,meta);}
+int uxobject_text_field(const unsigned char *data,unsigned n,const char *key,char *out,unsigned cap)
+{
+    Reader r;int rc=field(data,n,key,&r);if(rc<=0)return rc;
+    return getstr(r,out,cap)?-1:1;
+}
+int uxobject_int_field(const unsigned char *data,unsigned n,const char *key,long long *out)
+{
+    Reader r;int rc=field(data,n,key,&r);if(rc<=0)return rc;
+    if(r.end-r.p==1 && *r.p==0xf6)return 0;
+    return getnum(r,out)?-1:1;
+}

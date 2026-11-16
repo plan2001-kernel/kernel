@@ -214,11 +214,13 @@ void uxsupervisor_release(UxSupervisor *s)
 int uxsupervisor_run(unsigned long long child_oid,
                      unsigned long long manifest_oid)
 {
+    const char *stage="console proxy";
     static UxSupervisor proxy;
-    UxLaunch launch={0};
+    static UxLaunch launch;
+    launch.grant_count=0;
     char child_oid_arg[19], manifest_arg[19];
     char *argv[4]={"unix-child",child_oid_arg,0,0};
-    int exec=-1, storage=-1, child=-1, exited_ok=0, status=-1;
+    int project=-1, exec=-1, storage=-1, child=-1, exited_ok=0, status=-1;
     unsigned int i, used=0;
     unsigned long long id;
     const char digits[]="0123456789abcdef";
@@ -227,6 +229,7 @@ int uxsupervisor_run(unsigned long long child_oid,
     if (uxsupervisor_prepare(&proxy)!=0) return -1;
     /* Only an actual boot process can mint these authorized GE/O handles.
      * Exec and storage are separate capability derivation paths. */
+    stage="executable volume";
     exec=(int)obj_open(ObjOpenVolume,0,0,UX_SUPERVISOR_LAUNCH,0);
     if (exec<=0) goto cleanup;
     if (manifest_oid) {
@@ -264,6 +267,18 @@ int uxsupervisor_run(unsigned long long child_oid,
         launch.grant[7].rights=UX_SUPERVISOR_STORE;
         launch.grant_count=8;
     }
+    if(!manifest_oid){
+        stage="project volume";
+        int vol=(int)obj_open(ObjOpenVolume,0,0,0,0);
+        if(vol<=0)goto cleanup;
+        ObjProjectOpen req={0};req.volume=vol;req.oid=0x4f45584543000007ULL;
+        req.rights=Vread|Vmeta|Vcontrol|Vdelegate|Vwrite|Vcreate|Vcommit|Vexecute;
+        stage="project root";
+        project=(int)obj_open(ObjOpenProject,&req,sizeof req,0,0);obj_close(vol);
+        if(project<=0)goto cleanup;
+        launch.grant[7].handle=project;launch.grant[7].rights=req.rights;launch.grant_count=8;
+    }
+    stage="child SPAWN";
     child=uxspawn_start(&launch,argv,manifest_oid ? 3 : 2);
     if (child<=0) goto cleanup;
     (void)p2001_session_write(1,start,sizeof(start)-1);
@@ -280,6 +295,13 @@ int uxsupervisor_run(unsigned long long child_oid,
         ++used; /* bounded arithmetic not used for authorization */
     }
 cleanup:
+    if(status<0){
+        extern void rerrstr(char*,unsigned int);char error[128];unsigned n=0;rerrstr(error,sizeof error);
+        while(stage[n])n++;
+        p2001_session_write(2,"Unix supervisor failed at ",26);p2001_session_write(2,stage,n);
+        p2001_session_write(2,": ",2);n=0;while(error[n] && n<sizeof error)n++;p2001_session_write(2,error,n);p2001_session_write(2,"\n",1);
+    }
+    if(project>0)obj_close(project);
     if (child>0) {
         if (status!=0) (void)obj_process_terminate(child);
         (void)obj_close(child);

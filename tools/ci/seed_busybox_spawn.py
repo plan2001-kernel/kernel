@@ -27,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", required=True, type=Path)
     parser.add_argument("--elf", required=True, type=Path)
+    parser.add_argument("--project-root",action="store_true",help="seed an authoritative durable ObjectSpace root")
     parser.add_argument("--unix-manifest", action="store_true",
                         help="provision a checked UXFS manifest on the new scratch volume")
     parser.add_argument("--extra-elf", type=Path,
@@ -86,6 +87,9 @@ def main():
                     (seed / "exe").write_bytes(frame_file(args.extra_elf,"application/x-elf"))
                     (seed / "exeoid").write_text(f"{UNIX_CHILD_OID:016x}",
                                                  encoding="ascii")
+            if command[0] == str(formatter) and args.project_root:
+                from seed_project_root import provision as project_seed
+                project_seed(seed,kernel)
             if command[0] == str(formatter) and args.unix_manifest:
                 from seed_unix_manifest import provision
                 provision(seed,kernel)

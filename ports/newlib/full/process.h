@@ -22,7 +22,7 @@ typedef struct {
     P9FdObject objects[P9_FDS];
     unsigned count;
     int files;
-    char cwd[256];
+    char cwd[4096];
 } P9FdImage;
 typedef struct { char path[256]; int volume; uint64_t oid; } P9Executable;
 typedef struct { int pid, handle, mailbox, reported, status, stop_seen, stop_notified; } P9Child;
