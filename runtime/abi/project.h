@@ -16,7 +16,7 @@ typedef struct ObjProjectOpen {
 typedef struct ObjProjectReq {
     unsigned int operation, kind, rights, flags;
     int other;
-    unsigned int reserved;
+    unsigned int relation;
     unsigned long long binding, replace, epoch;
     const void *data;
     unsigned long long length;

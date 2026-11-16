@@ -1,5 +1,5 @@
 class Counter:
-    def __init__(self): self.n=0
+    def __init__(self): self.n=0; self.root_oid=0
 shared=Counter()
 alias=shared
 
@@ -22,6 +22,20 @@ def run():
     v=p.obj_open_volume()
     rights=1|8|64|128|256|2048|4096|8192
     print("PROJECT STEP root")
+    if shared.root_oid:
+        import project
+        restored=project.from_handle(p.project_open(v,shared.root_oid,rights))
+        with restored.open('left/shared') as item:
+            assert item.raw()==b'same'
+            ident=item.identity()
+        with restored.open('right/shared') as item:assert item.identity()==ident
+        with restored.open('writable/newfile') as item:assert item.raw()==b'written'
+        restored.activate()
+        import pkg
+        assert pkg.value==73
+        print('PROJECT-RESTORE-PASS')
+        shared.n+=1
+        return shared.n
     root=p.project_open(v,0,rights,empty())
     print("PROJECT STEP child")
     p.project_call(root,2,'src',0,0,empty(),19,rights)
@@ -56,6 +70,7 @@ def run():
     left=ns.mkdir('left');right=ns.mkdir('right')
     sharedfile=left.create('shared',b'same')
     right.link('shared',sharedfile)
+    assert ns.links(sharedfile)==2
     union=ns.compose('union',[left,right])
     intersection=ns.compose('intersection',[left,right],operation='intersection')
     assert union.resolve('shared').identity()==sharedfile.identity()
@@ -71,6 +86,29 @@ def run():
     writable=ns.compose('writable',[left,right],write_source=0)
     created=writable.create('newfile',b'written');created.close()
     assert left.resolve('newfile').raw()==b'written'
+    wide=ns.mkdir('wide')
+    for i in range(70):
+        item=wide.create('n'+str(i),b'x');item.close()
+    assert len(wide.entries())==70
+    longname='L'*255
+    item=wide.create(longname,b'long');item.close()
+    with wide.resolve(longname) as item:assert item.raw()==b'long'
+    chain=ns.mkdir('chain')
+    for i in range(18):
+        next=chain.mkdir('d');chain.close();chain=next
+    chain.close()
+    # Native ObjectSpace operations address the same durable bindings.
+    rows,cursor,epoch=p.space_list(left.handle)
+    assert any(row[1]=='shared' for row in rows)
+    before=sharedfile.identity()
+    right.rename('shared',left,'alias',False)
+    with left.resolve('alias') as item:assert item.identity()==before
+    # Restore fixture keeps both aliases to the one object.
+    right.link('shared',sharedfile)
+    left.remove('alias')
+    assert ns.links(sharedfile)==2
+    shared.root_oid=p.project_identity(root)[1]
+    print('PROJECT-SCALE-PASS')
     print('PROJECT-COMPOSITION-PASS')
     print('PROJECT-IMPORT-PASS')
     print('PROJECT-NATIVE-PASS')

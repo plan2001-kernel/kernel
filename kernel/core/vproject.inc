@@ -32,17 +32,18 @@ static long pjcheck(uchar *p,long n)
     if(off!=raw-8)error("namespace: trailing record bytes");
     return raw;
 }
-static uchar *pjload(Ohand *oh,uvlong oid,long *n,int directory)
+static uchar *pjloadver(Ohand *oh,uvlong oid,long *n,int directory,uvlong *version)
 {
     uchar *p=nil;
     if(waserror()){free(p);nexterror();}
     *n=osreadhandk(oh,oid,nil,0,nil);
     if(*n<32 || *n>64*1024*1024)error("namespace: invalid object length");
     p=mallocz(*n,1);if(p==nil)error(Enomem);
-    if(osreadhandk(oh,oid,p,*n,nil)!=*n)error("namespace: changed object length");
+    if(osreadhandk(oh,oid,p,*n,version)!=*n)error("namespace: changed object length");
     if(directory)pjcheck(p,*n);else pjraw(p,*n);
     poperror();return p;
 }
+static uchar *pjload(Ohand *oh,uvlong oid,long *n,int directory){return pjloadver(oh,oid,n,directory,nil);}
 static Ohand *pjbackend(Vobj *o,uvlong *oid)
 {
     if(o->kind==VkindGe){*oid=o->oid;return o->priv;}
@@ -148,14 +149,12 @@ int vobjprojectopen(ObjProjectOpen *r,VobjId *id)
     if(id!=nil)vobjidentity(h,id);
     poperror();free(p);vhandput(v);return h;
 }
-void vobjprojectcall(int handle,ObjCall *c)
+static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
 {
-    ObjProjectReq r;Vhand *h=nil,*other=nil;Ohand *oh,*tx=nil,*oh2;uvlong oid,oid2=0,newid,ver=0;
+    Vhand *h=nil,*other=nil;Ohand *oh,*tx=nil,*oh2;uvlong oid,oid2=0,newid,ver=0;
     uchar *p=nil,*p2=nil,*q=nil,*q2=nil,*payload=nil;long n=0,n2=0,raw,raw2=0,at=-1,at2=-1,qn=0,q2n=0;
     uchar add[32+255];long addlen=0;int rights,dir,need;
-    if(c->in==nil || c->inlen!=sizeof r)error(Ebadarg);
-    validaddr((uintptr)c->in,sizeof r,0);memmove(&r,c->in,sizeof r);
-    if((r.flags && !(r.operation==ProjectLink && r.flags==1)) || r.reserved || r.length>64*1024*1024)error(Ebadarg);
+    if((r.flags && !(r.operation==ProjectLink && r.flags==1)) || r.length>64*1024*1024)error(Ebadarg);
     need=(r.operation==ProjectRead || r.operation==ProjectResolve || r.operation==ProjectLinks)?Vread:
          r.operation==ProjectAttenuate?Vdelegate:r.operation==ProjectPut?Vwrite:Vcontrol;
     h=vlookup(handle,need);
@@ -166,9 +165,9 @@ void vobjprojectcall(int handle,ObjCall *c)
         free(p);free(p2);free(q);free(q2);free(payload);oshandput(tx);vhandput(other);
         qunlock(&projectgate);nexterror();
     }
-    p=pjload(oh,oid,&n,dir);raw=pjraw(p,n);
-    if(r.epoch && (!dir || r.epoch!=pjget(p+8,8)))error("namespace: epoch changed");
-    c->aux=dir?pjget(p+8,8):0;c->result=0;
+    p=pjloadver(oh,oid,&n,dir,&ver);raw=pjraw(p,n);
+    if(r.epoch && r.epoch!=(dir?pjget(p+8,8):ver))error("namespace: epoch changed");
+    c->aux=dir?pjget(p+8,8):ver;c->result=0;
     if(r.operation==ProjectRead){
         c->result=n;
         if(c->outlen){if(c->out==nil || c->outlen<(uvlong)n)error("namespace: short buffer");validaddr((uintptr)c->out,n,1);memmove(c->out,p,n);}
@@ -217,8 +216,8 @@ void vobjprojectcall(int handle,ObjCall *c)
         }
         if(pjget(p+16,8)==~(uvlong)0)error("namespace: binding IDs exhausted");
         memset(add,0,sizeof add);pjput(add,pjget(p+16,8)+1,8);pjput(add+8,newid,8);
-        pjput(add+16,rights,4);pjput(add+24,r.kind,4);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
-        q=pjedit(p,n,-1,add,addlen,&qn);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=newid;goto done;
+        pjput(add+16,rights,4);pjput(add+20,r.relation,4);pjput(add+24,r.kind,4);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
+        q=pjedit(p,n,-1,add,addlen,&qn);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=r.operation==ProjectLink?pjget(add,8):0;goto done;
     }
     at=pjfind(p,raw,r.binding,nil);if(at<0)error("namespace: not found");
     if(r.operation==ProjectUnlink){
@@ -246,4 +245,34 @@ void vobjprojectcall(int handle,ObjCall *c)
 done:
     poperror();free(p);free(p2);free(q);free(q2);free(payload);oshandput(tx);vhandput(other);qunlock(&projectgate);
     poperror();vhandput(h);
+}
+
+void vobjprojectcall(int handle,ObjCall *c)
+{
+    ObjProjectReq r;
+    if(c->in==nil || c->inlen!=sizeof r)error(Ebadarg);
+    validaddr((uintptr)c->in,sizeof r,0);memmove(&r,c->in,sizeof r);
+    projectinvoke(handle,c,r);
+}
+uvlong vobjprojectbind(int handle,ObjSpaceBindReq *b)
+{
+    ObjProjectReq r={0};ObjCall c={0};r.operation=ProjectLink;r.other=b->target;r.rights=b->rights;r.relation=b->relation;
+    memmove(r.name,b->label,sizeof r.name);projectinvoke(handle,&c,r);
+    return c.result;
+}
+void vobjprojectunbind(int handle,uvlong binding)
+{ObjProjectReq r={0};ObjCall c={0};r.operation=ProjectUnlink;r.binding=binding;projectinvoke(handle,&c,r);}
+int vobjprojectresolve(int handle,uvlong binding,uvlong rights)
+{ObjProjectReq r={0};ObjCall c={0};r.operation=ProjectResolve;r.binding=binding;r.rights=rights;projectinvoke(handle,&c,r);return c.result;}
+int vobjprojectenumerate(int handle,uvlong cursor,uvlong generation,ObjSpaceEntry *out,int max,uvlong *epoch)
+{
+    Vhand *h=vlookup(handle,Vmeta);Vspace *s=h->obj->priv;uchar *p=nil;long n,raw,off=32;int count=0;uvlong index=0;
+    if(waserror()){free(p);vhandput(h);nexterror();}
+    p=pjload(s->project,s->projectoid,&n,1);raw=pjraw(p,n);*epoch=pjget(p+8,8);
+    if(generation && generation!=*epoch)error("namespace: epoch changed");
+    while(off<raw-8 && count<max){long len=pjget(p+off+28,4);
+        if(index++>=cursor){ObjSpaceEntry *e=&out[count++];memset(e,0,sizeof *e);e->binding_id=pjget(p+off,8);e->oid=pjget(p+off+8,8);e->rights=pjget(p+off+16,4)&h->rights;e->relation=pjget(p+off+20,4);e->kind=pjget(p+off+24,4);memmove(e->label,p+off+32,len);}
+        off+=32+len;
+    }
+    poperror();free(p);vhandput(h);return count;
 }

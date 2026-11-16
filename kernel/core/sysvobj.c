@@ -229,7 +229,8 @@ struct Vspace {
 	 * Bindings remain weak, preventing graph cycles from leaking objects. */
 	int npersist_children;
 	Vobj *persist_children[16];
-	VspaceBinding entries[ObjSpaceBindingMax];
+	int capacity;
+    VspaceBinding *entries;
 };
 static Lock vspaceregistrylock;
 static Vspace *vspaceregistry;
@@ -468,6 +469,7 @@ vobjput(Vobj *o)
 		for(i = 0; i < s->npersist_children; i++)
 			vobjput(s->persist_children[i]);
 		oshandput(s->project);
+        free(s->entries);
         free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
@@ -3728,6 +3730,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 		error(Ebadarg);
 	vspacelabelcheck(req->label);
 	o = vspacehandle(handle, Vcontrol);
+    if(((Vspace*)o->priv)->project){vobjput(o);return vobjprojectbind(handle,req);}
 	if(waserror()){vcapput(grant);vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
 	rights = req->rights == 0 ? target->rights : req->rights;
@@ -3736,11 +3739,27 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 		error(Eperm);
 	grant = vcapnew(target->cap);
 	s = o->priv;
-	lock(&s->lk);
-	if(s->revoked || s->nbindings == ObjSpaceBindingMax ||
+    VspaceBinding *grown=nil,*retired=nil;
+    int capacity;
+    for(;;){
+        lock(&s->lk);
+        if(s->nbindings<s->capacity)break;
+        capacity=s->capacity?s->capacity*2:8;
+        unlock(&s->lk);
+        if(capacity<0 || (uvlong)capacity*sizeof *grown>64*1024*1024)error(Enomem);
+        grown=mallocz(capacity*sizeof *grown,1);if(grown==nil)error(Enomem);
+        lock(&s->lk);
+        if(s->nbindings==s->capacity && capacity>s->capacity){
+            if(s->nbindings)memmove(grown,s->entries,s->nbindings*sizeof *grown);
+            retired=s->entries;s->entries=grown;grown=nil;s->capacity=capacity;break;
+        }
+        unlock(&s->lk);free(grown);grown=nil;
+    }
+	if(s->revoked ||
 	   s->nextid == ~(uvlong)0){
 		unlock(&s->lk);
-		error(s->revoked ? Eperm : "objectspace: binding limit");
+        free(retired);
+		error(s->revoked ? Eperm : "objectspace: binding IDs exhausted");
 	}
 	b = &s->entries[s->nbindings++];
 	memset(b, 0, sizeof *b);
@@ -3759,6 +3778,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	}
 	s->epoch++;
 	unlock(&s->lk);
+    free(retired);
 	poperror();
 	vhandput(target);
 	vobjput(o);
@@ -3776,6 +3796,7 @@ vobjspaceunbind(int handle, uvlong id)
 	if(id == 0) error(Ebadarg);
 	o = vspacehandle(handle, Vcontrol);
 	s = o->priv;
+    if(s->project){vobjput(o);vobjprojectunbind(handle,id);return;}
 	lock(&s->lk);
 	if(s->revoked){
 		unlock(&s->lk);
@@ -3812,6 +3833,7 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 	int i, allowed, result;
 	if(id == 0 || rights > Vall) error(Ebadarg);
 	o = vspacehandle(handle, Vread);
+    if(((Vspace*)o->priv)->project){vobjput(o);return vobjprojectresolve(handle,id,rights);}
 	if(waserror()){vcapput(grant);vobjput(target);vobjput(o);nexterror();}
 	s = o->priv;
 	lock(&s->lk);
@@ -3863,9 +3885,10 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 	int i, n = 0;
 	if(out == nil || epoch == nil || max < 1 || max > ObjSpacePageMax)
 		error(Ebadarg);
-	if(cursor > ObjSpaceBindingMax) error(Ebadarg);
+	if(cursor > 0x7fffffffULL) error(Ebadarg);
 	o = vspacehandle(handle, Vmeta);
 	s = o->priv;
+    if(s->project){vobjput(o);return vobjprojectenumerate(handle,cursor,generation,out,max,epoch);}
 	lock(&s->lk);
 	if(s->revoked || (generation != 0 && generation != s->epoch)){
 		unlock(&s->lk);

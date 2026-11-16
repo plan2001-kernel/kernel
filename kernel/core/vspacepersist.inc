@@ -7,7 +7,7 @@
  * GE volume grant.  No transient Handle, pointer or boot identity is saved.
  */
 enum {
-    SpaceDiskVersion = 2,
+    SpaceDiskVersion = 3,
     SpaceGraphNodeMax = 16,
     SpaceGraphEdgeMax = SpaceGraphNodeMax * ObjSpaceBindingMax,
 };
@@ -46,7 +46,7 @@ struct SpaceGraphEdge {
     SpaceGraphEdgeMax*sizeof(SpaceGraphEdge))
 _Static_assert(sizeof(SpaceGraphHead) == 32, "ObjectSpace graph header");
 _Static_assert(sizeof(SpaceGraphNode) == 24, "ObjectSpace graph node");
-_Static_assert(sizeof(SpaceGraphEdge) == 80, "ObjectSpace graph edge");
+_Static_assert(sizeof(SpaceGraphEdge) == 288, "ObjectSpace graph edge");
 
 static uvlong
 spacediskhash(void *data, ulong n)
@@ -127,7 +127,7 @@ vobjspacesave(int spacehandle, ObjSpaceDiskReq *r, uvlong *version)
         s = nodes[i]->priv;
         nt = 0;
         lock(&s->lk);
-        if(s->revoked)
+        if(s->revoked || s->nbindings>ObjSpaceBindingMax)
             bad = 1;
         else
             for(j = 0; j < s->nbindings; j++){

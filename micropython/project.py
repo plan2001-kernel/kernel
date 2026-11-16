@@ -45,14 +45,20 @@ class Object:
     def __init__(self,handle):self.handle=handle
     def close(self):
         if self.handle:_p.obj_close(self.handle);self.handle=0
+    def __del__(self):
+        try:self.close()
+        except OSError:pass
     def identity(self):
         return _p.project_identity(self.handle)
     def raw(self):return _split(_p.project_call(self.handle,1))[0]
     def metadata(self):return _cbor.loads(_split(_p.project_call(self.handle,1))[1])
     def write(self,data):
         if not isinstance(data,bytes):raise TypeError('bytes required')
-        meta=self.metadata();meta['raw_sha256']=None
-        _p.project_call(self.handle,6,None,0,0,_frame(data,meta))
+        blob,version=_p.project_snapshot(self.handle)
+        raw,encoded=_split(blob);meta=_cbor.loads(encoded)
+        if isinstance(meta,dict):meta['raw_sha256']=None;encoded=_cbor.dumps(meta)
+        payload=data+encoded+b'P2OTAIL1'+_u(1,4)+_u(0,4)+_u(len(data))+_u(len(encoded))
+        _p.project_call(self.handle,6,None,0,0,payload,0,0,version)
     def text(self):return self.raw().decode('utf-8')
     def __enter__(self):return self
     def __exit__(self,*args):self.close()
@@ -189,6 +195,7 @@ class Namespace(Object):
         matches=[e for e in self._entries() if e[0]==name]
         if len(matches)!=1:raise OSError('not found or ambiguous')
         return _p.project_call(self.handle,5,newname,destination.handle,matches[0][4],None,0,0,0,replace)
+    def links(self,target):return _p.project_call(self.handle,11,None,target.handle)
     def activate(self):
         global _active
         _active=self

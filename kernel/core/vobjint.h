@@ -215,3 +215,8 @@ int vconsoleisinput(Vobj*);
 
 int vobjprojectopen(ObjProjectOpen*, VobjId*);
 void vobjprojectcall(int, ObjCall*);
+
+uvlong vobjprojectbind(int,ObjSpaceBindReq*);
+void vobjprojectunbind(int,uvlong);
+int vobjprojectresolve(int,uvlong,uvlong);
+int vobjprojectenumerate(int,uvlong,uvlong,ObjSpaceEntry*,int,uvlong*);

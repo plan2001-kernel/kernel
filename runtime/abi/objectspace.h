@@ -9,7 +9,7 @@
 #ifndef PLAN2001_OBJECTSPACE_ABI_H
 #define PLAN2001_OBJECTSPACE_ABI_H
 enum {
-    ObjSpaceLabelMax = 48,
+    ObjSpaceLabelMax = 256,
     ObjSpaceBindingMax = 64,
     ObjSpacePageMax = 8,
     ObjSpaceRelationNames = 0,

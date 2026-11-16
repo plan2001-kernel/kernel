@@ -10,3 +10,7 @@ qob_new_o_image() {
  "$QOB_ROOT/tools/mkovol" "$img" "$QOB_MIB" "$ROOT/tools/host/project/native.py" > "$logdir/mkovol.log" 2>&1
 }
 qob_main --no-build --accel kvm:tcg --obootexec 0x4f45584543000003 --timeout 180 --expect PROJECT-NATIVE-PASS "$@"
+
+qob_boot_once "$QOB_OUT/disk.img" reboot 'PLAN2001-O: REPL READY' repl '' PROJECT-RESTORE-PASS ||
+ qob_die "project cold boot failed: $QOB_BOOT_REASON"
+qob_say 'PASS: durable namespace identity, aliases, compositions and Python package restored'

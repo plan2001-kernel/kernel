@@ -616,6 +616,16 @@ static mp_obj_t p9_projectopen(size_t n,const mp_obj_t *a){
  return check(obj_open(ObjOpenProject,&r,sizeof r,0,NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectopen_obj,3,4,p9_projectopen);
+static mp_obj_t p9_projectsnapshot(mp_obj_t handle){
+ ObjProjectReq r={0};ObjCall c={0};r.operation=ProjectRead;
+ c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
+ int h=mp_obj_get_int(handle);if(obj_invoke(h,&c,sizeof c)<0)raise_err();
+ vstr_t v;vstr_init_len(&v,c.result);c.out=v.buf;c.outlen=v.len;
+ if(obj_invoke(h,&c,sizeof c)<0){vstr_clear(&v);raise_err();}
+ mp_obj_t a[2]={mp_obj_new_bytes_from_vstr(&v),mp_obj_new_int_from_ull(c.aux)};
+ return mp_obj_new_tuple(2,a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_projectsnapshot_obj,p9_projectsnapshot);
 static mp_obj_t p9_projectcall(size_t n,const mp_obj_t *a){
  ObjProjectReq r={0};ObjCall c={0};mp_buffer_info_t b={0};
  r.operation=mp_obj_get_int(a[1]);
@@ -1326,6 +1336,7 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_snapshot), MP_ROM_PTR(&p9_projectsnapshot_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_identity), MP_ROM_PTR(&p9_projectidentity_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_module), MP_ROM_PTR(&p9_projectnewmodule_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_exec), MP_ROM_PTR(&p9_projectexec_obj) },
