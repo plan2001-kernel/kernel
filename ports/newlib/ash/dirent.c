@@ -54,7 +54,7 @@ static int emit_project(void *context,const char *name,unsigned n,unsigned kind)
     if(d->used==d->capacity){unsigned cap=d->capacity?d->capacity*2:16;void *p=realloc(d->entries,cap*sizeof *d->entries);if(!p)return -1;d->entries=p;d->capacity=cap;}
     if(add_entry(d,name,n,kind))return -1;
     char full[4096];size_t base=strlen(d->base);if(base+n+2>=sizeof full)return -1;
-    memcpy(full,d->base,base);if(base>1)full[base++]='/';memcpy(full+base,name,n);full[base+n]=0;
+    memcpy(full,d->base,base);if(base && full[base-1]!='/')full[base++]='/';memcpy(full+base,name,n);full[base+n]=0;
     struct stat st;if(stat(full,&st))return -1;d->entries[d->used-1].d_ino=st.st_ino;return 0;
 }
 DIR *opendir(const char *path)
