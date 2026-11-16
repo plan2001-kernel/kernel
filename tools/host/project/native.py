@@ -53,6 +53,25 @@ def run():
     obj=pkg.create('part.py',b'value=73\n');obj.close()
     import pkg
     assert pkg.value==73
+    left=ns.mkdir('left');right=ns.mkdir('right')
+    sharedfile=left.create('shared',b'same')
+    right.link('shared',sharedfile)
+    union=ns.compose('union',[left,right])
+    intersection=ns.compose('intersection',[left,right],operation='intersection')
+    assert union.resolve('shared').identity()==sharedfile.identity()
+    assert intersection.resolve('shared').raw()==b'same'
+    conflict=left.create('conflict',b'left');conflict.close()
+    conflict=right.create('conflict',b'right');conflict.close()
+    try:union.resolve('conflict')
+    except OSError:pass
+    else:raise AssertionError('union selected ambiguous label')
+    try:union.create('denied',b'no')
+    except OSError:pass
+    else:raise AssertionError('read-only union wrote')
+    writable=ns.compose('writable',[left,right],write_source=0)
+    created=writable.create('newfile',b'written');created.close()
+    assert left.resolve('newfile').raw()==b'written'
+    print('PROJECT-COMPOSITION-PASS')
     print('PROJECT-IMPORT-PASS')
     print('PROJECT-NATIVE-PASS')
     shared.n+=1

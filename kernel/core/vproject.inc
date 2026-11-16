@@ -94,6 +94,40 @@ static uchar *pjedit(uchar *p,long n,long remove,uchar *add,long addlen,long *ne
     memmove(q+newraw,p+raw,meta);objtail_pack(q+newraw+meta,newraw,meta);
     *newn=newraw+meta+32;return q;
 }
+/* Per-volume namespace reference index, published in the same GE transaction
+ * as the changed bindings. An index OID grants no access to its targets. */
+#define PJREFINDEX 0x4e53524546494e44ULL
+static uchar *pjrefload(Ohand *oh,long *size)
+{
+    long n=osreadhandk(oh,PJREFINDEX,nil,0,nil);uchar *p;
+    if(n<0){p=mallocz(56,1);if(p==nil)error(Enomem);memmove(p,"P2NREF01",8);pjput(p+16,pjhash(p,16),8);objtail_pack(p+24,24,0);*size=56;return p;}
+    if(n<56 || n>64*1024*1024)error("namespace: invalid reference index size");
+    p=mallocz(n,1);if(p==nil)error(Enomem);
+    if(waserror()){free(p);nexterror();}
+    if(osreadhandk(oh,PJREFINDEX,p,n,nil)!=n)error("namespace: short reference index");
+    long raw=pjraw(p,n);uvlong count=pjget(p+8,8);
+    if(raw<24 || memcmp(p,"P2NREF01",8) || count>(uvlong)(raw-24)/16 || raw!=24+16*count || pjget(p+raw-8,8)!=pjhash(p,raw-8))error("namespace: corrupt reference index");
+    poperror();*size=n;return p;
+}
+static uvlong pjreferences(Ohand *oh,uvlong oid)
+{
+    long n;uchar *p=pjrefload(oh,&n);uvlong count=pjget(p+8,8),refs=0;
+    for(uvlong i=0;i<count;i++)if(pjget(p+16+16*i,8)==oid){refs=pjget(p+24+16*i,8);break;}
+    free(p);return refs;
+}
+static void pjrefchange(Ohand *tx,uvlong oid,int change)
+{
+    long n;uchar *old=pjrefload(tx,&n),*p=nil;uvlong count=pjget(old+8,8),i;
+    if(waserror()){free(old);free(p);nexterror();}
+    for(i=0;i<count;i++)if(pjget(old+16+16*i,8)==oid)break;
+    long raw=24+16*(count+(i==count));
+    p=mallocz(raw+32,1);if(p==nil)error(Enomem);memmove(p,old,16+16*count);
+    uvlong refs=i==count?0:pjget(old+24+16*i,8);
+    if((change<0 && refs==0) || (change>0 && refs==~(uvlong)0))error("namespace: invalid reference count");
+    pjput(p+16+16*i,oid,8);pjput(p+24+16*i,refs+change,8);pjput(p+8,count+(i==count),8);
+    pjput(p+raw-8,pjhash(p,raw-8),8);objtail_pack(p+raw,raw,0);
+    oswritehandk(tx,PJREFINDEX,p,raw+32);poperror();free(old);free(p);
+}
 int vobjprojectopen(ObjProjectOpen *r,VobjId *id)
 {
     Vhand *v=nil;Ohand *oh;uchar *p=nil;long n;int h,rights;uvlong oid;
@@ -122,7 +156,7 @@ void vobjprojectcall(int handle,ObjCall *c)
     if(c->in==nil || c->inlen!=sizeof r)error(Ebadarg);
     validaddr((uintptr)c->in,sizeof r,0);memmove(&r,c->in,sizeof r);
     if((r.flags && !(r.operation==ProjectLink && r.flags==1)) || r.reserved || r.length>64*1024*1024)error(Ebadarg);
-    need=(r.operation==ProjectRead || r.operation==ProjectResolve)?Vread:
+    need=(r.operation==ProjectRead || r.operation==ProjectResolve || r.operation==ProjectLinks)?Vread:
          r.operation==ProjectAttenuate?Vdelegate:r.operation==ProjectPut?Vwrite:Vcontrol;
     h=vlookup(handle,need);
     if(waserror()){vhandput(h);nexterror();}
@@ -139,6 +173,12 @@ void vobjprojectcall(int handle,ObjCall *c)
         c->result=n;
         if(c->outlen){if(c->out==nil || c->outlen<(uvlong)n)error("namespace: short buffer");validaddr((uintptr)c->out,n,1);memmove(c->out,p,n);}
         goto done;
+    }
+    if(r.operation==ProjectLinks){
+        if(!dir)error(Ebadarg);
+        uvlong target=oid;
+        if(r.other){other=vlookup(r.other,Vmeta);oh2=pjbackend(other->obj,&target);uchar a[16],b[16];osvolumeid(oh,a);osvolumeid(oh2,b);if(memcmp(a,b,16))error("namespace: cross volume");}
+        c->result=pjreferences(oh,target);goto done;
     }
     if(r.operation==ProjectAttenuate){
         rights=r.rights;if(!rights || (rights&~h->rights))error(Eperm);
@@ -178,11 +218,11 @@ void vobjprojectcall(int handle,ObjCall *c)
         if(pjget(p+16,8)==~(uvlong)0)error("namespace: binding IDs exhausted");
         memset(add,0,sizeof add);pjput(add,pjget(p+16,8)+1,8);pjput(add+8,newid,8);
         pjput(add+16,rights,4);pjput(add+24,r.kind,4);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
-        q=pjedit(p,n,-1,add,addlen,&qn);oswritehandk(tx,oid,q,qn);oscommithand(tx,&ver);c->aux=ver;c->result=newid;goto done;
+        q=pjedit(p,n,-1,add,addlen,&qn);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=newid;goto done;
     }
     at=pjfind(p,raw,r.binding,nil);if(at<0)error("namespace: not found");
     if(r.operation==ProjectUnlink){
-        q=pjedit(p,n,at,nil,0,&qn);oswritehandk(tx,oid,q,qn);oscommithand(tx,&ver);c->aux=ver;goto done;
+        q=pjedit(p,n,at,nil,0,&qn);oswritehandk(tx,oid,q,qn);pjrefchange(tx,pjget(p+at+8,8),-1);oscommithand(tx,&ver);c->aux=ver;goto done;
     }
     if(r.operation!=ProjectRename)error(Ebadarg);
     pjname(r.name);other=vlookup(r.other,Vcontrol);oh2=pjbackend(other->obj,&oid2);
@@ -201,6 +241,7 @@ void vobjprojectcall(int handle,ObjCall *c)
         pjput(add,pjget(p2+16,8)+1,8);q2=pjedit(p2,n2,at2,add,addlen,&q2n);
         oswritehandk(tx,oid,q,qn);oswritehandk(tx,oid2,q2,q2n);
     }
+    if(at2>=0)pjrefchange(tx,pjget(p2+at2+8,8),-1);
     oscommithand(tx,&ver);c->aux=ver;
 done:
     poperror();free(p);free(p2);free(q);free(q2);free(payload);oshandput(tx);vhandput(other);qunlock(&projectgate);

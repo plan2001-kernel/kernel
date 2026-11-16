@@ -5,7 +5,7 @@
 #define PROJECT_MAGIC 0x503250524f4a3031ULL
 #define PROJECT_NAME_MAX 255u
 enum { ProjectRead=1, ProjectCreate=2, ProjectLink=3, ProjectUnlink=4,
-       ProjectRename=5, ProjectPut=6, ProjectResolve=7, ProjectAttenuate=8, ProjectDetached=10 };
+       ProjectRename=5, ProjectPut=6, ProjectResolve=7, ProjectAttenuate=8, ProjectDetached=10, ProjectLinks=11 };
 typedef struct ObjProjectOpen {
     int volume;
     unsigned int rights;
