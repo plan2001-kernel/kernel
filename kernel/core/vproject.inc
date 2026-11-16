@@ -68,7 +68,9 @@ static void pjname(char *name){int n;for(n=0;n<256 && name[n];n++);if(n==0 || n=
 /* Return an entry offset by BindingID, or exact unambiguous local name. */
 static long pjfind(uchar *p,long raw,uvlong binding,char *name)
 {
-    long off=32,found=-1,len;int namelen=binding?0:strlen(name);
+    long off=32,found=-1,len;
+    if(!binding && name==nil)error(Ebadarg);
+    int namelen=binding?0:strlen(name);
     while(off<raw-8){len=pjget(p+off+28,4);
         if((binding && pjget(p+off,8)==binding) ||
            (!binding && len==namelen && memcmp(name,p+off+32,len)==0)){
