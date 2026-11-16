@@ -16,10 +16,11 @@ root_oid=$(sed -n 's/.*PROJECT-ROOT-OID \([0-9]*\).*/\1/p' "$QOB_OUT/boot-boot.l
 for point in 105 106; do
  cat > "$QOB_OUT/crash-$point.py" <<PY
 import plan9 as p
-import project
-r=project.open_project($root_oid,14793)
-a=r.open('left')
-b=r.open('right')
+import namespace
+import posix
+r=namespace.open_boot_namespace($root_oid,14793)
+a=posix.open_filesystem(r).open('left')
+b=posix.open_filesystem(r).open('right')
 f=a.create('crash$point',b'atomic')
 p.ownerid_fault($point)
 a.rename('crash$point',b,'done$point')
@@ -30,12 +31,13 @@ p=pathlib.Path(sys.argv[1]);lines=p.read_text().splitlines();p.write_text('exec(
 PYWRAP
  QOB_CRASH_AFTER_EXPECT=1 QOB_REPL_SYNC_LINES=0 qob_boot_once "$QOB_OUT/disk.img" "crash-$point" 'PLAN2001-O: REPL READY' repl "$QOB_OUT/crash-$point.py" 'OWNERID-CRASH' || qob_die "crash injection failed: $QOB_BOOT_REASON"
  cat > "$QOB_OUT/verify-$point.py" <<PY
-import project
-r=project.open_project($root_oid,14793)
-a=r.open('left')
-b=r.open('right')
+import namespace
+import posix
+r=namespace.open_boot_namespace($root_oid,14793)
+a=posix.open_filesystem(r).open('left')
+b=posix.open_filesystem(r).open('right')
 assert ('crash$point' in a.names()) != ('done$point' in b.names())
-f=a.open('crash$point') if 'crash$point' in a.names() else b.open('done$point')
+f=posix.open_filesystem(a).open('crash$point') if 'crash$point' in a.names() else posix.open_filesystem(b).open('done$point')
 assert f.raw()==b'atomic'
 assert r.links(f)==1
 print('PROJECT-RECOVERY-$point-PASS')

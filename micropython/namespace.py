@@ -1,4 +1,4 @@
-"""Capability-scoped live projects; no ambient filesystem or volume lookup."""
+"""Capability-scoped native ObjectSpace bindings; labels are not Unix paths."""
 import plan9 as _p
 import cbor as _cbor
 import sys as _sys
@@ -154,7 +154,7 @@ class Namespace(Object):
             for s in sources:s.close()
     def names(self):return [e[0] for e in self.entries()]
     def resolve(self,name,_seen=()):
-        if '/' in name:return self.open(name)
+        if '/' in name:raise ValueError('resolve requires one local label; use posix.open_filesystem for paths')
         mode=self._view()
         if not mode:return self._native(name)
         identity=self.identity()
@@ -187,20 +187,6 @@ class Namespace(Object):
         finally:
             for o in matches:o.close()
             for source in sources:source.close()
-    def open(self,path):
-        components=[]
-        for part in path.split('/'):
-            if not part or part=='.':continue
-            if part=='..':
-                if components:components.pop()
-            else:components.append(part)
-        current=Namespace(_p.project_call(self.handle,8,None,0,0,None,0,_p.obj_info(self.handle)[10]))
-        try:
-            for part in components:
-                nxt=current.resolve(part);current.close();current=nxt
-            return current
-        except:
-            current.close();raise
     def link(self,name,target):
         if self._view():
             writer=self._writer()
@@ -277,14 +263,14 @@ class Namespace(Object):
             else:target.close()
 
 def from_handle(handle):
-    """Take ownership of an explicitly supplied project handle."""
+    """Take ownership of an explicitly supplied namespace handle."""
     return Namespace(handle)
 def current():
     if _active is not None:return _active
     roots=_p.space_roots()
-    if len(roots)!=1:raise OSError('one explicitly delegated project root required')
+    if len(roots)!=1:raise OSError('one explicitly delegated namespace root required')
     return Namespace(roots[0])
-def open_project(oid,rights=_READONLY):
+def open_boot_namespace(oid,rights=_READONLY):
     """Trusted boot/installer operation; ordinary processes use current/from_handle."""
     return Namespace(_p.project_boot(oid,rights))
 def _import(name,globals=None,locals=None,fromlist=(),level=0):

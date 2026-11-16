@@ -78,7 +78,7 @@ never ORs rights. Composition is read-only by default; an explicit write source
 routes mutations to that source, without copy-up, hidden whiteouts or fallback.
 Cycles in composition are reported rather than recursively expanded forever.
 
-MicroPython's `project` module wraps a delegated Handle, reads raw data and
+MicroPython's `namespace` module wraps a delegated Handle, reads raw data and
 metadata, binds namespace references, and explicitly activates a project import
 context. Source and MPY modules, packages and relative imports use that context;
 no global volume catalog is consulted. Imported modules are cached per project
@@ -92,3 +92,39 @@ by the retired whole-graph snapshot API. Persistent spaces likewise have no
 64-binding or 16-node schema limit; allocation and the existing GE/O transaction
 budget bound resource usage. Full cross-volume persistence, garbage collection,
 and physical-hardware validation remain separate work.
+
+## Python naming and path boundary
+
+`namespace.resolve(label)` follows exactly one local ObjectSpace binding. It
+rejects slash-separated paths. Native namespaces have no `open(path)` method.
+A process uses `namespace.from_handle(handle)` for an explicitly delegated
+root, or `namespace.current()` when exactly one root is available (or an import
+context has been activated). `from_handle` takes ownership of that Handle.
+
+Unix path interpretation is explicit and lives in `posix`:
+
+```python
+import namespace
+import posix
+
+root = namespace.current()
+tmp = root.resolve('tmp')
+file = tmp.resolve('koe.txt')
+print(file.metadata())
+file.close()
+tmp.close()
+
+with posix.open_filesystem(root) as fs:
+    with fs.open('/tmp/koe.txt') as file:
+        print(file.metadata())
+```
+
+The filesystem view owns an attenuated copy of its root Handle. An opened
+object remains valid after the view closes. Absolute and relative paths start
+at this view's root; `..` follows the traversed route and clamps at that root.
+Intermediate non-directory objects are rejected, even before `..`.
+
+`namespace.open_boot_namespace(oid, rights)` is an explicitly trusted bootstrap
+or installer helper, not the ordinary application entry point. The OID names a
+stored namespace on the boot volume; it is not a pathname, mount point or source
+of authority. Ordinary programs receive scoped namespace Handles instead.

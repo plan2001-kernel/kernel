@@ -1,3 +1,7 @@
+def path(ns,name):
+    import posix
+    with posix.open_filesystem(ns) as fs:return fs.open(name)
+
 class Counter:
     def __init__(self): self.n=0; self.root_oid=0
 shared=Counter()
@@ -23,13 +27,13 @@ def run():
     rights=1|8|64|128|256|2048|4096|8192
     print("PROJECT STEP root")
     if shared.root_oid:
-        import project
-        restored=project.from_handle(p.project_open(v,shared.root_oid,rights))
-        with restored.open('left/shared') as item:
+        import namespace
+        restored=namespace.from_handle(p.project_open(v,shared.root_oid,rights))
+        with path(restored,'left/shared') as item:
             assert item.raw()==b'same'
             ident=item.identity()
-        with restored.open('right/shared') as item:assert item.identity()==ident
-        with restored.open('writable/newfile') as item:assert item.raw()==b'written'
+        with path(restored,'right/shared') as item:assert item.identity()==ident
+        with path(restored,'writable/newfile') as item:assert item.raw()==b'written'
         restored.activate()
         import pkg
         assert pkg.value==73
@@ -77,8 +81,16 @@ def run():
     except OSError:pass
     else:raise AssertionError('serialized binding minted authority')
     print('PROJECT-METADATA-CAS-PASS')
-    import project
-    ns=project.from_handle(root)
+    import namespace
+    ns=namespace.from_handle(root)
+    assert not hasattr(ns,'open')
+    try:ns.resolve('src/moi')
+    except ValueError:pass
+    else:raise AssertionError('native resolve interpreted a Unix path')
+    with ns.resolve('src') as directory:
+        with directory.resolve('moi') as item:assert item.raw()==b'updated\n'
+    with path(ns,'/src/../src/moi') as item:assert item.raw()==b'updated\n'
+    print('NAMESPACE-POSIX-API-PASS')
     module=ns.create('hello.py',b'value=42\n');module.close()
     ns.activate()
     import hello
@@ -99,7 +111,7 @@ def run():
     right.link('shared',sharedfile)
     assert ns.links(sharedfile)==2
     left.link('cycle',left)
-    with left.open('cycle/cycle/shared') as item:assert item.identity()==sharedfile.identity()
+    with path(left,'cycle/cycle/shared') as item:assert item.identity()==sharedfile.identity()
     union=ns.compose('union',[left,right])
     intersection=ns.compose('intersection',[left,right],operation='intersection')
     assert union.resolve('shared').identity()==sharedfile.identity()
@@ -161,7 +173,7 @@ def run():
     shared.root_oid=p.project_identity(root)[1]
     p.program_register('project-reader','project-reader',v,0x4f45584543000003)
     reader=p.project_call(root,8,None,0,0,None,0,1|8|128|8192)
-    childcode="import plan9 as p; import project; roots=p.space_roots(); assert len(roots)==1; assert len(p.obj_list())==1; ns=project.from_handle(roots[0]); assert ns.open('src/moi').raw()==b'updated\\n'; ns.activate(); import pkg; assert pkg.value==73; p.exits('')"
+    childcode="import plan9 as p; import namespace; import posix; roots=p.space_roots(); assert len(roots)==1; assert len(p.obj_list())==1; ns=namespace.from_handle(roots[0]); assert posix.open_filesystem(ns).open('src/moi').raw()==b'updated\\n'; ns.activate(); import pkg; assert pkg.value==73; p.exits('')"
     process=p.program_launch('project-reader',('project-reader','-c',childcode),((reader,1|8|128|8192),))
     state=p.process_wait(process,30000)
     assert state[1]=='',state

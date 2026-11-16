@@ -563,8 +563,9 @@ p9_space_mod_t *p9_space_loadmod(qstr name) {
 // Environment MicroPython's; with one the builtin modules, then the
 // Environment's, loaded once; a module whose top level fails is not
 // left in sys.modules (CPython's way)
-extern mp_obj_t p9_project_module(void);
-extern mp_obj_t p9_project_import(size_t,const mp_obj_t*);
+extern mp_obj_t p9_namespace_module(void);
+extern mp_obj_t p9_posix_module(void);
+extern mp_obj_t p9_namespace_import(size_t,const mp_obj_t*);
 mp_obj_t p9_import(size_t n, const mp_obj_t *a) {
     mp_map_t *loaded = &MP_STATE_VM(mp_loaded_modules_dict).map;
     mp_map_elem_t *el;
@@ -574,9 +575,10 @@ mp_obj_t p9_import(size_t n, const mp_obj_t *a) {
     nlr_buf_t nlr;
 
     qstr requested=mp_obj_str_get_qstr(a[0]);
-    if(requested==MP_QSTR_project)return p9_project_module();
+    if(requested==MP_QSTR_namespace)return p9_namespace_module();
+    if(requested==MP_QSTR_posix)return p9_posix_module();
     if(mp_module_get_builtin(requested,false)==MP_OBJ_NULL && mp_module_get_builtin(requested,true)==MP_OBJ_NULL){
-        mp_obj_t result=p9_project_import(n,a);if(result!=mp_const_none)return result;
+        mp_obj_t result=p9_namespace_import(n,a);if(result!=mp_const_none)return result;
     }
     if (MP_STATE_VM(p9_space_env) == MP_OBJ_NULL) {
         return mp_builtin___import___default(n, a);
