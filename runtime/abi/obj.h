@@ -505,15 +505,13 @@ typedef struct ObjOwnerInfo {
 
 #define PROCESS_WAIT_INFINITE ((unsigned long long)-1)
 
-/* SPAWN(int Space handle, uvlong OID, char **argv, int argc,
- * struct Ospawn *options) creates one static x86-64 ELF child from an
- * explicit GE/O Space capability and OID.  The Handle must be a VkindGeVolume
- * Handle carrying Vexecute; the same Ohand Oexecute gate and per-Space
- * authorization as OEXECUTE remain in force.  argv/options are validated by
- * the shared spawn core, including the Ospawn and optional
- * Oinherit/Oinheritv blocks.  The child receives the same registers, stack,
- * argv, CPU affinity, memory budget, namespace/view, environment and
- * Vhand inheritance semantics.  The result is the child PID. */
+/* SPAWN(int source_handle, uvlong OID, char **argv, int argc,
+ * struct Ospawn *options) creates one native static AMD64 child. A live
+ * Vexecute GE/O volume Handle selects a nonzero OID; a Vexecute GE object
+ * Handle requires OID=0 and fixes the stored object itself. Paths, raw OIDs
+ * and owner identity do not mint execution authority. The shared spawn core
+ * validates ELF layout, argv/options, CPU/memory budgets and the explicit
+ * Oinherit/Oinheritv capability vector. The result is a Process Handle. */
 
 #define OBJ_EXITMSG_MAX 128
 
