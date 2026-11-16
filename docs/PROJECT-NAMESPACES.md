@@ -25,7 +25,8 @@ parsing is exclusively userspace policy.
 
 `ObjOpProject` uses the fixed-width request in `runtime/abi/project.h`:
 read snapshot, create, link, unlink, rename, replace file payload, resolve,
-attenuate, create detached object, and query persistent binding references.
+attenuate, create detached object, query persistent binding references, and
+read footer-selected opaque metadata with metadata authority alone.
 The conventional ObjectSpace bind/unbind/resolve/enumerate operations also
 operate on durable ObjectSpace Handles. Enumeration checks an epoch; duplicate
 labels remain distinct edges identified by BindingID.
@@ -51,7 +52,11 @@ reclamation; automatic garbage collection is not provided.
 Every request admits a live typed Handle. Resolving a child intersects the
 saved edge ceiling with the current project grant; a read-only root cannot
 produce writable descendants. Each derived Handle retains the capability
-lineage. The provider also retains GE/O origin revocation and owner-record
+lineage of both the traversed project and the capability used to create the
+binding. Revoking either lineage invalidates existing descendants and future
+resolves. Removing a binding does not revoke its open descendants. A trusted
+boot issuer reconstructs persisted binding ceilings on a new boot; live
+capability revocations are not serialized. The provider also retains GE/O origin revocation and owner-record
 integrity checking. Owner equality, Unix uid/gid, labels and raw OIDs never
 authorize an operation. Mutation requires directory control or file write;
 creating objects additionally requires create authority.

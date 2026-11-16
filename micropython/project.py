@@ -52,11 +52,16 @@ class Object:
     def identity(self):
         return _p.project_identity(self.handle)
     def raw(self):return _split(_p.project_call(self.handle,1))[0]
-    def metadata(self):return _cbor.loads(_split(_p.project_call(self.handle,1))[1])
+    def metadata(self):
+        data=_p.project_call(self.handle,12)
+        try:return _cbor.loads(data)
+        except (ValueError,TypeError):return data
     def write(self,data):
         if not isinstance(data,bytes):raise TypeError('bytes required')
         blob,version=_p.project_snapshot(self.handle)
-        raw,encoded=_split(blob);meta=_cbor.loads(encoded)
+        raw,encoded=_split(blob)
+        try:meta=_cbor.loads(encoded)
+        except (ValueError,TypeError):meta=None
         if isinstance(meta,dict):
             meta['raw_sha256']=None
             if isinstance(meta.get('unix'),dict):meta['unix']['mtime_ns']=_p.time_ns();meta['unix']['ctime_ns']=meta['unix']['mtime_ns']
@@ -76,7 +81,7 @@ class Namespace(Object):
         result=[];off=32
         for i in range(int.from_bytes(raw[24:32],'big')):
             b=int.from_bytes(raw[off:off+8],'big');oid=int.from_bytes(raw[off+8:off+16],'big')
-            rights=int.from_bytes(raw[off+16:off+20],'big');kind=int.from_bytes(raw[off+24:off+28],'big')
+            rights=int.from_bytes(raw[off+16:off+20],'big')&_p.obj_info(self.handle)[10];kind=int.from_bytes(raw[off+24:off+28],'big')
             n=int.from_bytes(raw[off+28:off+32],'big');label=raw[off+32:off+32+n].decode('utf-8')
             result.append((label,oid,kind,rights,b));off+=32+n
         return result
@@ -84,12 +89,15 @@ class Namespace(Object):
         h=_p.project_call(self.handle,7,name,0,binding)
         kind=_p.obj_info(h)[8]
         return Namespace(h) if kind==19 else Object(h)
-    def _view(self):return self.metadata().get('project_view')
+    def _view(self):
+        meta=self.metadata()
+        return meta.get('project_view') if isinstance(meta,dict) else None
     def _sources(self):return [self._native(binding=e[4]) for e in self._entries()]
     def _directory_metadata(self):
         blob,epoch=_p.project_snapshot(self.handle);raw,encoded=_split(blob)
         meta=_cbor.loads(encoded)
         if isinstance(meta,dict):
+            meta['raw_sha256']=None
             unix=meta.get('unix')
             if isinstance(unix,dict):unix['mtime_ns']=_p.time_ns();unix['ctime_ns']=unix['mtime_ns']
             encoded=_cbor.dumps(meta)
@@ -107,9 +115,20 @@ class Namespace(Object):
         h=_p.project_call(self.handle,10,None,0,0,_empty(meta),19,_p.obj_info(self.handle)[10])
         view=Namespace(h)
         try:
-            for i,source in enumerate(sources):view._native_link(str(i),source)
-            self.link(name,view)
-            return view
+            for i,source in enumerate(sources):
+                rights=_p.obj_info(source.handle)[10]
+                if i!=write_source:rights&=_READONLY
+                restricted=Namespace(_p.project_call(source.handle,8,None,0,0,None,0,rights))
+                try:view._native_link(str(i),restricted)
+                finally:restricted.close()
+            rights=_p.obj_info(view.handle)[10]
+            if write_source is None:rights&=_READONLY
+            published=Namespace(_p.project_call(view.handle,8,None,0,0,None,0,rights))
+            try:self.link(name,published)
+            except:
+                published.close();raise
+            view.close()
+            return published
         except:
             view.close();raise
     def _writer(self):
@@ -257,8 +276,11 @@ class Namespace(Object):
             if directory:code.close()
             else:target.close()
 
-def from_handle(handle):return Namespace(handle)
+def from_handle(handle):
+    """Take ownership of an explicitly supplied project handle."""
+    return Namespace(handle)
 def current():
+    if _active is not None:return _active
     roots=_p.space_roots()
     if len(roots)!=1:raise OSError('one explicitly delegated project root required')
     return Namespace(roots[0])

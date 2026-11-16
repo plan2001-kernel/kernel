@@ -32,6 +32,7 @@ struct Vobj {
 	ulong	size;
 	uchar	*data;		/* immutable snapshot, may be nil */
 	void	*priv;		/* provider-private state */
+    void *projectguard; /* immutable, refcounted namespace authority dependencies */
 };
 
 /* Core operations exported to concrete providers. */
@@ -218,3 +219,5 @@ uvlong vobjprojectbind(int,ObjSpaceBindReq*);
 void vobjprojectunbind(int,uvlong);
 int vobjprojectresolve(int,uvlong,uvlong);
 int vobjprojectenumerate(int,uvlong,uvlong,ObjSpaceEntry*,int,uvlong*);
+
+long osreadhandmetak(Ohand*,uvlong,void*,long,uvlong*);

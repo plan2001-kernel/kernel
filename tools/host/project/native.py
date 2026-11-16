@@ -107,6 +107,28 @@ def run():
     right.link('shared',sharedfile)
     left.remove('alias')
     assert ns.links(sharedfile)==2
+    # Removing a name preserves an already-open object; revoking its source
+    # grant invalidates both future resolves and capabilities already issued.
+    held=left.create('unlinked',b'held')
+    left.remove('unlinked')
+    assert held.raw()==b'held'
+    held.close()
+    source=left.create('revocable',b'secret')
+    right.link('revocable-alias',source)
+    opened=right.resolve('revocable-alias')
+    p.cap_revoke(source.handle)
+    for action in (lambda:opened.raw(),lambda:right.resolve('revocable-alias')):
+        try:action()
+        except OSError:pass
+        else:raise AssertionError('revoked source grant survived')
+    opened.close();source.close()
+    # A read-only composition must also deny native bypass of its policy.
+    native_source=p.project_call(union.handle,7,'0')
+    try:p.project_call(native_source,2,'bypass',0,0,frame(b'bad'),3,rights)
+    except OSError:pass
+    else:raise AssertionError('native composition write bypass')
+    p.obj_close(native_source)
+    print('PROJECT-REVOCATION-PASS')
     shared.root_oid=p.project_identity(root)[1]
     p.program_register('project-reader','project-reader',v,0x4f45584543000003)
     reader=p.project_call(root,8,None,0,0,None,0,1|8|128|8192)

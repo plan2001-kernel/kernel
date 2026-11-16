@@ -3,6 +3,42 @@
 #define OBJTAIL_NATIVE_TYPES
 #include "../../runtime/objtail.h"
 static QLock projectgate;
+/* Live binding authority is not serialized. The durable record is descriptive;
+ * a boot issuer reconstructs it, while new bindings pin the admitted source
+ * lineage. Unbinding drops the edge, never revokes an already opened Handle. */
+typedef struct ProjectGrant ProjectGrant;
+struct ProjectGrant {uchar volume[16];uvlong space,binding;ProjectGuard *guard;ProjectGrant *next;};
+static ProjectGrant *projectgrants;
+static ProjectGuard *projectissuer;
+static void projectgrantfree(ProjectGrant *g){if(g){projectguardput(g->guard);free(g);}}
+static ProjectGrant *projectgrantfind(Ohand *oh,uvlong space,uvlong binding)
+{
+    uchar volume[16];osvolumeid(oh,volume);
+    for(ProjectGrant *g=projectgrants;g;g=g->next)if(g->space==space && g->binding==binding && !memcmp(volume,g->volume,16))return g;
+    return nil;
+}
+static ProjectGrant *projectgrantnew(Ohand *oh,uvlong space,uvlong binding,Vcap *source,ProjectGuard *guards)
+{
+    ProjectGrant *g=mallocz(sizeof *g,1);Vcap *cap=nil;if(g==nil)error(Enomem);
+    if(waserror()){vcapput(cap);projectgrantfree(g);nexterror();}
+    osvolumeid(oh,g->volume);g->space=space;g->binding=binding;
+    cap=vcapnew(source);g->guard=projectguardnode(cap,guards);vcapput(cap);cap=nil;
+    poperror();return g;
+}
+static void projectgrantremove(Ohand *oh,uvlong space,uvlong binding)
+{
+    ProjectGrant *g=projectgrantfind(oh,space,binding);if(!g)return;
+    ProjectGrant **link=&projectgrants;while(*link!=g)link=&(*link)->next;
+    *link=g->next;projectgrantfree(g);
+}
+static void projectgrantpublish(ProjectGrant *g){g->next=projectgrants;projectgrants=g;}
+static ProjectGrant *projectgrantload(Ohand *oh,uvlong space,uvlong binding)
+{
+    ProjectGrant *g=projectgrantfind(oh,space,binding);if(g)return g;
+    if(projectissuer==nil || !projectguardvalid(projectissuer))error("namespace: trusted issuer unavailable");
+    g=mallocz(sizeof *g,1);if(g==nil)error(Enomem);osvolumeid(oh,g->volume);
+    g->space=space;g->binding=binding;g->guard=projectissuer;incref(&projectissuer->ref);projectgrantpublish(g);return g;
+}
 static uvlong pjget(uchar *p,int n){uvlong v=0;while(n--)v=v<<8|*p++;return v;}
 static void pjput(uchar *p,uvlong v,int n){while(n--){p[n]=v;v>>=8;}}
 static uvlong pjhash(uchar *p,long n){uvlong h=0xcbf29ce484222325ULL;while(n--){h^=*p++;h*=1099511628211ULL;}return h;}
@@ -32,18 +68,18 @@ static long pjcheck(uchar *p,long n)
     if(off!=raw-8)error("namespace: trailing record bytes");
     return raw;
 }
-static uchar *pjloadver(Ohand *oh,uvlong oid,long *n,int directory,uvlong *version)
+static uchar *pjloadmode(Ohand *oh,uvlong oid,long *n,int directory,uvlong *version,int metadata)
 {
     uchar *p=nil;
     if(waserror()){free(p);nexterror();}
-    *n=osreadhandk(oh,oid,nil,0,nil);
+    *n=metadata?osreadhandmetak(oh,oid,nil,0,nil):osreadhandk(oh,oid,nil,0,nil);
     if(*n<32 || *n>64*1024*1024)error("namespace: invalid object length");
     p=mallocz(*n,1);if(p==nil)error(Enomem);
-    if(osreadhandk(oh,oid,p,*n,version)!=*n)error("namespace: changed object length");
+    if((metadata?osreadhandmetak(oh,oid,p,*n,version):osreadhandk(oh,oid,p,*n,version))!=*n)error("namespace: changed object length");
     if(directory)pjcheck(p,*n);else pjraw(p,*n);
     poperror();return p;
 }
-static uchar *pjload(Ohand *oh,uvlong oid,long *n,int directory){return pjloadver(oh,oid,n,directory,nil);}
+static uchar *pjload(Ohand *oh,uvlong oid,long *n,int directory){return pjloadmode(oh,oid,n,directory,nil,0);}
 static Ohand *pjbackend(Vobj *o,uvlong *oid)
 {
     if(o->kind==VkindGe){*oid=o->oid;return o->priv;}
@@ -51,7 +87,7 @@ static Ohand *pjbackend(Vobj *o,uvlong *oid)
         error("namespace: persistent object required");
     *oid=((Vspace*)o->priv)->projectoid;return ((Vspace*)o->priv)->project;
 }
-static int pjinstall(Ohand *backend,uvlong oid,int kind,int rights,Vcap *parent)
+static int pjinstall(Ohand *backend,uvlong oid,int kind,int rights,Vcap *parent,ProjectGuard *guard)
 {
     Vobj *o=nil;Ohand *cap=nil;Vspace *s;int h;
     if(waserror()){oshandput(cap);vobjput(o);nexterror();}
@@ -62,6 +98,7 @@ static int pjinstall(Ohand *backend,uvlong oid,int kind,int rights,Vcap *parent)
         s->object=o;s->epoch=1;s->project=cap;cap=nil;s->projectoid=oid;o->priv=s;
         lock(&vspaceregistrylock);s->next=vspaceregistry;vspaceregistry=s;unlock(&vspaceregistrylock);
     }else{o->priv=cap;cap=nil;o->oid=oid;o->provider=VopenGe;}
+    o->projectguard=guard;if(guard)incref(&guard->ref);
     h=vobjinstallchild(o,rights,parent);poperror();vobjput(o);return h;
 }
 static void pjname(char *name){int n;for(n=0;n<256 && name[n];n++);if(n==0 || n==256)error(Ebadarg);}
@@ -157,7 +194,15 @@ int vobjprojectopen(ObjProjectOpen *r,VobjId *id)
         validaddr((uintptr)r->data,r->length,0);p=mallocz(r->length,1);if(p==nil)error(Enomem);
         memmove(p,r->data,r->length);pjcheck(p,r->length);oscreatehandowner(oh,p,r->length,&oid,up->owner?up->owner:ownerroot());
     }else p=pjload(oh,oid,&n,1);
-    h=pjinstall(oh,oid,VkindObjectSpace,rights,v->cap);
+    qlock(&projectgate);
+    if(waserror()){qunlock(&projectgate);nexterror();}
+    if(projectissuer==nil){
+        Vcap *issuer=vcapnew(v->cap);
+        if(waserror()){vcapput(issuer);nexterror();}
+        projectissuer=projectguardnode(issuer,nil);poperror();vcapput(issuer);
+    }
+    poperror();qunlock(&projectgate);
+    h=pjinstall(oh,oid,VkindObjectSpace,rights,v->cap,nil);
     if(id!=nil)vobjidentity(h,id);
     poperror();free(p);vhandput(v);return h;
 }
@@ -165,21 +210,28 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
 {
     Vhand *h=nil,*other=nil;Ohand *oh,*tx=nil,*oh2;uvlong oid,oid2=0,newid,ver=0;
     uchar *p=nil,*p2=nil,*q=nil,*q2=nil,*payload=nil;long n=0,n2=0,raw,raw2=0,at=-1,at2=-1,qn=0,q2n=0;
+    ProjectGrant *pending=nil;ProjectGuard *guard=nil;
     uchar add[32+255];long addlen=0;int rights,dir,need;
     if((r.flags && !(r.operation==ProjectLink && r.flags==1)) || r.length>64*1024*1024)error(Ebadarg);
-    need=(r.operation==ProjectRead || r.operation==ProjectResolve || r.operation==ProjectLinks)?Vread:
+    need=(r.operation==ProjectRead || r.operation==ProjectResolve)?Vread:
+         (r.operation==ProjectMetadata || r.operation==ProjectLinks)?Vmeta:
          r.operation==ProjectAttenuate?Vdelegate:r.operation==ProjectPut?Vwrite:Vcontrol;
     h=vlookup(handle,need);
     if(waserror()){vhandput(h);nexterror();}
     oh=pjbackend(h->obj,&oid);oscheckhand(oh);dir=h->obj->kind==VkindObjectSpace;
     qlock(&projectgate);
     if(waserror()){
-        free(p);free(p2);free(q);free(q2);free(payload);oshandput(tx);vhandput(other);
+        free(p);free(p2);free(q);free(q2);free(payload);projectgrantfree(pending);projectguardput(guard);oshandput(tx);vhandput(other);
         qunlock(&projectgate);nexterror();
     }
-    p=pjloadver(oh,oid,&n,dir,&ver);raw=pjraw(p,n);
+    p=pjloadmode(oh,oid,&n,dir,&ver,r.operation==ProjectMetadata);raw=pjraw(p,n);
     if(r.epoch && r.epoch!=(dir?pjget(p+8,8):ver))error("namespace: epoch changed");
     c->aux=dir?pjget(p+8,8):ver;c->result=0;
+    if(r.operation==ProjectMetadata){
+        long length=n-raw-32;c->result=length;c->aux=raw;
+        if(c->outlen){if(c->out==nil || c->outlen<(uvlong)length)error("namespace: short buffer");validaddr((uintptr)c->out,length,1);memmove(c->out,p+raw,length);}
+        goto done;
+    }
     if(r.operation==ProjectRead){
         c->result=n;
         if(c->outlen){if(c->out==nil || c->outlen<(uvlong)n)error("namespace: short buffer");validaddr((uintptr)c->out,n,1);memmove(c->out,p,n);}
@@ -193,7 +245,7 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
     }
     if(r.operation==ProjectAttenuate){
         rights=r.rights;if(!rights || (rights&~h->rights))error(Eperm);
-        c->result=pjinstall(oh,oid,h->obj->kind,rights,h->cap);goto done;
+        c->result=pjinstall(oh,oid,h->obj->kind,rights,h->cap,h->obj->projectguard);goto done;
     }
     if(r.operation==ProjectPut){
         if(dir)error("namespace: structural record is not a byte file");
@@ -208,7 +260,10 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
         rights=pjget(p+at+16,4)&h->rights;
         if(r.rights){if(r.rights&~rights)error(Eperm);rights=r.rights;}
         if(!rights)error(Eperm);
-        c->result=pjinstall(oh,pjget(p+at+8,8),pjget(p+at+24,4),rights,h->cap);goto done;
+        ProjectGrant *g=projectgrantload(oh,oid,pjget(p+at,8));
+        if(!projectguardvalid(g->guard))error(Eperm);
+        guard=projectguardjoin(h->obj->projectguard,g->guard);
+        c->result=pjinstall(oh,pjget(p+at+8,8),pjget(p+at+24,4),rights,h->cap,guard);goto done;
     }
     tx=oscopycapdelegate(oh,oshandrights(oh));
     if(r.operation==ProjectCreate || r.operation==ProjectDetached || r.operation==ProjectLink){
@@ -220,7 +275,7 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
             validaddr((uintptr)r.data,r.length,0);payload=mallocz(r.length,1);if(payload==nil)error(Enomem);
             memmove(payload,r.data,r.length);if(r.kind==VkindObjectSpace){pjcheck(payload,r.length);if(pjget(payload+24,8)!=0)error("namespace: new directory must be empty");}else pjraw(payload,r.length);
             oscreatehandowner(tx,payload,r.length,&newid,up->owner?up->owner:ownerroot());
-            if(r.operation==ProjectDetached){c->result=pjinstall(oh,newid,r.kind,rights,h->cap);goto done;}
+            if(r.operation==ProjectDetached){c->result=pjinstall(oh,newid,r.kind,rights,h->cap,h->obj->projectguard);goto done;}
         }else{
             other=vlookup(r.other,Vdelegate);oh2=pjbackend(other->obj,&newid);
             uchar a[16],b[16];osvolumeid(oh,a);osvolumeid(oh2,b);if(memcmp(a,b,16))error("namespace: cross volume");
@@ -229,7 +284,8 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
         if(pjget(p+16,8)==~(uvlong)0)error("namespace: binding IDs exhausted");
         memset(add,0,sizeof add);pjput(add,pjget(p+16,8)+1,8);pjput(add+8,newid,8);
         pjput(add+16,rights,4);pjput(add+20,r.relation,4);pjput(add+24,r.kind,4);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
-        q=pjedit(p,n,-1,add,addlen,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=r.operation==ProjectLink?pjget(add,8):0;goto done;
+        pending=projectgrantnew(oh,oid,pjget(add,8),other?other->cap:h->cap,other?other->obj->projectguard:h->obj->projectguard);
+        q=pjedit(p,n,-1,add,addlen,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);oswritehandk(tx,oid,q,qn);pjrefchange(tx,newid,1);oscommithand(tx,&ver);c->aux=ver;c->result=r.operation==ProjectLink?pjget(add,8):0;projectgrantpublish(pending);pending=nil;goto done;
     }
     at=pjfind(p,raw,r.binding,nil);if(at<0)error("namespace: not found");
     if(r.operation==ProjectUnlink){
@@ -237,7 +293,7 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
             if(r.kind!=pjget(p+at+24,4))error("namespace: target kind changed");
             if(r.kind==VkindObjectSpace){long bytes;payload=pjload(oh,pjget(p+at+8,8),&bytes,1);if(pjget(payload+24,8))error("namespace: target not empty");}
         }
-        q=pjedit(p,n,at,nil,0,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);oswritehandk(tx,oid,q,qn);pjrefchange(tx,pjget(p+at+8,8),-1);oscommithand(tx,&ver);c->aux=ver;goto done;
+        q=pjedit(p,n,at,nil,0,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);oswritehandk(tx,oid,q,qn);pjrefchange(tx,pjget(p+at+8,8),-1);oscommithand(tx,&ver);projectgrantremove(oh,oid,pjget(p+at,8));c->aux=ver;goto done;
     }
     if(r.operation!=ProjectRename)error(Ebadarg);
     pjname(r.name);other=vlookup(r.other,Vcontrol);oh2=pjbackend(other->obj,&oid2);
@@ -251,6 +307,10 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
         if(r.kind==VkindObjectSpace){long bytes;payload=pjload(oh2,pjget(p2+at2+8,8),&bytes,1);if(pjget(payload+24,8))error("namespace: target not empty");}
     }
     if((pjget(p+at+16,4)&~other->rights)!=0)error(Eperm);
+    ProjectGrant *source=projectgrantload(oh,oid,pjget(p+at,8));
+    pending=mallocz(sizeof *pending,1);if(pending==nil)error(Enomem);
+    osvolumeid(oh,pending->volume);pending->space=oid2;pending->binding=pjget(p2+16,8)+1;
+    pending->guard=source->guard;incref(&pending->guard->ref);
     memmove(add,p+at,32);addlen=strlen(r.name);pjput(add+28,addlen,4);memmove(add+32,r.name,addlen);addlen+=32;
     q=pjedit(p,n,at,nil,0,&qn);pjmetadata(&q,&qn,r.metadata,r.metadata_length);
     if(oid==oid2){
@@ -262,8 +322,11 @@ static void projectinvoke(int handle,ObjCall *c,ObjProjectReq r)
     }
     if(at2>=0)pjrefchange(tx,pjget(p2+at2+8,8),-1);
     oscommithand(tx,&ver);c->aux=ver;
+    projectgrantremove(oh,oid,pjget(p+at,8));
+    if(at2>=0)projectgrantremove(oh,oid2,pjget(p2+at2,8));
+    projectgrantpublish(pending);pending=nil;
 done:
-    poperror();free(p);free(p2);free(q);free(q2);free(payload);oshandput(tx);vhandput(other);qunlock(&projectgate);
+    poperror();free(p);free(p2);free(q);free(q2);free(payload);projectgrantfree(pending);projectguardput(guard);oshandput(tx);vhandput(other);qunlock(&projectgate);
     poperror();vhandput(h);
 }
 
@@ -287,12 +350,13 @@ int vobjprojectresolve(int handle,uvlong binding,uvlong rights)
 int vobjprojectenumerate(int handle,uvlong cursor,uvlong generation,ObjSpaceEntry *out,int max,uvlong *epoch)
 {
     Vhand *h=vlookup(handle,Vmeta);Vspace *s=h->obj->priv;uchar *p=nil;long n,raw,off=32;int count=0;uvlong index=0;
-    if(waserror()){free(p);vhandput(h);nexterror();}
+    qlock(&projectgate);
+    if(waserror()){free(p);qunlock(&projectgate);vhandput(h);nexterror();}
     p=pjload(s->project,s->projectoid,&n,1);raw=pjraw(p,n);*epoch=pjget(p+8,8);
     if(generation && generation!=*epoch)error("namespace: epoch changed");
     while(off<raw-8 && count<max){long len=pjget(p+off+28,4);
-        if(index++>=cursor){ObjSpaceEntry *e=&out[count++];memset(e,0,sizeof *e);e->binding_id=pjget(p+off,8);e->oid=pjget(p+off+8,8);e->rights=pjget(p+off+16,4)&h->rights;e->relation=pjget(p+off+20,4);e->kind=pjget(p+off+24,4);memmove(e->label,p+off+32,len);}
+        if(index++>=cursor){ObjSpaceEntry *e=&out[count++];memset(e,0,sizeof *e);e->binding_id=pjget(p+off,8);e->oid=pjget(p+off+8,8);e->rights=pjget(p+off+16,4)&h->rights;e->relation=pjget(p+off+20,4);e->kind=pjget(p+off+24,4);ProjectGrant *grant=projectgrantfind(s->project,s->projectoid,e->binding_id);if(grant && !projectguardvalid(grant->guard))e->flags|=ObjSpaceFlagRevoked;memmove(e->label,p+off+32,len);}
         off+=32+len;
     }
-    poperror();free(p);vhandput(h);return count;
+    poperror();free(p);qunlock(&projectgate);vhandput(h);return count;
 }

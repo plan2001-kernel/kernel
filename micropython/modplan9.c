@@ -649,7 +649,7 @@ static mp_obj_t p9_projectcall(size_t n,const mp_obj_t *a){
  c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
  int h=mp_obj_get_int(a[0]);
  if(obj_invoke(h,&c,sizeof c)<0)raise_err();
- if(r.operation==ProjectRead){vstr_t v;vstr_init_len(&v,c.result);c.out=v.buf;c.outlen=v.len;
+ if(r.operation==ProjectRead || r.operation==ProjectMetadata){vstr_t v;vstr_init_len(&v,c.result);c.out=v.buf;c.outlen=v.len;
   if(obj_invoke(h,&c,sizeof c)<0){vstr_clear(&v);raise_err();}return mp_obj_new_bytes_from_vstr(&v);}
  return mp_obj_new_int_from_ll(c.result);
 }
