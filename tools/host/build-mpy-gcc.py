@@ -101,6 +101,7 @@ def gen_headers(reuse: bool, report: list[str]) -> None:
         shutil.rmtree(src)
     shutil.copytree(MPY, src, symlinks=True)
     shutil.copy2(ROOT / "runtime/objtail.h", src / "objtail.h")
+    shutil.copy2(GEN / "project_source.h",src / "project_source.h")
     ok = True
     p = run(["make", "-C", str(src), "genhdr"], log=BUILD / "genhdr.log", quiet=True)
     if p.returncode != 0:
@@ -232,7 +233,7 @@ def sources() -> list[tuple[str, pathlib.Path]]:
         if n == "modjson":
             continue
         out.append((f"py_{n}", MPY / "py" / (n + ".c")))
-    for n in ("main", "modplan9", "modcbor", "modaesgcm", "p9space", "p9image", "p9sha",
+    for n in ("main", "modplan9", "modcbor", "modaesgcm", "p9space", "p9project", "p9image", "p9sha",
               "p9builtin", "p9math", "p9console", "p9hal"):
         out.append((n, MPY / (n + ".c")))
     out.append(("extmod_modjson", MPY / "extmod/modjson.c"))
@@ -383,6 +384,9 @@ def main() -> int:
 
     for d in (BUILD, LIB, OBJ, LOG, GEN, GENHDR):
         d.mkdir(parents=True, exist_ok=True)
+    import json
+    source_header='static const char project_source[] = '+json.dumps((MPY/'project.py').read_text(),ensure_ascii=True)+';\n'
+    (GEN/'project_source.h').write_text(source_header)
     report: list[str] = []
     gen_headers(args.reuse_headers, report)
     stub_src = gen_stubs()

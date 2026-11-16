@@ -42,6 +42,18 @@ def run():
     try:p.project_call(rf,6,None,0,0,frame(b'forbidden'))
     except OSError:pass
     else:raise AssertionError('read-only project escalated')
+    import project
+    ns=project.from_handle(root)
+    module=ns.create('hello.py',b'value=42\n');module.close()
+    ns.activate()
+    import hello
+    assert hello.value==42
+    pkg=ns.mkdir('pkg')
+    obj=pkg.create('__init__.py',b'from . import part\nvalue=part.value\n');obj.close()
+    obj=pkg.create('part.py',b'value=73\n');obj.close()
+    import pkg
+    assert pkg.value==73
+    print('PROJECT-IMPORT-PASS')
     print('PROJECT-NATIVE-PASS')
     shared.n+=1
     return shared.n

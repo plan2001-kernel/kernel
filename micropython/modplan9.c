@@ -598,6 +598,16 @@ static mp_obj_t p9_objopenhandle(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenhandle_obj,1,2,p9_objopenhandle);
 
+extern mp_obj_t p9_project_new_module(void);
+extern mp_obj_t p9_project_exec(mp_obj_t,mp_obj_t,mp_obj_t);
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_projectnewmodule_obj,p9_project_new_module);
+static MP_DEFINE_CONST_FUN_OBJ_3(p9_projectexec_obj,p9_project_exec);
+static mp_obj_t p9_projectidentity(mp_obj_t handle){
+ VobjInfo i;if(obj_info(mp_obj_get_int(handle),&i)<0)raise_err();
+ mp_obj_t a[2]={mp_obj_new_bytes(i.volume,16),mp_obj_new_int_from_ull(i.oid)};
+ return mp_obj_new_tuple(2,a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_projectidentity_obj,p9_projectidentity);
 /* ObjectSpace project operations never expose their backing volume. */
 static mp_obj_t p9_projectopen(size_t n,const mp_obj_t *a){
  ObjProjectOpen r={0};mp_buffer_info_t b={0};
@@ -1316,6 +1326,9 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_identity), MP_ROM_PTR(&p9_projectidentity_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_module), MP_ROM_PTR(&p9_projectnewmodule_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_exec), MP_ROM_PTR(&p9_projectexec_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_open), MP_ROM_PTR(&p9_projectopen_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_call), MP_ROM_PTR(&p9_projectcall_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_volume), MP_ROM_PTR(&p9_objopenvolume_obj) },
