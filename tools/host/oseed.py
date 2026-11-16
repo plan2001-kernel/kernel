@@ -109,7 +109,8 @@ def compile_mpy(source: pathlib.Path, out: pathlib.Path, mpy_cross: pathlib.Path
 
 
 def build_seed(source: pathlib.Path, seed: pathlib.Path, mpy_exec: pathlib.Path | None,
-               mpy_cross: pathlib.Path, ike_exec: pathlib.Path | None = None) -> dict[str, str]:
+               mpy_cross: pathlib.Path, ike_exec: pathlib.Path | None = None,
+               extra_modules=()) -> dict[str, str]:
     src = source.read_bytes()
     definition = sha256_hex(src)
 
@@ -120,10 +121,25 @@ def build_seed(source: pathlib.Path, seed: pathlib.Path, mpy_exec: pathlib.Path 
     mpy_bytes = compile_mpy(source, mpy_path, mpy_cross)
     mpy_digest = sha256_hex(mpy_bytes)
 
-    env = (
-        f"runtime {runtime_id()}\n"
-        f"{MODULE_NAME} {definition} {mpy_digest} {OID_CODE:016x}\n"
-    ).encode()
+    manifest = [f"runtime {runtime_id()}\n",
+                f"{MODULE_NAME} {definition} {mpy_digest} {OID_CODE:016x}\n"]
+    names = {MODULE_NAME}
+    digests = {definition}
+    for index, (name, path) in enumerate(extra_modules, 1):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name in names:
+            raise SystemExit(f"oseed: invalid/duplicate module: {name!r}")
+        names.add(name)
+        digest = sha256_hex(path.read_bytes())
+        if digest in digests:
+            raise SystemExit(f"oseed: duplicate module source: {name}")
+        digests.add(digest)
+        oid = OID_CODE + index
+        if oid >= 0xfffffffffffffffc:
+            raise SystemExit("oseed: too many extra modules")
+        artifact = seed / "mod" / f"{digest}.mpy"
+        compiled = compile_mpy(path, artifact, mpy_cross)
+        manifest.append(f"{name} {digest} {sha256_hex(compiled)} {oid:016x}\n")
+    env = "".join(manifest).encode()
     env_digest = sha256_hex(env)
 
     mpy_exec_bytes = None
@@ -184,6 +200,8 @@ def main() -> int:
     ap.add_argument("--mp-exec", dest="mpy_exec", type=pathlib.Path,
                     help="MicroPython ELF to store")
     ap.add_argument("--ike-exec", type=pathlib.Path, help="optional userspace iked ELF")
+    ap.add_argument("--module", action="append", default=[], metavar="NAME=PATH",
+                    help="additional GE/O Environment module")
     ap.add_argument("--no-mp", dest="no_mpy", action="store_true",
                     help="omit seed/mp and seed/mpoid (NOMPEXEC images)")
     ap.add_argument("--mpy-cross", type=pathlib.Path, default=DEFAULT_MPY_CROSS,
@@ -201,7 +219,15 @@ def main() -> int:
         ap.error("--no-mp and --mp-exec are exclusive")
     if not args.no_mpy and args.mpy_exec is None:
         ap.error("--mp-exec or --no-mp is required")
-    check = [args.source, args.mpy_cross]
+    modules = []
+    for spec in args.module:
+        if "=" not in spec:
+            ap.error("--module requires NAME=PATH")
+        name, filename = spec.split("=", 1)
+        if not filename:
+            ap.error("--module path must be nonempty")
+        modules.append((name, pathlib.Path(filename)))
+    check = [args.source, args.mpy_cross] + [p for _, p in modules]
     if args.mpy_exec is not None:
         check.append(args.mpy_exec)
     for p in check:
@@ -209,7 +235,8 @@ def main() -> int:
             ap.error(f"no {p}")
     try:
         info = build_seed(args.source, args.seed,
-                          None if args.no_mpy else args.mpy_exec, args.mpy_cross, args.ike_exec)
+                          None if args.no_mpy else args.mpy_exec, args.mpy_cross,
+                          args.ike_exec, extra_modules=modules)
     except OSError as e:
         print(f"oseed: {e}", file=sys.stderr)
         return 1
