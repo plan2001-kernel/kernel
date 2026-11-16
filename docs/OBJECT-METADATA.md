@@ -8,11 +8,13 @@ optional metadata follows raw bytes, and the final 32 bytes locate it.
 
 ## Preserve the original name above everything else
 
-A portable object should record its **original descriptive filename** at
-creation/import, e.g. kernel_trap.c. It is highly valuable provenance long
+A portable object should record **one object-owned descriptive name per
+OID**, e.g. kernel_trap.c, when its producer supplies a name. It is highly valuable provenance long
 after a project disappears. Do not replace this original name when a local
 path is renamed. Maintain the **current** path/label separately through
-UXFS/PVD/ObjectSpace. An object can have multiple simultaneous names.
+UXFS/PVD/ObjectSpace. One OID may have multiple unrelated binding labels;
+those labels are not additional object-owned names. Different OIDs may
+share the same descriptive name. A rename or alias never rewrites it.
 The name is not an OID, authorization credential or executable selector.
 
 The other essential provenance is the original **creation instant** (when
@@ -79,10 +81,23 @@ For metadata-bearing files, a persisted UXFS implementation needs to:
 * preserve one GE/O object version's raw data and metadata together.
   No guessed OID or copied OwnerID authorizes access.
 
-**Status, not implementation claim:** UXFS v1's current manifest is a fixed
-array of path, OID, raw length and kind. Its stored file data currently
-consists of bare bytes, and its stat adapters do not persist the full
-Unix metadata above. This profile therefore documents the agreed intended
-behavior; neither a UXFS migration nor a reboot-tested implementation is
-included here. Do not claim current cold-boot compatibility with the new
-frame until those changes have been made and tested.
+**Implementation:** native ELF/MPY provisioning and loading use validated
+footers. UXFS v4 publishes each file as raw bytes, CBOR metadata and footer
+in one GE/O version. Its sparse manifest stores only live slot-indexed node
+and metadata records, keeping inode slots stable without writing empty
+capacity on every access-time update. The checked raw layout is a 16-byte
+magic/version/count header, ascending `(uint32 slot, UxNode, UxMeta)` records,
+and an 8-byte FNV-1a checksum in the native AMD64 little-endian profile.
+It publishes its framed manifest only after staging
+all successor files. Original name, known creation time, media type,
+mode/uid/gid/rdev and known atime/mtime/ctime/birthtime are restored. Unknown
+metadata keys, including producer-specific ACL/xattr values, survive rewrites;
+non-map opaque metadata remains opaque. The optional source raw_sha256
+field is cleared on UXFS publication rather than retained as a stale digest;
+offline inspection computes the current raw digest directly. This does not implement chmod,
+chown or ACL/xattr modification APIs: unsupported operations still fail.
+Raw reads, stat size and seek expose only file bytes. The manifest and file
+footer are mandatory; older unframed manifests are explicitly rejected.
+Use a freshly provisioned image or an explicit offline migration, never a
+silent reformat. Generic GE/O values outside these producer paths remain
+opaque; this is not a global conversion of every existing OID.

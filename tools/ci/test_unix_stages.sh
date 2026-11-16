@@ -9,11 +9,13 @@ trap 'rm -rf "$OUT"' EXIT
 CC=${CC:-gcc}
 BASE=(-std=c11 -O1 -g -Wall -Wextra -Werror -pedantic
       -fsanitize=undefined -fno-omit-frame-pointer
-      -I"$ROOT/ports/unix" -I"$ROOT/ports/busybox")
+      -I"$ROOT/ports/unix" -I"$ROOT/ports/busybox" -I"$KERNEL/runtime")
 case "$STAGE" in
   4)
+    "$CC" "${BASE[@]}" "$ROOT/tests/host/test_uxobject.c" "$ROOT/ports/unix/uxobject.c" "$KERNEL/runtime/objtail.c" -o "$OUT/uxobject"
+    "$OUT/uxobject"
     "$CC" "${BASE[@]}" "$ROOT/tests/host/test_uxfs.c" \
-      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" -o "$OUT/uxfs"
+      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" "$ROOT/ports/unix/uxobject.c" "$KERNEL/runtime/objtail.c" -o "$OUT/uxfs"
     "$OUT/uxfs"
     ;;
   6)
@@ -34,7 +36,7 @@ case "$STAGE" in
       -c "$ROOT/ports/busybox/ls_child.c" -o "$OUT/native-ls.o"
     "$CC" "${BASE[@]}" -I"$KERNEL/runtime/abi" \
       "$ROOT/tests/host/test_uxexternal.c" \
-      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" \
+      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" "$ROOT/ports/unix/uxobject.c" "$KERNEL/runtime/objtail.c" \
       "$ROOT/ports/unix/uxexternal.c" "$ROOT/ports/unix/uxspawn.c" \
       "$ROOT/ports/unix/uxpipe.c" -o "$OUT/uxexternal"
     "$OUT/uxexternal"
@@ -55,17 +57,17 @@ case "$STAGE" in
     ;;
   7)
     "$CC" "${BASE[@]}" "$ROOT/tests/host/test_uxshell.c" \
-      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" \
+      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" "$ROOT/ports/unix/uxobject.c" "$KERNEL/runtime/objtail.c" \
       "$ROOT/ports/unix/uxshell.c" -o "$OUT/uxshell"
     "$OUT/uxshell"
     "$CC" "${BASE[@]}" "$ROOT/tests/host/test_uxservice.c" \
-      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" \
+      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" "$ROOT/ports/unix/uxobject.c" "$KERNEL/runtime/objtail.c" \
       "$ROOT/ports/unix/uxshell.c" "$ROOT/ports/unix/uxservice.c" \
       "$ROOT/ports/unix/uxfd.c" -o "$OUT/uxservice"
     "$OUT/uxservice"
     "$CC" "${BASE[@]}" -pthread \
       "$ROOT/tests/host/test_uxrpc.c" \
-      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" \
+      "$ROOT/ports/unix/pvd.c" "$ROOT/ports/unix/uxfs.c" "$ROOT/ports/unix/uxobject.c" "$KERNEL/runtime/objtail.c" \
       "$ROOT/ports/unix/uxshell.c" "$ROOT/ports/unix/uxservice.c" \
       "$ROOT/ports/unix/uxfd.c" "$ROOT/ports/unix/uxpipe.c" \
       "$ROOT/ports/unix/uxrpc.c" -o "$OUT/uxrpc"

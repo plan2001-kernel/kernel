@@ -133,7 +133,8 @@ def main() -> None:
               "-fno-asynchronous-unwind-tables", "-fno-unwind-tables",
               "-fno-omit-frame-pointer", "-ffunction-sections",
               "-fdata-sections", "-Wall", "-Wextra", "-Werror",
-              "-I", str(PORT), "-I", str(args.kernel / "runtime/abi")]
+              "-I", str(PORT), "-I", str(args.kernel / "runtime/abi"),
+              "-I", str(args.kernel / "runtime")]
 
     objects = []
     info = {"kernel_commit": read(
@@ -165,6 +166,8 @@ def main() -> None:
                              ("unix_init", UNIX / "init.c"),
                              ("f5_shell", PORT / "f5_shell.c"),
                              ("uxfs", UNIX / "uxfs.c"),
+                             ("uxobject", UNIX / "uxobject.c"),
+                             ("objtail", args.kernel / "runtime/objtail.c"),
                              ("uxgeo", UNIX / "uxgeo.c"),
                              ("uxshell", UNIX / "uxshell.c"),
                              ("uxservice", UNIX / "uxservice.c"),
@@ -176,7 +179,7 @@ def main() -> None:
                              ("uxfd", UNIX / "uxfd.c"),
                              ("supervisor", UNIX / "supervisor.c")):
             obj = build / f"{name}.o"
-            logged(common + ["-c", str(source), "-o", str(obj)], log)
+            logged(common + (["-DOBJTAIL_NATIVE_TYPES"] if name=="objtail" else []) + ["-c", str(source), "-o", str(obj)], log)
             pvd_objects.append(obj)
 
         for label, mode in (("busybox-plan2001", "standard"),

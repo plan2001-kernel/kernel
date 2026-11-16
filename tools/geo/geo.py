@@ -21,6 +21,10 @@ a = s.add_parser('get')
 a.add_argument('volume')
 a.add_argument('oid', type=lambda x: int(x, 0))
 a.add_argument('output', type=Path)
+for op in ('raw','metadata'):
+    a=s.add_parser(op)
+    a.add_argument('volume');a.add_argument('oid',type=lambda x:int(x,0))
+    a.add_argument('output',type=Path)
 a = s.add_parser('rebuild')
 a.add_argument('volume')
 a.add_argument('output', type=Path)
@@ -41,14 +45,20 @@ with tempfile.TemporaryDirectory(prefix='geo-') as t:
             print('OID                 BYTES       SHA256')
             for oid, item in d['objects'].items():
                 print(f"0x{oid} {item['bytes']:10d} {item['sha256']}")
-    elif a.op == 'get':
+    elif a.op in ('get','raw','metadata'):
         if a.output.exists():
             p.error('output must not exist')
         src = extract / f'{a.oid:016x}.bin'
         if not src.exists():
             p.error('OID not found')
+        data=src.read_bytes()
+        if a.op!='get':
+            import sys
+            sys.path.insert(0,str(k/'tools/host'))
+            from object_format import unpack
+            raw,meta=unpack(data);data=raw if a.op=='raw' else meta
         with a.output.open('xb') as out:
-            out.write(src.read_bytes())
+            out.write(data)
     else:
         if a.output.exists():
             p.error('output must not exist; rebuild writes regular new images only')

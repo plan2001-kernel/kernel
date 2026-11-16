@@ -230,6 +230,18 @@ int main(void)
         check(unlink("/tmp/large-file")==0,"reclaim large file arena");
         emit("PASS: 256 KiB file and 200 nodes across real fork/exec and pipelines\n");
     }
+    {
+        UxMeta before,after;struct stat st1,st2;
+        fixture("/tmp/object-original","raw-file\n");
+        check(uxfs_metadata(&service.fs,"/tmp/object-original",&before)==0,"read native Unix metadata");
+        check(!strcmp(before.name,"object-original") && (before.known&UXMETA_BIRTH),"object-owned name and real creation instant");
+        check(stat("/tmp/object-original",&st1)==0 && st1.st_size==9 && st1.st_ino!=0,"raw-view stat and local inode");
+        check(rename("/tmp/object-original","/tmp/unrelated-binding")==0,"rename namespace binding");
+        check(uxfs_metadata(&service.fs,"/tmp/unrelated-binding",&after)==0 && !strcmp(after.name,before.name) && after.birth_ns==before.birth_ns,"rename preserves object name and creation instant");
+        check(stat("/tmp/unrelated-binding",&st2)==0 && st2.st_ino==st1.st_ino && st2.st_size==9,"rename preserves Unix identity and raw size");
+        check(unlink("/tmp/unrelated-binding")==0,"remove metadata fixture");
+        emit("PASS: one object-owned name, independent Unix binding, creation time and raw stat projection\n");
+    }
     RUN(0, EXPECTED_APPLETS, "busybox", "--list");
     RUN(0, EXPECTED_APPLETS_FULL, "busybox", "--list-full");
     RUN(0, "hello\n", "busybox", "echo", "hello");

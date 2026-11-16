@@ -5,6 +5,7 @@
 #ifndef PLAN2001_UXFS_H
 #define PLAN2001_UXFS_H
 #include "pvd.h"
+#include "uxobject.h"
 #define UXFS_NODES PVD_MAX_NODES
 /* Shared snapshot must fit the native 16 MiB region ceiling. Files share
  * this arena, rather than reserving a maximum-sized buffer per inode. */
@@ -13,7 +14,7 @@
 #define UXFS_DIR 1u
 #define UXFS_FILE 2u
 #define UXFS_MAGIC 0x3153465855323030ULL /* "002UXFS1" ABI-local marker */
-#define UXFS_VERSION 2u
+#define UXFS_VERSION 4u
 
 typedef unsigned long long UxOid;
 typedef struct {
@@ -29,6 +30,9 @@ typedef struct {
     UxNode nodes[UXFS_NODES];
     unsigned int offsets[UXFS_NODES];
     unsigned int used;
+    UxMeta metadata[UXFS_NODES];
+    unsigned int meta_offsets[UXFS_NODES],meta_sizes[UXFS_NODES],meta_used;
+    unsigned char meta_data[UXMETA_ARENA];
     unsigned char data[UXFS_DATA_MAX];
 } UxFs;
 
@@ -55,6 +59,9 @@ int uxfs_read(UxFs *fs, const char *path, void *buf,
 long uxfs_pread(UxFs *,const char *,void *,unsigned int,unsigned int);
 long uxfs_pwrite(UxFs *,const char *,const void *,unsigned int,unsigned int,int);
 void uxfs_snapshot(UxFs *,const UxFs *);
+int uxfs_inode(UxFs *,const char *,unsigned long long *);
+int uxfs_metadata(UxFs *,const char *,UxMeta *);
+int uxfs_framed_metadata(UxFs *,const char *,void *,unsigned,unsigned *);
 int uxfs_copy(UxFs *fs, const char *src, const char *dest);
 int uxfs_move(UxFs *fs, const char *src, const char *dest);
 int uxfs_remove(UxFs *fs, const char *path);

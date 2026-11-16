@@ -170,7 +170,7 @@ try:
         enter("awk 'BEGIN {for (i=0;i<4096;i++) print \"big\"}' > /tmp/big")
         enter("cat /tmp/big | awk 'END {print NR}'; echo LARGE-END")
         result=waitscreen("pipeline-large", "LARGE-END", occurrences=2)
-        assert "\n4096\nLARGE-END\n" in result, result
+        assert re.search(r"(?:\n|ash\$ )4096\nLARGE-END\n",result), result
         enter("rm /tmp/big")
         print("PASS: exact cat FILE | awk, three external stages and a 16 KiB file with 4096 lines")
     elif mode == "multicall-essentials":
@@ -348,32 +348,38 @@ try:
 
         if mode == "persist-reboot":
             enter("cat /tmp/persisted")
-            waitscreen("geo-restored-cat", "\npersist2026\nunix:/$")
+            waitscreen("geo-restored-cat", "PLAN2001-BUSYBOX-F5-READ:cat /tmp/persisted\npersist2026\nunix:/$")
             enter("ls /tmp")
-            waitscreen("geo-restored-list", "persisted")
+            waitscreen("geo-restored-list", "PLAN2001-BUSYBOX-F5-READ:ls /tmp\npersisted")
             # A SECOND native process reads the exact same committed
             # service view via two delegated UXPIPE channels, no volume.
-            enter("cat /tmp/fromclient")
-            waitscreen("geo-rpc-reboot-local", "\nremote\nunix:/$")
-            enter("uxfile get /tmp/fromclient")
-            waitscreen("geo-rpc-reboot-remote", "\nremote\nunix:/$")
+            enter("cat /tmp/client-renamed")
+            waitscreen("geo-rpc-reboot-local", "PLAN2001-BUSYBOX-F5-READ:cat /tmp/client-renamed\nremote\nunix:/$")
+            enter("uxfile get /tmp/client-renamed")
+            waitscreen("geo-rpc-reboot-remote", "PLAN2001-BUSYBOX-F5-READ:uxfile get /tmp/client-renamed\nremote\nunix:/$")
             print("PASS: GE/O restored file written by a separate UXPIPE RPC client")
             print("PASS: real GE/O manifest and file restored across fresh QEMU boot")
         elif mode == "persist-initial":
             enter("echo persist2026 > /tmp/persisted")
+            waitscreen("geo-write-committed", "PLAN2001-BUSYBOX-F5-READ:echo persist2026 > /tmp/persisted\nunix:/$")
             enter("cat /tmp/persisted")
-            waitscreen("geo-firstboot-cat", "\npersist2026\nunix:/$")
+            waitscreen("geo-firstboot-cat", "PLAN2001-BUSYBOX-F5-READ:cat /tmp/persisted\npersist2026\nunix:/$")
             # The F5 Unix-init remains the only UXFS/GE/O owner. A
             # separate SPAWNed process sees shell changes via bounded RPC.
             enter("uxfile get /tmp/persisted")
-            waitscreen("geo-rpc-shell-to-child", "\npersist2026\nunix:/$")
+            waitscreen("geo-rpc-shell-to-child", "PLAN2001-BUSYBOX-F5-READ:uxfile get /tmp/persisted\npersist2026\nunix:/$")
             enter("uxfile put /tmp/fromclient remote")
+            waitscreen("geo-rpc-write-committed", "PLAN2001-BUSYBOX-F5-READ:uxfile put /tmp/fromclient remote\nunix:/$")
             enter("cat /tmp/fromclient")
-            waitscreen("geo-rpc-child-to-shell", "\nremote\nunix:/$")
+            waitscreen("geo-rpc-child-to-shell", "PLAN2001-BUSYBOX-F5-READ:cat /tmp/fromclient\nremote\nunix:/$")
+            enter("mv /tmp/fromclient /tmp/client-renamed")
+            waitscreen("geo-rename-committed", "PLAN2001-BUSYBOX-F5-READ:mv /tmp/fromclient /tmp/client-renamed\nunix:/$")
+            enter("cat /tmp/client-renamed")
+            waitscreen("geo-renamed-before-reboot", "PLAN2001-BUSYBOX-F5-READ:cat /tmp/client-renamed\nremote\nunix:/$")
             enter("uxfile put /etc/protected secret")
-            waitscreen("geo-rpc-denied", "uxfile: output failed")
+            waitscreen("geo-rpc-denied", "PLAN2001-BUSYBOX-F5-READ:uxfile put /etc/protected secret\nuxfile: output failed")
             enter("cat /etc/protected")
-            waitscreen("geo-rpc-denied-no-file", "cat: no such directory")
+            waitscreen("geo-rpc-denied-no-file", "PLAN2001-BUSYBOX-F5-READ:cat /etc/protected\ncat: no such directory")
             spawns = re.findall(
                 r"o: SPAWN pid=\d+ handle=\d+ oid=0x4f45584543000006\b",
                 serial.read_text(errors="replace"))

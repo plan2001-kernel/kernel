@@ -110,6 +110,28 @@ static int parent_ok(const UxFs *fs, const char *path)
     return id < 0 ? PVD_ENOENT :
            fs->nodes[id].kind == UXFS_DIR ? PVD_OK : PVD_EINVAL;
 }
+extern unsigned long long uxfs_clock_ns(void) __attribute__((weak));
+static unsigned long long now_ns(void){return uxfs_clock_ns?uxfs_clock_ns():0;}
+static void changed(UxFs*fs,unsigned id,int data)
+{
+    unsigned long long now=now_ns();
+    if(now){fs->metadata[id].ctime_ns=(long long)now;fs->metadata[id].known|=UXMETA_CTIME;
+        if(data){fs->metadata[id].mtime_ns=(long long)now;fs->metadata[id].known|=UXMETA_MTIME;}}
+    fs->modified[id]=1;fs->dirty=1;
+}
+/* Retained original CBOR lives in a separate packed arena. It never contains
+ * process pointers, Handles or authority-bearing values. */
+static int metastore(UxFs*fs,unsigned id,const void*buf,unsigned size)
+{
+    unsigned old=fs->meta_sizes[id],off=fs->meta_offsets[id];
+    if(size>old && size-old>UXMETA_ARENA-fs->meta_used)return PVD_ENOSPC;
+    if(!old)off=fs->meta_used;
+    movebytes(fs->meta_data+off+size,fs->meta_data+off+old,fs->meta_used-off-old);
+    for(unsigned i=0;i<UXFS_NODES;i++)if(i!=id && fs->meta_sizes[i] && fs->meta_offsets[i]>off)
+        fs->meta_offsets[i]=fs->meta_offsets[i]-old+size;
+    if(size)bytes(fs->meta_data+off,buf,size);
+    fs->meta_used=fs->meta_used-old+size;fs->meta_sizes[id]=size;fs->meta_offsets[id]=off;return 0;
+}
 static int seed(UxFs *fs, const char *path)
 {
     int id = free_node(fs);
@@ -117,6 +139,7 @@ static int seed(UxFs *fs, const char *path)
     if (id < 0 || n >= PVD_PATH_MAX) return PVD_ENOSPC;
     bytes(fs->nodes[id].path, path, n + 1);
     fs->nodes[id].kind = UXFS_DIR;
+    uxmeta_init(&fs->metadata[id],path,UXFS_DIR,now_ns());
     return PVD_OK;
 }
 void uxfs_init(UxFs *fs, Pvd *view)
@@ -146,6 +169,7 @@ int uxfs_mkdir(UxFs *fs, const char *path)
     if (rc) return rc;
     bytes(fs->nodes[id].path, resolved, length(resolved)+1);
     fs->nodes[id].kind = UXFS_DIR;
+    uxmeta_init(&fs->metadata[id],resolved,UXFS_DIR,now_ns());
     fs->dirty = 1;
     return PVD_OK;
 }
@@ -176,6 +200,7 @@ int uxfs_rmdir(UxFs *fs,const char *path)
     rc=pvd_rmdir_memory(fs->view,resolved);
     if(rc) return rc;
     zero(&fs->nodes[id],sizeof(fs->nodes[id]));
+    (void)metastore(fs,(unsigned)id,0,0);zero(&fs->metadata[id],sizeof(UxMeta));
     fs->modified[id]=0;
     fs->dirty=1;
     return PVD_OK;
@@ -223,11 +248,12 @@ long uxfs_pwrite(UxFs *fs,const char *path,const void *buf,unsigned count,
     if(fresh){
         fs->offsets[id]=fs->used;
         fs->nodes[id].kind=UXFS_FILE;
+        uxmeta_init(&fs->metadata[id],resolved,UXFS_FILE,now_ns());
         bytes(fs->nodes[id].path,resolved,length(resolved)+1);
     }
     rc=resize(fs,(unsigned)id,target);if(rc)return rc;
     if(count)bytes(fs->data+fs->offsets[id]+offset,buf,count);
-    fs->modified[id]=1;fs->dirty=1;
+    changed(fs,(unsigned)id,1);
     return count;
 }
 int uxfs_write(UxFs *fs,const char *path,const void *buf,unsigned size,int append)
@@ -248,6 +274,7 @@ long uxfs_pread(UxFs *fs,const char *path,void *buf,unsigned count,unsigned offs
     if(offset>=fs->nodes[id].length)return 0;
     if(count>fs->nodes[id].length-offset)count=fs->nodes[id].length-offset;
     if(count)bytes(buf,fs->data+fs->offsets[id]+offset,count);
+    unsigned long long now=now_ns();if(now && count){fs->metadata[id].atime_ns=(long long)now;fs->metadata[id].known|=UXMETA_ATIME;fs->modified[id]=1;fs->dirty=1;}
     return count;
 }
 int uxfs_read(UxFs *fs,const char *path,void *buf,unsigned capacity,unsigned *size)
@@ -301,6 +328,7 @@ int uxfs_remove(UxFs *fs, const char *path)
     (void)resize(fs,(unsigned)id,0);
     zero(&fs->nodes[id], sizeof(UxNode));
     fs->offsets[id]=0;
+    (void)metastore(fs,(unsigned)id,0,0);zero(&fs->metadata[id],sizeof(UxMeta));
     fs->modified[id] = 0;
     fs->dirty = 1;
     return PVD_OK;
@@ -325,10 +353,11 @@ int uxfs_move(UxFs *fs, const char *src, const char *dest)
         (void)resize(fs,(unsigned)other,0);
         zero(&fs->nodes[other], sizeof(UxNode));
         fs->offsets[other]=0;
+        (void)metastore(fs,(unsigned)other,0,0);zero(&fs->metadata[other],sizeof(UxMeta));
         fs->modified[other] = 0;
     }
     bytes(fs->nodes[id].path, b, length(b)+1);
-    fs->dirty = 1;
+    changed(fs,(unsigned)id,0);
     return PVD_OK;
 }
 int uxfs_list(UxFs *fs, const char *path, UxEmit emit, void *ctx)
@@ -368,9 +397,8 @@ int uxfs_list(UxFs *fs, const char *path, UxEmit emit, void *ctx)
 typedef struct {
     UxOid magic;
     unsigned int version;
-    unsigned int reserved;
     UxNode nodes[UXFS_NODES];
-    UxOid checksum;
+    UxMeta metadata[UXFS_NODES];
 } UxManifest;
 static UxOid hash(const void *data, unsigned long n)
 {
@@ -378,6 +406,38 @@ static UxOid hash(const void *data, unsigned long n)
     UxOid h = 14695981039346656037ULL;
     while (n--) { h ^= *p++; h *= 1099511628211ULL; }
     return h;
+}
+/* Sparse native manifest: header, (slot,node,metadata) records, checksum.
+ * Empty capacity is never written. Slot numbers preserve local inode identity. */
+#define MANIFEST_RECORD (4u+sizeof(UxNode)+sizeof(UxMeta))
+#define MANIFEST_MAX (24u+UXFS_NODES*MANIFEST_RECORD)
+static unsigned manifest_pack(UxManifest *d,unsigned char *out)
+{
+    unsigned count=0,off=16;
+    for(unsigned i=0;i<UXFS_NODES;i++)if(d->nodes[i].kind){
+        bytes(out+off,&i,4);off+=4;
+        bytes(out+off,&d->nodes[i],sizeof(UxNode));off+=sizeof(UxNode);
+        bytes(out+off,&d->metadata[i],sizeof(UxMeta));off+=sizeof(UxMeta);count++;
+    }
+    bytes(out,&d->magic,8);bytes(out+8,&d->version,4);bytes(out+12,&count,4);
+    UxOid sum=hash(out,off);bytes(out+off,&sum,8);return off+8;
+}
+static int manifest_unpack(UxManifest *d,const unsigned char *in,unsigned size)
+{
+    unsigned count,off=16,previous=0;UxOid sum;
+    if(size<24)return -1;
+    zero(d,sizeof *d);bytes(&d->magic,in,8);bytes(&d->version,in+8,4);bytes(&count,in+12,4);
+    if(d->magic!=UXFS_MAGIC || d->version!=UXFS_VERSION || count>UXFS_NODES ||
+       size!=24+count*MANIFEST_RECORD)return -1;
+    bytes(&sum,in+size-8,8);if(sum!=hash(in,size-8))return -1;
+    for(unsigned i=0;i<count;i++){
+        unsigned slot;bytes(&slot,in+off,4);off+=4;
+        if(slot>=UXFS_NODES || (i && slot<=previous))return -1;
+        previous=slot;bytes(&d->nodes[slot],in+off,sizeof(UxNode));off+=sizeof(UxNode);
+        bytes(&d->metadata[slot],in+off,sizeof(UxMeta));off+=sizeof(UxMeta);
+        if(!d->nodes[slot].kind)return -1;
+    }
+    return 0;
 }
 /* Copy-on-write persistence: never replace the object named by a published
  * manifest until its successor has committed. GE/O create may commit an
@@ -395,6 +455,7 @@ int uxfs_save(UxFs *fs, const UxStore *s, UxOid manifest)
     disk.magic = UXFS_MAGIC;
     disk.version = UXFS_VERSION;
     bytes(disk.nodes, fs->nodes, sizeof(disk.nodes));
+    bytes(disk.metadata,fs->metadata,sizeof(disk.metadata));
     for (i = 0; i < UXFS_NODES; ++i) {
         UxNode *n = &disk.nodes[i];
         UxOid fresh = 0;
@@ -409,12 +470,24 @@ int uxfs_save(UxFs *fs, const UxStore *s, UxOid manifest)
                     disk.nodes[j].oid == fresh)
                     return PVD_EIO;
             n->oid = fresh;
-            if (s->put(s->context, fresh, fs->data+fs->offsets[i], n->length))
-                return PVD_EIO;
+            static unsigned char framed[UXFS_DATA_MAX+UXMETA_ARENA+32];
+            unsigned meta;
+            if(uxobject_metadata(&fs->metadata[i],fs->meta_data+fs->meta_offsets[i],fs->meta_sizes[i],
+                   framed+n->length,UXMETA_ARENA,&meta))return PVD_EIO;
+            bytes(framed,fs->data+fs->offsets[i],n->length);
+            if(uxobject_footer(framed+n->length+meta,n->length,meta) ||
+               s->put(s->context,fresh,framed,n->length+meta+32))return PVD_EIO;
         }
     }
-    disk.checksum = hash(&disk, sizeof(disk)-sizeof(disk.checksum));
-    if (s->put(s->context, manifest, &disk, sizeof(disk)) ||
+    static unsigned char envelope[MANIFEST_MAX+512];
+    unsigned raw=manifest_pack(&disk,envelope);
+    UxMeta manifestmeta;unsigned msize;
+    uxmeta_init(&manifestmeta,"uxfs-manifest",UXFS_FILE,0);
+    const char *mt="application/vnd.plan2001.uxfs-manifest";
+    bytes(manifestmeta.media_type,mt,length(mt)+1);
+    if(uxobject_metadata(&manifestmeta,0,0,envelope+raw,480,&msize))return PVD_EIO;
+    if(uxobject_footer(envelope+raw+msize,raw,msize))return PVD_EIO;
+    if (s->put(s->context, manifest, envelope, raw+msize+32) ||
         s->commit(s->context))
         return PVD_EIO;
     for (i = 0; i < UXFS_NODES; ++i) {
@@ -445,24 +518,17 @@ int uxfs_restore(UxFs *fs, const UxStore *s, UxOid manifest)
     int rc;
     if (!fs || !fs->view || !s || !s->get || !manifest)
         return PVD_EINVAL;
-    /* Version 1 held 64 fixed metadata records. Its payload checksum must
-     * be verified before zero-extending into the current metadata table. */
-    zero(&disk,sizeof(disk));
-    if(s->get(s->context,manifest,&disk,sizeof(disk),&n) || n<24 ||
-       disk.magic!=UXFS_MAGIC || disk.reserved!=0)return PVD_EIO;
-    if(disk.version==1){
-        UxOid stored;unsigned legacy=16+64*sizeof(UxNode)+sizeof(UxOid);
-        if(n!=legacy)return PVD_EIO;
-        bytes(&stored,(unsigned char*)&disk+n-sizeof(UxOid),sizeof stored);
-        if(stored!=hash(&disk,n-sizeof(UxOid)))return PVD_EIO;
-        zero((unsigned char*)&disk+16+64*sizeof(UxNode),sizeof(disk)-16-64*sizeof(UxNode));
-    }else if(disk.version!=UXFS_VERSION || n!=sizeof(disk) ||
-       disk.checksum!=hash(&disk,sizeof(disk)-sizeof(disk.checksum)))return PVD_EIO;
+    static unsigned char envelope[MANIFEST_MAX+UXMETA_ARENA+32];
+    unsigned rawsize,metasize;
+    if(s->get(s->context,manifest,envelope,sizeof envelope,&n) ||
+       uxobject_split(envelope,n,&rawsize,&metasize) ||
+       manifest_unpack(&disk,envelope,rawsize))return PVD_EIO;
     if (disk.nodes[0].kind != UXFS_DIR ||
         !same(disk.nodes[0].path, "/")) return PVD_EIO;
     if (pvd_bootstrap(&staged_view) != PVD_OK) return PVD_EIO;
     uxfs_init(&staged, &staged_view);
     bytes(staged.nodes, disk.nodes, sizeof(disk.nodes));
+    bytes(staged.metadata,disk.metadata,sizeof(disk.metadata));
     for (i = 0; i < UXFS_NODES; ++i) {
         UxNode *p = &staged.nodes[i];
         if (!p->kind) continue;
@@ -517,10 +583,13 @@ int uxfs_restore(UxFs *fs, const UxStore *s, UxOid manifest)
         } else if (p->kind == UXFS_FILE) {
             if(p->length>UXFS_DATA_MAX-staged.used)return PVD_EIO;
             staged.offsets[i]=staged.used;
-            if (s->get(s->context, p->oid, staged.data+staged.used,
-                       p->length, &n) || n != p->length)
-                return PVD_EIO;
-            staged.used+=n;
+            static unsigned char framed[UXFS_DATA_MAX+UXMETA_ARENA+32];
+            if(s->get(s->context,p->oid,framed,sizeof framed,&n) ||
+               uxobject_split(framed,n,&rawsize,&metasize) || rawsize!=p->length)return PVD_EIO;
+            if(uxobject_decode(framed+rawsize,metasize,&staged.metadata[i]) ||
+               metastore(&staged,i,framed+rawsize,metasize))return PVD_EIO;
+            bytes(staged.data+staged.used,framed,rawsize);
+            staged.used+=rawsize;
         }
     }
     Pvd *original_view=fs->view;
@@ -530,4 +599,26 @@ int uxfs_restore(UxFs *fs, const UxStore *s, UxOid manifest)
     *fs->view = staged_view;
     fs->dirty = 0;
     return PVD_OK;
+}
+
+int uxfs_metadata(UxFs*fs,const char*path,UxMeta*out)
+{
+    char resolved[PVD_PATH_MAX];int rc=uxfs_path(fs,path,resolved);if(rc)return rc;
+    int id=find(fs,resolved);if(id<0)return PVD_ENOENT;
+    if(!out)return PVD_EINVAL;
+    *out=fs->metadata[id];return 0;
+}
+int uxfs_framed_metadata(UxFs*fs,const char*path,void*out,unsigned cap,unsigned*size)
+{
+    char resolved[PVD_PATH_MAX];int rc=uxfs_path(fs,path,resolved);if(rc)return rc;
+    int id=find(fs,resolved);if(id<0)return PVD_ENOENT;
+    return uxobject_metadata(&fs->metadata[id],fs->meta_data+fs->meta_offsets[id],fs->meta_sizes[id],out,cap,size)?PVD_ENOSPC:0;
+}
+
+int uxfs_inode(UxFs*fs,const char*path,unsigned long long*out)
+{
+    char resolved[PVD_PATH_MAX];int rc=uxfs_path(fs,path,resolved);if(rc)return rc;
+    int id=find(fs,resolved);if(id<0)return PVD_ENOENT;
+    if(!out)return PVD_EINVAL;
+    *out=(unsigned long long)id+1;return 0;
 }

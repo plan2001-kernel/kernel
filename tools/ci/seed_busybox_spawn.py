@@ -37,6 +37,9 @@ def main():
     args = parser.parse_args()
 
     kernel = args.kernel.resolve()
+    import sys
+    sys.path.insert(0,str(kernel / "tools/host"))
+    from object_format import frame_file
     reports = args.reports.resolve()
     image = args.image.absolute()
     if image.exists() or image.is_symlink():
@@ -76,16 +79,16 @@ def main():
             if command[0] == str(formatter):
                 # This is a formatter-neutral *raw* executable extension of
                 # the normal seeder, never a second boot executable.
-                (seed / "rawexec").write_bytes(args.elf.read_bytes())
+                (seed / "rawexec").write_bytes(frame_file(args.elf,"application/x-elf"))
                 (seed / "rawexecoid").write_text(f"{BUSYBOX_OID:016x}",
                                                   encoding="ascii")
                 if args.extra_elf:
-                    (seed / "exe").write_bytes(args.extra_elf.read_bytes())
+                    (seed / "exe").write_bytes(frame_file(args.extra_elf,"application/x-elf"))
                     (seed / "exeoid").write_text(f"{UNIX_CHILD_OID:016x}",
                                                  encoding="ascii")
             if command[0] == str(formatter) and args.unix_manifest:
                 from seed_unix_manifest import provision
-                provision(seed)
+                provision(seed,kernel)
             stream.write("$ " + " ".join(command) + "\n")
             stream.flush()
             run = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
@@ -97,12 +100,12 @@ def main():
         ["python3", str(inspect), str(image)], text=True)
     (reports / "busybox-spawn-oinspect.json").write_text(result, encoding="utf-8")
     info = json.loads(result)
-    verified = [(MPY_OID, mp.read_bytes()), (BUSYBOX_OID, args.elf.read_bytes())]
+    verified = [(MPY_OID, frame_file(mp,"application/x-elf")), (BUSYBOX_OID, frame_file(args.elf,"application/x-elf"))]
     if args.extra_elf:
-        verified.append((UNIX_CHILD_OID, args.extra_elf.read_bytes()))
+        verified.append((UNIX_CHILD_OID, frame_file(args.extra_elf,"application/x-elf")))
     if args.unix_manifest:
         from seed_unix_manifest import MANIFEST_OID, initial_manifest
-        verified.append((MANIFEST_OID, initial_manifest()))
+        verified.append((MANIFEST_OID, initial_manifest(kernel)))
     for oid, data in verified:
         found = info["objects"].get(f"{oid:016x}")
         if not found or found["sha256"] != sha(data) or found["bytes"] != len(data):
@@ -111,13 +114,13 @@ def main():
         raise SystemExit("unexpected GE/O image size")
     manifest = {
         "boot_executable_oid": f"{MPY_OID:016x}",
-        "boot_executable_sha256": sha(mp.read_bytes()),
+        "boot_executable_sha256": sha(frame_file(mp,"application/x-elf")),
         "child_executable_oid": f"{BUSYBOX_OID:016x}",
-        "child_executable_sha256": sha(args.elf.read_bytes()),
+        "child_executable_sha256": sha(frame_file(args.elf,"application/x-elf")),
         "initial_python_code": str(args.init),
         "additional_f5_child_oid": (f"{UNIX_CHILD_OID:016x}"
                                   if args.extra_elf else None),
-        "additional_f5_child_sha256": (sha(args.extra_elf.read_bytes())
+        "additional_f5_child_sha256": (sha(frame_file(args.extra_elf,"application/x-elf"))
                                       if args.extra_elf else None),
         "image_size": image.stat().st_size,
         "result": "PASS: fresh GE/O volume contains both native ELFs",
