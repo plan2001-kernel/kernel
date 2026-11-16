@@ -37,6 +37,7 @@ def run():
         shared.n+=1
         return shared.n
     root=p.project_open(v,0,rights,empty())
+    print("PROJECT-ROOT-OID",p.project_identity(root)[1])
     print("PROJECT STEP child")
     p.project_call(root,2,'src',0,0,empty(),19,rights)
     print("PROJECT STEP resolve")
@@ -62,6 +63,12 @@ def run():
     ns.activate()
     import hello
     assert hello.value==42
+    obj=ns.create('compiled.mpy',b'M\x06\x00\x1f\x03\x00\x16compiled.py\x00\x0f\x82EP\x00\x02\x01"\x80[\x16\x02Qc');obj.close()
+    import compiled
+    assert compiled.value==91
+    module=ns.resolve('hello.py');module.write(b'value=43\n');module.close()
+    assert ns.import_module('hello').value==42
+    assert ns.reload('hello').value==43
     pkg=ns.mkdir('pkg')
     obj=pkg.create('__init__.py',b'from . import part\nvalue=part.value\n');obj.close()
     obj=pkg.create('part.py',b'value=73\n');obj.close()
