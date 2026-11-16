@@ -22,6 +22,7 @@
 extern long objopen(unsigned long long, void *, long, unsigned long long, void *);
 extern long objinvoke(int, void *, long);
 extern long objclose(int);
+extern long errstr(char *,unsigned long);
 static int report;
 static unsigned char covered[sizeof(expected_names)/sizeof(expected_names[0])];
 static void emit(const char *s)
@@ -35,6 +36,8 @@ static void check(int ok, const char *what)
 {
     if (!ok) {
         emit("PLAN2001-MULTICALL-FAIL: "); emit(what); emit("\n");
+        char diagnostic[160];snprintf(diagnostic,sizeof diagnostic,"errno=%d\n",errno);emit(diagnostic);
+        memset(diagnostic,0,sizeof diagnostic);errstr(diagnostic,sizeof diagnostic);emit(diagnostic);emit("\n");
         _exit(99);
     }
 }
@@ -156,6 +159,52 @@ static void content(const char *path,const char *data)
     check(n==(int)strlen(data) && !memcmp(buf,data,(unsigned)n),"file content");
     check(read(fd,buf,1)==0 && close(fd)==0,"file EOF and close");
 }
+/* Build a native composition, then exercise it through ordinary Unix paths. */
+static void view(const char *label,const char *mode,int writer)
+{
+    PjObject root,left,right,space;
+    check(p9_project_resolve("/tmp",&root)==0,"composition parent");
+    UxMeta m;uxmeta_init(&m,label,1,0);
+    unsigned char *blob;size_t n;check(pj_empty(&m,&blob,&n)==0,"composition framing");
+    unsigned raw,old;check(uxobject_split(blob,(unsigned)n,&raw,&old)==0,"composition split");
+    unsigned char metadata[128],*out=malloc(raw+UXMETA_ARENA+32);unsigned pos=0,meta;
+    check(out!=NULL,"composition allocation");
+    metadata[pos++]=0xa2;metadata[pos++]=0x6c;memcpy(metadata+pos,"project_view",12);pos+=12;
+    metadata[pos++]=(unsigned char)(0x60+strlen(mode));memcpy(metadata+pos,mode,strlen(mode));pos+=(unsigned)strlen(mode);
+    metadata[pos++]=0x6c;memcpy(metadata+pos,"write_source",12);pos+=12;metadata[pos++]=writer<0?0xf6:0;
+    memcpy(out,blob,raw);free(blob);
+    check(uxobject_metadata(&m,metadata,pos,out+raw,UXMETA_ARENA,&meta)==0,"composition metadata");
+    check(uxobject_footer(out+raw+meta,raw,meta)==0,"composition footer");
+    ObjProjectReq req={0};req.operation=ProjectCreate;req.kind=VkindObjectSpace;req.rights=root.rights;
+    strcpy(req.name,label);req.data=out;req.length=raw+meta+32;
+    check(pj_call(root.handle,&req,NULL,0)>=0,"publish composition object");free(out);
+    check(pj_resolve(&root,label,&space)==0,"resolve composition object");
+    check(p9_project_resolve("/tmp/view-left",&left)==0 && p9_project_resolve("/tmp/view-right",&right)==0,"composition sources");
+    /* Native bindings carry the enforced source ceilings. */
+    for(int i=0;i<2;i++){
+        PjObject *source=i?&right:&left;ObjProjectReq r={0};r.operation=ProjectLink;
+        r.other=source->handle;r.rights=source->rights;if(i!=writer)r.rights&=Vread|Vmeta|Vdelegate|Vexecute;
+        strcpy(r.name,i?"1":"0");check(pj_call(space.handle,&r,NULL,0)>=0,"bind live composition source");
+    }
+    pj_close(&left);pj_close(&right);pj_close(&space);pj_close(&root);
+}
+static void compositions(void)
+{
+    check(mkdir("/tmp/view-left",0700)==0 && mkdir("/tmp/view-right",0700)==0,"create composition sources");
+    fixture("/tmp/view-left/shared","same");check(link("/tmp/view-left/shared","/tmp/view-right/shared")==0,"shared hard link");
+    fixture("/tmp/view-left/conflict","left");fixture("/tmp/view-right/conflict","right");
+    view("union","union",-1);view("intersection","intersection",-1);view("writable","union",0);
+    content("/tmp/union/shared","same");content("/tmp/intersection/shared","same");
+    struct stat st;check(stat("/tmp/union/conflict",&st)<0,"reject ambiguous union");
+    DIR *d=opendir("/tmp/intersection");check(d!=NULL,"enumerate intersection despite conflicting labels");
+    struct dirent *e;unsigned count=0;while((e=readdir(d)))if(strcmp(e->d_name,".") && strcmp(e->d_name,"..")){check(!strcmp(e->d_name,"shared"),"intersection contains identical pairs only");count++;}
+    check(closedir(d)==0 && count==1,"intersection deduplicates common pair");
+    check(open("/tmp/union/denied",O_WRONLY|O_CREAT,0600)<0 && errno==EROFS,"composition defaults read only");
+    fixture("/tmp/writable/created","chosen");content("/tmp/view-left/created","chosen");
+    check(stat("/tmp/view-right/created",&st)<0 && errno==ENOENT,"no copy up or alternate write source");
+    check(stat("/tmp/view-left/shared",&st)==0 && st.st_nlink==2,"real hard link count");
+    emit("PASS: Unix live union/intersection, ambiguity and explicit write source\n");
+}
 int main(void)
 {
     ObjOpenConsoleReq req = {1, 0};
@@ -199,6 +248,17 @@ int main(void)
         check(stat("/bin/not-configured",&st)<0 && errno==ENOENT,"unknown alias absent");
         emit("PASS: authorized immutable aliases, stat/lstat/access and directory enumeration\n");
     }
+    compositions();
+    check(mkdir("/tmp/cwd-source",0700)==0 && chdir("/tmp/cwd-source")==0,"open cwd view");
+    fixture("here","cwd");
+    check(rename("/tmp/cwd-source","/tmp/cwd-renamed")==0,"rename live cwd");
+    content("here","cwd");
+    DIR *cwd_dir=opendir(".");check(cwd_dir!=NULL && closedir(cwd_dir)==0,"enumerate renamed cwd");
+    RUN(0,"cwd","/bin/cat","here");
+    check(chdir("..")==0,"cwd parent follows retained caller route");
+    struct stat cwd_stat;check(stat("cwd-renamed/here",&cwd_stat)==0,"cwd returns to retained parent");
+    check(chdir("/../../")==0,"parent traversal stays within delegated root");
+    emit("PASS: cwd capabilities survive rename and exec; caller-relative parent traversal\n");
     /* Native diagnostic console cannot delegate. Commands inherit pipe fds. */
     (void)close(0); (void)close(1); (void)close(2);
     /* Leave fourteen unrelated pipe descriptors open across real exec.
@@ -231,7 +291,7 @@ int main(void)
             snprintf(path,sizeof path,"/tmp/file%u",i);check(unlink(path)==0,"remove many files");
             if(i!=99){snprintf(path,sizeof path,"/tmp/dir%u",i);check(rmdir(path)==0,"remove many directories");}
         }
-        check(unlink("/tmp/large-file")==0,"reclaim large file arena");
+        check(unlink("/tmp/large-file")==0,"unlink large persistent file");
         emit("PASS: 256 KiB file and 200 nodes across real fork/exec and pipelines\n");
     }
     {
@@ -342,13 +402,14 @@ int main(void)
     fixture("/tmp/destination","keep");
     int destination=open("/tmp/destination",O_RDONLY);
     check(destination>=0,"hold rename destination");
-    RUN(1,NULL,"/bin/mv","/tmp/renamed","/tmp/destination");
-    content("/tmp/destination","keep");
-    RUN(1,NULL,"/bin/rm","/tmp/renamed");
+    RUN(0,"","/bin/mv","/tmp/renamed","/tmp/destination");
+    content("/tmp/destination","moved");
+    check(read(destination,held_data,4)==4 && !memcmp(held_data,"keep",4),"replacement preserves open destination inode");
+    check(unlink("/tmp/destination")==0,"unlink open renamed file");
+    check(lseek(held,0,SEEK_SET)==0 && read(held,held_data,5)==5 && !memcmp(held_data,"moved",5),"unlink preserves open inode");
     check(close(held)==0 && close(destination)==0,"close held descriptions");
     errno=0;
-    check(rmdir("/dev")==-1 && errno==EBUSY,"bootstrap directory anchor protected");
-    RUN(0,"","/bin/rm","/tmp/renamed");
+    check(rmdir("/")==-1 && errno==EBUSY,"view root cannot be removed");
     FILE *first=popen("echo first","re"),*second;
     check(first!=NULL && fcntl(fileno(first),F_GETFD)==FD_CLOEXEC,"popen cloexec");
     check(fgets(held_data,sizeof held_data,first)!=NULL && !strcmp(held_data,"first\n"),"popen first command");

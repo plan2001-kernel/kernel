@@ -8,16 +8,16 @@
   },
   "mv": {
     "missing_interfaces": [
-      "directory rename",
-      "detached overwritten-open-file lifetime"
+      "cross-volume rename",
+      "Unix permission/ownership preservation"
     ],
-    "reason": "Same-service regular-file rename preserves source open descriptions. Replacing an open destination returns EBUSY; directory moves are unsupported."
+    "reason": "Same-volume native rename publishes both namespaces atomically and preserves open source and replaced destination objects."
   },
   "rm": {
     "missing_interfaces": [
-      "detached unlinked-open-file lifetime"
+      "automatic orphan reclamation"
     ],
-    "reason": "Regular and recursive removal are supported. Removing an open file returns EBUSY; root/cwd and nonempty-directory rules remain enforced."
+    "reason": "Unlink removes a name and updates durable link counts. Open capabilities remain usable; the delegated view root is protected."
   },
   "sed": {
     "missing_interfaces": [

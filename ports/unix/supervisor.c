@@ -299,7 +299,7 @@ cleanup:
         extern void rerrstr(char*,unsigned int);char error[128];unsigned n=0;rerrstr(error,sizeof error);
         while(stage[n])n++;
         p2001_session_write(2,"Unix supervisor failed at ",26);p2001_session_write(2,stage,n);
-        p2001_session_write(2,": ",2);n=0;while(error[n] && n<sizeof error)n++;p2001_session_write(2,error,n);p2001_session_write(2,"\n",1);
+        p2001_session_write(2,": ",2);n=0;while(n<sizeof error && error[n])n++;p2001_session_write(2,error,n);p2001_session_write(2,"\n",1);
     }
     if(project>0)obj_close(project);
     if (child>0) {

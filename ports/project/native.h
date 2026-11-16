@@ -19,6 +19,7 @@ int pj_link(PjObject *,const char *,PjObject *);
 int pj_remove(PjObject *,const char *,int);
 int pj_rename(PjObject *,const char *,PjObject *,const char *,int);
 int pj_metadata(PjObject *,UxMeta *);
+int pj_metadata_size(PjObject *,UxMeta *,size_t *);
 long pj_read(PjObject *,void *,size_t,uint64_t);
 long pj_write(PjObject *,const void *,size_t,uint64_t,int);
 

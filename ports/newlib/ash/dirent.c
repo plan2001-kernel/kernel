@@ -1,5 +1,5 @@
-/* Bounded POSIX dirent adapter over the same authoritative UxService as
- * the shell. A directory snapshot is a userspace view, never GE/O authority.
+/* POSIX enumeration of the shared persistent ObjectSpace.
+ * A directory snapshot is a userspace view, never GE/O authority.
  * No PATH-based kernel VFS, no host libc and no magic raw OID.
  */
 #include <dirent.h>
@@ -79,10 +79,17 @@ DIR *opendir(const char *path)
     d->entries=calloc(d->capacity,sizeof(*d->entries));
     if(!d->entries) { free(d); errno=ENOMEM; return NULL; }
     if(strlen(path)>=sizeof d->base){free(d->entries);free(d);errno=ENAMETOOLONG;return NULL;}
-    if(path[0]=='/'){strcpy(d->base,path);rc=0;}else{rc=getcwd(d->base,sizeof d->base)?0:-1;if(!rc && strcmp(path,".")){size_t n=strlen(d->base);if(n+strlen(path)+2>=sizeof d->base)rc=-1;else{if(n>1)strcat(d->base,"/");strcat(d->base,path);}}}
+    strcpy(d->base,path);rc=0;
     if(!rc && add_entry(d,".",1,UXFS_DIR)==0 &&
        add_entry(d,"..",2,UXFS_DIR)==0)
-        rc=p9_project_list(path,emit_project,d);
+        {
+        d->entries[0].d_ino=info.st_ino;
+        char parent[4096];size_t n=strlen(d->base);
+        if(n+4>=sizeof parent)rc=-1;
+        else {memcpy(parent,d->base,n);memcpy(parent+n,"/..",4);
+            struct stat up;if(stat(parent,&up))rc=-1;
+            else {d->entries[1].d_ino=up.st_ino;rc=p9_project_list(path,emit_project,d);}}
+    }
     if(!rc && p9_multicall_path) {
         unsigned i;
         const char *entry;
@@ -90,7 +97,8 @@ DIR *opendir(const char *path)
             const char *name=strrchr(entry,'/');
             size_t parent=(size_t)(name-entry);
             uint64_t oid;
-            if(strlen(d->base)!=parent || strncmp(entry,d->base,parent) ||
+            char projected[4096];if(p9_project_normalize(d->base,projected)) {rc=-1;break;}
+            if(strlen(projected)!=parent || strncmp(entry,projected,parent) ||
                !p9_process_executable(entry,&oid)) continue;
             if(add_entry(d,name+1,(unsigned)strlen(name+1),UXFS_FILE)) { rc=PVD_ENOSPC; break; }
             d->entries[d->used-1].d_ino=(ino_t)oid;

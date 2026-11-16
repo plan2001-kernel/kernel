@@ -434,7 +434,7 @@ int p9_fd_export(P9FdImage *image,P9Plan *plan,int exec)
     image->files=-1;
     if(p9_project_root()) {
         image->files=p9_file_export(plan);
-        if(image->files<0 || !getcwd(image->cwd,sizeof image->cwd)) return -1;
+        if(image->files<0 || !getcwd(image->cwd,sizeof image->cwd) || p9_file_export_cwd(image,plan)<0) return -1;
     }
     for(i=0;i<FD_COUNT;++i) { indices[i]=-1; image->fds[i].object=-1; }
     for(fd=0;fd<FD_COUNT;++fd) {
@@ -491,7 +491,7 @@ int p9_fd_import(const P9FdImage *image,const int *handles,unsigned count)
     if(image->count>FD_COUNT) { errno=EINVAL; return -1; }
     if(image->files>=0) {
         if((unsigned)image->files>=count || !memchr(image->cwd,0,sizeof image->cwd) ||
-           p9_file_import(handles[image->files])<0 || chdir(image->cwd)<0) return -1;
+           p9_file_import(handles[image->files])<0 || p9_file_import_cwd(image,handles,count)<0) return -1;
     }
     memset(descriptors,0,sizeof descriptors);
     memset(descriptions,0,sizeof descriptions);

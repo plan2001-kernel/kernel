@@ -132,6 +132,8 @@ int uxobject_decode(const unsigned char*data,unsigned size,UxMeta*m)
 {
     Reader v,u;long long n;int rc;
     Reader all={data,data+size};if(skip(&all,0)||all.p!=all.end)return 0; /* opaque metadata */
+    Reader top={data,data+size};unsigned kind;unsigned long long count;
+    if(header(&top,&kind,&count)||kind!=5)return 0;
     rc=field(data,size,"name_bytes",&v);if(rc<0)return -1;
     if(rc){if(getstr(v,m->name,sizeof m->name))return -1;}
     else {rc=field(data,size,"name",&v);if(rc<0)return -1;
@@ -159,11 +161,15 @@ int uxobject_split(const void*buf,unsigned size,unsigned*raw,unsigned*meta)
 int uxobject_footer(unsigned char*out,unsigned raw,unsigned meta){return objtail_pack(out,raw,meta);}
 int uxobject_text_field(const unsigned char *data,unsigned n,const char *key,char *out,unsigned cap)
 {
+    Reader top={data,data+n};unsigned kind;unsigned long long count;
+    if(header(&top,&kind,&count)||kind!=5)return 0;
     Reader r;int rc=field(data,n,key,&r);if(rc<=0)return rc;
     return getstr(r,out,cap)?-1:1;
 }
 int uxobject_int_field(const unsigned char *data,unsigned n,const char *key,long long *out)
 {
+    Reader top={data,data+n};unsigned kind;unsigned long long count;
+    if(header(&top,&kind,&count)||kind!=5)return 0;
     Reader r;int rc=field(data,n,key,&r);if(rc<=0)return rc;
     if(r.end-r.p==1 && *r.p==0xf6)return 0;
     return getnum(r,out)?-1:1;

@@ -3,6 +3,8 @@
 #include "process.h"
 #include "../../project/native.h"
 int p9_project_boot(void);
+int p9_file_export_cwd(P9FdImage *,P9Plan *);
+int p9_file_import_cwd(const P9FdImage *,const int *,unsigned);
 int p9_project_normalize(const char *,char [4096]);
 int p9_project_root(void);
 int p9_project_resolve(const char *,PjObject *);

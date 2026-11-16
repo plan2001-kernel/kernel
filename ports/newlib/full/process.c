@@ -243,7 +243,7 @@ static int initialize(void)
     if(!ctx) { (void)objclose(mailbox); mailbox=0; return -1; }
     memset(ctx,0,sizeof(*ctx));
     ctx->magic=P9_CONTEXT_MAGIC;
-    ctx->version=1;
+    ctx->version=P9_CONTEXT_ABI_VERSION;
     ctx->pid=unix_pid;
     ctx->ready=1;
     unbox(ctx);
@@ -464,7 +464,7 @@ static int fork_impl(void)
     if(childbox<=0) { errno=ENOMEM; return -1; }
     ctx=box(childbox,0);
     if(!ctx) { (void)objclose(childbox); return -1; }
-    memset(ctx,0,sizeof(*ctx)); ctx->magic=P9_CONTEXT_MAGIC; ctx->version=1;
+    memset(ctx,0,sizeof(*ctx)); ctx->magic=P9_CONTEXT_MAGIC; ctx->version=P9_CONTEXT_ABI_VERSION;
     unbox(ctx);
     selfindex=p9_plan_add(&plan,childbox,Vread|Vwrite|Vdelegate);
     parentindex=p9_plan_add(&plan,mailbox,Vread|Vwrite|Vdelegate);
@@ -598,7 +598,7 @@ static int exec_impl(const char *path,char *const argv[],char *const envp[])
     if(selected<0) { errno=ENOENT; return -1; }
     while(argv[argc]) if(++argc>64) { errno=E2BIG; return -1; }
     memset(&image,0,sizeof image);
-    image.magic=P9_CONTEXT_MAGIC; image.version=1; image.exec=1;
+    image.magic=P9_CONTEXT_MAGIC; image.version=P9_CONTEXT_ABI_VERSION; image.exec=1;
     image.pid=unix_pid; image.ppid=parent_pid; image.blocked=blocked;
     image.alarm_deadline=alarm_deadline;
     image.self=p9_plan_add(&plan,mailbox,Vread|Vwrite|Vdelegate);
@@ -697,7 +697,7 @@ int p9_process_startup(void)
     if(!first) return 0;
     mapped=box(first,1);
     if(!mapped) return -1;
-    if(mapped->magic!=P9_CONTEXT_MAGIC || mapped->version!=1 || !mapped->exec) {
+    if(mapped->magic!=P9_CONTEXT_MAGIC || mapped->version!=P9_CONTEXT_ABI_VERSION || !mapped->exec) {
         unbox(mapped); errno=EACCES; return -1;
     }
     image=*mapped; mapped->ready=1; unbox(mapped);

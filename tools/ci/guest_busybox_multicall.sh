@@ -29,7 +29,7 @@ python3 "$KERNEL/tools/host/oseed.py" \
 python3 "$KERNEL/tools/host/object_format.py" pack "$BUILD/busybox.elf" "$OUT/seed/rawexec" --media-type application/x-elf
 printf '4f45584543000005' > "$OUT/seed/rawexecoid"
 python3 "$(dirname "$0")/seed_project_root.py" "$KERNEL" "$OUT/seed"
-"$QOB_FORMAT" --seed "$OUT/seed" --size 129 "$OUT/o.img" > "$OUT/format.log" 2>&1
+"$QOB_FORMAT" --seed "$OUT/seed" --size 513 "$OUT/o.img" > "$OUT/format.log" 2>&1
 python3 "$KERNEL/tools/oinspect.py" "$OUT/o.img" > "$OUT/oinspect.json"
 python3 - "$BUILD" "$OUT/oinspect.json" "$KERNEL/tools/host" <<'PY'
 import hashlib, json, pathlib, sys

@@ -15,6 +15,8 @@
 #include "../../unix/uxfd.h"
 static PjObject root;
 static char cwd[4096]="/";
+static PjObject *cwd_frames;
+static unsigned cwd_count;
 typedef struct {PjObject object;int region,flags;} OpenFile;
 static OpenFile files[UXFD_SLOTS];
 extern long objopen(unsigned long long,void*,long,unsigned long long,void*);
@@ -46,27 +48,83 @@ int p9_project_normalize(const char *path,char out[4096])
         if(k>255){errno=ENAMETOOLONG;return -1;}if(n>1)out[n++]='/';memcpy(out+n,in+start,k);n+=k;out[n]=0;
     }return 0;
 }
+static int copy_object(PjObject *source,PjObject *out)
+{
+    ObjProjectReq r={0};r.operation=ProjectAttenuate;r.rights=source->rights;
+    int h=pj_call(source->handle,&r,NULL,0);if(h<0)return -1;
+    if(pj_from_handle(out,h)){objclose(h);return -1;}return 0;
+}
+static void close_frames(PjObject *frames,unsigned n){int saved=errno;for(unsigned i=0;i<n;i++)pj_close(&frames[i]);free(frames);errno=saved;}
+/* The caller's traversal route owns the parent references. A rename or an
+ * alias elsewhere in the graph cannot change what '..' means in this view. */
+static int walk(const char *path,PjObject **result,unsigned *count)
+{
+    if(!path || !*path){errno=ENOENT;return -1;}
+    size_t length=strlen(path);if(length>=4096){errno=ENAMETOOLONG;return -1;}
+    unsigned n=0,capacity=(unsigned)length+cwd_count+2;
+    PjObject *frames=calloc(capacity,sizeof *frames);if(!frames){errno=ENOMEM;return -1;}
+    if(path[0]!='/' && cwd_count){
+        for(unsigned i=0;i<cwd_count;i++){if(copy_object(&cwd_frames[i],&frames[n]))goto fail;n++;}
+    }else {if(copy_object(&root,&frames[n]))goto fail;n++;}
+    size_t at=0;
+    while(path[at]){
+        while(path[at]=='/')at++;
+        size_t start=at;while(path[at] && path[at]!='/')at++;
+        size_t len=at-start;if(!len)break;
+        if(frames[n-1].kind!=VkindObjectSpace){errno=ENOTDIR;goto fail;}
+        if(len==1 && path[start]=='.')continue;
+        if(len==2 && path[start]=='.' && path[start+1]=='.'){if(n>1)pj_close(&frames[--n]);continue;}
+        if(len>255){errno=ENAMETOOLONG;goto fail;}
+        char name[256];memcpy(name,path+start,len);name[len]=0;
+        if(pj_resolve(&frames[n-1],name,&frames[n]))goto fail;n++;
+    }
+    if(length && path[length-1]=='/' && frames[n-1].kind!=VkindObjectSpace){errno=ENOTDIR;goto fail;}
+    *result=frames;*count=n;return 0;
+fail:close_frames(frames,n);return -1;
+}
 int p9_project_resolve(const char *path,PjObject *o)
 {
-    char full[4096];if(p9_project_normalize(path,full))return -1;
-    ObjProjectReq r={0};r.operation=ProjectAttenuate;r.rights=root.rights;
-    int h=pj_call(root.handle,&r,NULL,0);if(h<0)return -1;
-    PjObject current;if(pj_from_handle(&current,h)){objclose(h);return -1;}
-    char *s=full+1;while(*s){char *end=strchr(s,'/');if(end)*end=0;
-        if(current.kind!=VkindObjectSpace){pj_close(&current);errno=ENOTDIR;return -1;}
-        PjObject next;if(pj_resolve(&current,s,&next)){pj_close(&current);return -1;}
-        pj_close(&current);current=next;if(!end)break;s=end+1;
-    }*o=current;return 0;
+    PjObject *frames;unsigned n;if(walk(path,&frames,&n))return -1;
+    *o=frames[n-1];frames[n-1].handle=0;close_frames(frames,n);return 0;
 }
 static int parent(const char *path,PjObject *o,char label[256])
 {
-    char full[4096];if(p9_project_normalize(path,full))return -1;
-    char *p=strrchr(full,'/');if(!p[1]){errno=EBUSY;return -1;}
-    strcpy(label,p+1);if(p==full)p[1]=0;else *p=0;return p9_project_resolve(full,o);
+    if(!path || !*path){errno=ENOENT;return -1;}
+    size_t n=strlen(path);if(n>=4096){errno=ENAMETOOLONG;return -1;}
+    char prefix[4096];memcpy(prefix,path,n+1);
+    while(n>1 && prefix[n-1]=='/')prefix[--n]=0;
+    char *p=strrchr(prefix,'/');const char *name=p?p+1:prefix;
+    if(!*name || !strcmp(name,".") || !strcmp(name,"..")){errno=EBUSY;return -1;}
+    if(strlen(name)>255){errno=ENAMETOOLONG;return -1;}strcpy(label,name);
+    if(!p)return p9_project_resolve(".",o);
+    if(p==prefix)p[1]=0;else *p=0;
+    return p9_project_resolve(prefix,o);
+}
+int p9_file_export_cwd(P9FdImage *image,P9Plan *plan)
+{
+    image->cwd_count=cwd_count;
+    for(unsigned i=0;i<cwd_count;i++){
+        if(i>=P9_FDS){errno=EMFILE;return -1;}
+        int index=p9_plan_add(plan,cwd_frames[i].handle,cwd_frames[i].rights);if(index<0)return -1;
+        image->cwd_handles[i]=index;
+    }return 0;
+}
+int p9_file_import_cwd(const P9FdImage *image,const int *handles,unsigned count)
+{
+    if(image->cwd_count>P9_FDS){errno=EINVAL;return -1;}
+    PjObject *frames=calloc(image->cwd_count?image->cwd_count:1,sizeof *frames);if(!frames){errno=ENOMEM;return -1;}
+    unsigned n=0;
+    for(;n<image->cwd_count;n++){
+        int index=image->cwd_handles[n];if(index<0 || (unsigned)index>=count){errno=EINVAL;goto fail;}
+        if(pj_from_handle(&frames[n],handles[index]))goto fail;
+        if(frames[n].kind!=VkindObjectSpace){errno=ENOTDIR;goto fail;}
+    }
+    close_frames(cwd_frames,cwd_count);cwd_frames=frames;cwd_count=n;strcpy(cwd,image->cwd);return 0;
+fail:close_frames(frames,n);return -1;
 }
 int p9_file_export(P9Plan *plan){if(!root.handle){errno=EACCES;return -1;}return p9_plan_add(plan,root.handle,root.rights);}
 void p9_file_refresh(void){}
-void p9_file_detach(void){pj_close(&root);}
+void p9_file_detach(void){close_frames(cwd_frames,cwd_count);cwd_frames=NULL;cwd_count=0;pj_close(&root);}
 int p9_file_ref(int fd,int delta){(void)delta;return fd>=3 && fd<3+UXFD_SLOTS && files[fd-3].object.handle?0:-1;}
 int p9_file_export_fd(int fd,P9Plan *plan,int *a,int *b)
 {
@@ -86,7 +144,7 @@ static uint64_t *offset_lock(OpenFile *f)
         p9_native_sleep_millis(1);
     }
 }
-static void offset_unlock(uint64_t *p){p9_full_region_unmap((uintptr_t)p);}
+static void offset_unlock(uint64_t *p){int saved=errno;p9_full_region_unmap((uintptr_t)p);errno=saved;}
 int p9_backend_open(const char *path,int flags,...)
 {
     if(p9_process_executable(path,NULL)){errno=EACCES;return -1;}
@@ -98,6 +156,8 @@ int p9_backend_open(const char *path,int flags,...)
         int rc=pj_create(&par,label,VkindGe,NULL,0,&o);pj_close(&par);if(rc)return -1;
     }
     if(o.kind==VkindObjectSpace){pj_close(&o);errno=EISDIR;return -1;}
+    if(((flags&O_ACCMODE)!=O_RDONLY && !(o.rights&Vwrite)) ||
+       ((flags&O_ACCMODE)!=O_WRONLY && !(o.rights&Vread))){pj_close(&o);errno=EACCES;return -1;}
     if((flags&O_TRUNC) && pj_write(&o,NULL,0,0,1)<0){pj_close(&o);return -1;}
     int region=(int)p9_full_region_create(4096);if(region<=0){pj_close(&o);return -1;}
     OpenFile *f=&files[fd];f->object=o;f->region=region;f->flags=flags;
@@ -130,17 +190,16 @@ off_t p9_backend_lseek(int fd,off_t delta,int whence)
     if(fd<3 || fd>=3+UXFD_SLOTS || !files[fd-3].object.handle){errno=EBADF;return -1;}OpenFile *f=&files[fd-3];
     uint64_t *off=offset_lock(f);if(!off)return -1;int64_t base=0;
     if(whence==SEEK_CUR)base=(int64_t)*off;
-    else if(whence==SEEK_END){unsigned char*p;size_t n,raw,meta;if(pj_blob(&f->object,&p,&n,&raw,&meta)){offset_unlock(off);return -1;}free(p);base=(int64_t)raw;}
+    else if(whence==SEEK_END){size_t raw;UxMeta m;if(pj_metadata_size(&f->object,&m,&raw)){offset_unlock(off);return -1;}base=(int64_t)raw;}
     else if(whence!=SEEK_SET){offset_unlock(off);errno=EINVAL;return -1;}
     if(delta< -base || delta>INT64_MAX-base){offset_unlock(off);errno=EINVAL;return -1;}*off=(uint64_t)(base+delta);off_t result=(off_t)*off;offset_unlock(off);return result;
 }
 static int object_stat(PjObject *o,struct stat *st)
 {
-    unsigned char*p;size_t n,raw,meta;if(pj_blob(o,&p,&n,&raw,&meta))return -1;
-    UxMeta m={0};int rc=uxobject_decode(p+raw,(unsigned)meta,&m);free(p);if(rc){errno=EIO;return -1;}
+    size_t raw;UxMeta m={0};if(pj_metadata_size(o,&m,&raw))return -1;
     memset(st,0,sizeof *st);st->st_ino=(ino_t)o->id.oid;
     uint64_t dev=UINT64_C(14695981039346656037);for(unsigned i=0;i<16;i++){dev^=o->id.volume[i];dev*=UINT64_C(1099511628211);}st->st_dev=(dev_t)dev;
-    st->st_mode=m.mode;st->st_uid=m.uid;st->st_gid=m.gid;st->st_rdev=m.rdev;st->st_size=(off_t)raw;
+    st->st_mode=(m.mode&07777)|(o->kind==VkindObjectSpace?S_IFDIR:S_IFREG);st->st_uid=m.uid;st->st_gid=m.gid;st->st_rdev=m.rdev;st->st_size=(off_t)raw;
     ObjProjectReq links={0};links.operation=ProjectLinks;links.other=o->handle;
     int count=pj_call(root.handle,&links,NULL,0);if(count<0)return -1;
     st->st_nlink=(nlink_t)count;st->st_blksize=4096;st->st_blocks=(blkcnt_t)((raw+511)/512);
@@ -156,7 +215,13 @@ int _stat(const char *path,struct stat *st)
     PjObject o;if(p9_project_resolve(path,&o))return -1;int rc=object_stat(&o,st);pj_close(&o);return rc;
 }
 int _lstat(const char *p,struct stat *s){return _stat(p,s);}
-int _chdir(const char *path){PjObject o;if(p9_project_resolve(path,&o))return -1;int dir=o.kind==VkindObjectSpace;pj_close(&o);if(!dir){errno=ENOTDIR;return -1;}return p9_project_normalize(path,cwd);}
+int _chdir(const char *path)
+{
+    PjObject *frames;unsigned n;if(walk(path,&frames,&n))return -1;
+    if(frames[n-1].kind!=VkindObjectSpace){close_frames(frames,n);errno=ENOTDIR;return -1;}
+    char display[4096];if(p9_project_normalize(path,display)){close_frames(frames,n);return -1;}
+    close_frames(cwd_frames,cwd_count);cwd_frames=frames;cwd_count=n;strcpy(cwd,display);return 0;
+}
 char *getcwd(char *buf,size_t n){size_t len=strlen(cwd)+1;if(!buf){buf=malloc(n?n:len);if(!buf){errno=ENOMEM;return NULL;}n=n?n:len;}if(n<len){errno=ERANGE;return NULL;}memcpy(buf,cwd,len);return buf;}
 int _mkdir(const char *path,mode_t mode){(void)mode;PjObject par;char label[256];if(parent(path,&par,label))return -1;int rc=pj_create(&par,label,VkindObjectSpace,NULL,0,NULL);pj_close(&par);return rc;}
 int _unlink(const char *path){PjObject par;char label[256];if(parent(path,&par,label))return -1;int rc=pj_remove(&par,label,0);pj_close(&par);return rc;}

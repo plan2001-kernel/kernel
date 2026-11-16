@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
+                "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -88,7 +88,7 @@ def focus(number):
 def type_text(line):
     # The fixture pins keymap=us (and older manifest consoles decode US
     # scancodes). HMP sendkey uses PHYSICAL keys, not typed characters.
-    specials = {" ": "spc", "/": "slash", ".": "dot", "-": "minus",
+    specials = {"_": "shift-minus", ",": "comma", "[": "bracket_left", "]": "bracket_right", " ": "spc", "/": "slash", ".": "dot", "-": "minus",
                 ">": "shift-dot", "<": "shift-comma", "|": "shift-backslash",
                 "$": "shift-4", "(": "shift-9", ")": "shift-0",
                 ":": "shift-semicolon", ";": "semicolon", "+": "shift-equal",
@@ -155,7 +155,29 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode == "multicall-pipeline":
+    if mode in ("project-initial", "project-reboot"):
+        waitscreen("project-ready", "PLAN2001-MULTICALL-READY")
+        waitscreen("project-prompt", "ash$", 45)
+        if mode=="project-initial":
+            enter("echo moi > moi")
+        else:
+            enter("cat moi; echo COLD-END")
+            result=waitscreen("cold-file", "COLD-END", occurrences=2)
+            assert "\nmpy\nCOLD-END\n" in result,result
+        focus(2)
+        enter("import namespace; import posix")
+        enter("x=namespace.open_boot_namespace(0x4f45584543000007,14793)")
+        expected="moi" if mode=="project-initial" else "mpy"
+        enter("assert posix.open_filesystem(x).open('/moi').raw()==b'"+expected+"\\n'; print('SHARED-PASS')")
+        waitscreen("mpy-shared", "SHARED-PASS", occurrences=2)
+        if mode=="project-initial":
+            enter("posix.open_filesystem(x).open('/moi').write(b'mpy\\n')")
+        focus(5)
+        enter("cat moi; echo LIVE-END")
+        result=waitscreen("ash-shared", "LIVE-END", occurrences=2)
+        assert "\nmpy\nLIVE-END\n" in result,result
+        print("PASS: shared persistent ObjectSpace, Unix/MPY live visibility, "+mode)
+    elif mode == "multicall-pipeline":
         waitscreen("pipeline-ready", "PLAN2001-MULTICALL-READY")
         waitscreen("pipeline-prompt", "ash$", 45)
         enter("echo pipe-line > koe.txt")

@@ -1,6 +1,7 @@
 # Userland architecture
 
-**Status: proposed design, not a working POSIX implementation.**
+**Status: an experimental native Unix projection; the BusyBox profile uses
+persistent ObjectSpace files and capability-based processes and streams.**
 
 The Plan2001 kernel's [ObjectSpace architecture](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECTSPACE.md) is authoritative. Userland must not turn the kernel into Unix.
 
@@ -28,7 +29,9 @@ A slash is parsed only in userland. Native ObjectSpace labels are local opaque n
 
 The PVD (present view descriptor) belongs to userspace and stores delegated root capabilities, current view, selected traversal stack and display path. `..` follows that view stack instead of assuming a native single parent. Paths may not escape the delegated view. Cycles require bounded traversal. Duplicate names are ambiguous: initial POSIX lookup must reject ambiguous selection, never arbitrarily choose one binding. Native callers can resolve by BindingID.
 
-The current v1 ObjectSpace API limits a space to 64 bindings and labels to 47 bytes plus NUL. Persistent graph records have their own size limits. Do not assume an unbounded directory hierarchy exists.
+Persistent ObjectSpaces grow dynamically and accept 255-byte labels. Each
+directory has its own framed GE/O object. Allocation and the native GE/O
+transaction budget bound growth; there is no fixed 64-binding directory limit.
 
 ## Identity, security, metadata
 
@@ -50,7 +53,8 @@ extended attributes. Multiple distinct OIDs may share the same object
 name; ObjectSpace labels and Unix pathnames remain unrelated and may be
 changed independently of that name. Only the raw-first / metadata-last / fixed-footer
 byte layout is normative; the CBOR metadata schema is a de facto
-recommendation. UXFS v1 does not yet persist or expose that full profile.
+recommendation. The persistent project adapter reads and preserves this metadata on the
+shared object; changing a binding does not change its descriptive name.
 Names and metadata never mint kernel capabilities.
 
 ## Processes, streams and console
@@ -63,7 +67,14 @@ Console input/output must respect the native session/device authority model.
 
 ## Persistence boundary
 
-Persistent ObjectSpace graph snapshots exist experimentally in the kernel. Root selection, complete lifetime/GC policy and hardware validation remain separate work. The early Unix view can use an explicitly supplied root capability. No compatibility-layer test may silently reformat GE/O storage.
+The BusyBox project adapter operates directly on delegated persistent
+ObjectSpace records. File descriptors hold object capabilities and share only
+open offsets across fork/exec. Namespace changes and their metadata publish
+atomically. Unlink and rename preserve open objects. There is no per-process
+file-content or directory-tree mirror. Union/intersection views use live source
+references; writes require an explicit source. Automatic orphan collection and
+cross-volume durable bindings remain outside the current implementation. No
+compatibility-layer test may silently reformat GE/O storage.
 
 Native ABI and implementation details must always be checked in the current [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md) and source before coding.
 
