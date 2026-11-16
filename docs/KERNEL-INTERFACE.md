@@ -1,9 +1,10 @@
 # Kernel interface: target and current status
 
 The [architecture](ARCHITECTURE.md) is the single authority for target design.
-The mechanisms below are proposals, not a frozen ABI. `runtime/abi/sys.h`
-and kernel source define what works now. There is no fixed syscall count or
-historical ABI compatibility obligation.
+Target mechanisms are not a frozen compatibility promise. Current operations,
+versions and limits are defined by `runtime/abi/{sys,obj,objectspace,project}.h`
+and the kernel providers; this document distinguishes them from future goals.
+There is no fixed syscall count or historical ABI compatibility obligation.
 
 ## ObjectSpace graph and capability target
 
@@ -17,8 +18,10 @@ label, kernel pointer or storage SpaceID can grant authority on its own.
 `OBJINVOKE` operations `ObjOpSpaceBind`, `ObjOpSpaceUnbind`,
 `ObjOpSpaceResolve`, `ObjOpSpaceEnumerate` manipulate unique labeled
 BindingIDs. Duplicate names and nested spaces are supported, without
-path parsing. Object ABI version 2 is intentionally incompatible with
-the earlier value. The ABI records are in `runtime/abi/objectspace.h`.
+path parsing. The current object ABI is **version 3** (`OBJ_ABI_VERSION`);
+ABI 2 is obsolete. The volatile graph records are in
+`runtime/abi/objectspace.h`, and durable project requests are in
+`runtime/abi/project.h`.
 
 The capability-lineage layer derives attenuated Handles with at most 128
 ancestor grants. `ObjOpCapRevoke` requires Vdelegate on the exact source
@@ -32,18 +35,27 @@ authorized by explicit grants. The GE/O Ohand enforces object/Space scope
 and independent revocation state; owner records are integrity-checked,
 not used to authorize requests.
 
-The v1 limit is 64 bindings per space, 47 label bytes plus NUL, and eight
-records per enumeration page. An epoch rejects mixed snapshots. Space-to-space
-references are weak in this first implementation to avoid retaining cycles;
-independently owned target Handles keep them live. Unbind does not revoke an
-already resolved Handle. A generic volatile Handle derivation tree and descendant revocation are
-now implemented by `ObjOpCapRevoke=57`. GE/O v2 can save and load one
-checksummed graph per durable OID through `ObjOpSpaceSave=58` and
-`OBJOPEN(ObjOpenSpaceGraph)`. Trusted boot treats `plan9.ini
-obootgraph=<OID>` as a selector, not authority: it automatically restores
-that graph on the `obootvol` GE/O volume and installs the root
-`VkindObjectSpace` Handle in the bootstrap process before user code runs.
-No selector means no automatic root; an invalid one fails closed.
+Volatile ObjectSpaces have dynamically allocated bindings and labels of at
+most **255 bytes plus NUL** (`ObjSpaceLabelMax=256`), not the earlier
+64-binding/47-byte limits. Enumeration still returns up to eight records per
+page; an epoch rejects mixed snapshots. Volatile space-to-space references
+are weak to avoid retaining cycles, so independent target Handles keep those
+spaces live. Unbind does not revoke an already resolved Handle.
+`ObjOpCapRevoke=57` implements derived-Handle subtree revocation.
+
+Persistent ObjectSpaces use the **durable project** provider:
+`OBJOPEN(ObjOpenProject=18)` with an authorized GE/O volume Handle and
+`OBJINVOKE(ObjOpProject=60)` with a typed `ObjProjectReq`. Each durable
+ObjectSpace has its own framed GE/O OID and transactional bindings; there is
+no `ObjOpSpaceSave` or `ObjOpenSpaceGraph` handler. The ordinary
+`ObjOpSpaceBind/Unbind/Resolve/Enumerate` operations also accept durable
+ObjectSpace Handles. See [durable project namespaces](PROJECT-NAMESPACES.md).
+Trusted boot interprets `plan9.ini obootgraph=<OID>` only as a selector, not
+authority. It restores that durable project on the authorized `obootvol`
+GE/O volume and installs a `VkindObjectSpace` Handle in the bootstrap process
+before user code runs. No selector means no automatic root; an invalid
+selector fails closed. This is boot-root Handle provisioning, **not** an
+installed mandatory `ExecutionContext` root.
 Existing Pgrp namespaces remain **legacy current behavior**, not architectural
 target invariants. OwnerID access gates have been replaced by capability
 admission and provider safety conditions.

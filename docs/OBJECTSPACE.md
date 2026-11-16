@@ -84,8 +84,8 @@ object lifetime, but their *capability lineage* is pinned.
 
 Native kind: `VkindObjectSpace=19`. Create with
 `OBJCREATE(ObjKindObjectSpace=5)`. Existing object syscall family is
-used rather than adding per-provider syscalls. The universal object ABI
-is intentionally bumped to v2.
+used rather than adding per-provider syscalls. The current universal object
+ABI is **v3** (`OBJ_ABI_VERSION=3`); v2 is obsolete.
 
 | Operation | Required capability | Result |
 |---|---|---|
@@ -107,9 +107,11 @@ resources until unbound. This is a deliberately incomplete lifetime
 policy, not a claim of general graph garbage collection.
 
 The graph is process-independent and can be explicitly delegated at
-launch through the existing Handle inheritance mechanism. The kernel
-has not yet installed a default ObjectSpace root in ExecutionContext.
-Legacy Pgrp/OContext namespace roles coexist only until their migration.
+launch through the existing Handle inheritance mechanism. Trusted boot can
+restore a single durable project selected by `obootgraph=<OID>` and install
+its Handle in the bootstrap process. This does **not** create a mandatory
+`ExecutionContext` root field: other processes need explicit Handle grants.
+Legacy Pgrp/OContext namespace roles remain until their migration.
 
 MicroPython API:
 
@@ -146,10 +148,10 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
 
 ## Required migration stages
 
-1. **Volatile graph PoC:** kernel ObjectSpace ops, MicroPython tests,
-   aliases, multiple labels, nested spaces, cycles, rights, stale handling,
-   concurrent enumeration and AMD64 QEMU boot. This branch implements a
-   foundation; full test execution is still required.
+1. **Volatile graph PoC (implemented foundation):** kernel ObjectSpace ops,
+   MicroPython wrappers, aliases, multiple labels, nested spaces, cycles,
+   rights, stale handling and epoch-based enumeration. QEMU/contract fixtures
+   exist in `tools/host/objectspace/`; run them for each release revision.
 2. **Capability security:** generic Handle derivation, process delegation,
    selective subtree revocation and explicit OwnerID-independent authorization
    are implemented for the current providers. GE/O Ohand scope/rights and
@@ -158,12 +160,17 @@ is introduced. Existing one-writer/RO-observer region IPC remains.
    covered by the native QEMU/OVMF fixture `owner-authority.py`. Hardware
    permissions, concurrent revocation fault injection and durable grants are
    not yet proven.
-3. **Execution roots:** replace Pgrp/OContext/NamespaceView role lookups
-   and old process namespace lifecycle with explicit ObjectSpace roots;
-   remove obsolete providers, public ABI, wrappers and tests. No shims.
-4. **Persistence:** define and implement GE/O ObjectSpace records and
-   atomic graph transactions, persisted identities and trusted reboot
-   reification. Phase 3 already retired the transitional Ospace/SpaceID API.
+3. **Execution roots (partial):** bootstrap can install a selected durable
+   root Handle, and descendants can receive explicit delegated roots. A
+   mandatory `ExecutionContext` root field and complete removal of legacy
+   Pgrp/OContext namespace lifecycle are not implemented. Do not introduce
+   obsolete compatibility shims.
+4. **Persistence (implemented foundation):** `ObjOpenProject` and
+   `ObjOpProject` provide per-OID durable ObjectSpaces, atomic binding/file
+   updates and trusted `obootgraph` restoration. The earlier whole-graph
+   save/load format and transitional Ospace/SpaceID API are removed.
+   Cross-volume durable edges, garbage collection and broader recovery/race
+   certification remain outstanding.
 5. **User view and hardening:** PVD, directory/project/container projections,
    multi-parent navigation, quotas, graph GC or specified lifetime semantics,
    recovery/race/fuzz tests, AMD64 physical hardware tests.

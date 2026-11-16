@@ -16,9 +16,12 @@ revocable and attenuable capability Handles. Delegation across OwnerIDs is
 supported for GE/O, processes, regions and device sessions, with boot
 authorization, object-scope checks, immutable Kowner records and provider
 safety conditions enforced separately. Existing region-based IPC uses a
-single writable publisher, read-only observers and WAIT/WAKE. Native
-ObjectSpace is a volatile capability multigraph proof of concept;
-persistent graph storage and process ObjectSpace roots remain future work.
+single writable publisher, read-only observers and WAIT/WAKE. Volatile
+ObjectSpace is an implemented capability multigraph. Durable project
+ObjectSpaces use individual framed GE/O records, transactional binding
+changes and an optional trusted `obootgraph=<OID>` boot-root Handle.
+A mandatory `ExecutionContext` root, cross-volume durable bindings, graph
+garbage collection and physical-hardware validation remain unfinished.
 MicroPython is the userspace proof of concept.
 
 The current **AMD64** kernel has a working full-system path, including GE/O
@@ -55,6 +58,9 @@ early-boot PASS is not a claim of physical-hardware validation.
 
 - [Architecture and architecture maturity](docs/ARCHITECTURE.md)
 - [GE/O persistent object storage](docs/OBJECT-STORAGE.md)
+- [ObjectSpace semantics and implementation status](docs/OBJECTSPACE.md)
+- [Durable project namespaces](docs/PROJECT-NAMESPACES.md)
+- [Portable object framing](docs/OBJECT-TAIL.md)
 - [Kernel interface: target and current status](docs/KERNEL-INTERFACE.md)
 - [AMD64 UEFI hardware boot, manifest and rollback guide](docs/HARDWARE-BOOT.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)

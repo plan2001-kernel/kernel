@@ -89,9 +89,14 @@ MicroPython boots with `-O PARTUUID=... -N` (or `-I`), and Python's
 The demonstration's Python Environment still uses the label `init`, but
 that label is not passed into GE/O or interpreted as a storage identity.
 
-Persisting native ObjectSpace relationship graphs, atomic binding updates
-and trusted capability reification remains **phase 4**, not part of the
-storage ABI migration.
+Persistent native ObjectSpaces are now implemented by the separate durable
+project provider (`ObjOpenProject`, `ObjOpProject`), not by changing GE/O's
+flat volume identity. Each project has its own framed OID record; binding
+mutations publish transactionally, and trusted `obootgraph=<OID>` selection
+restores an authorized project Handle at boot. The retired whole-graph
+snapshot/save-load format is unsupported. Full cross-volume durable bindings,
+graph garbage collection and complete `ExecutionContext` root migration
+remain unfinished. See [PROJECT-NAMESPACES.md](PROJECT-NAMESPACES.md).
 
 ## Acceptance and inspection
 

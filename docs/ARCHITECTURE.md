@@ -27,10 +27,14 @@ been removed from current GE/O, region, device and process providers.
 Their authorization now uses capability admission, GE/O Ohand scope,
 trusted bootstrap gates and provider-specific safety checks.
 
-The implemented ObjectSpace runtime uses the existing five-call object ABI.
-Processes have explicit ObjectSpace roots. GE/O persistence gives each durable ObjectSpace its own OID, and
-trusted boot can select one graph with `plan9.ini obootgraph=<OID>` and
-restore it automatically into the bootstrap process as an explicit Handle.
+The implemented ObjectSpace runtime uses the native object ABI (version 3;
+`OBJBIND` is reserved, and binding is invoked with `OBJINVOKE`). Processes
+can hold and explicitly delegate ObjectSpace-root Handles, but there is no
+mandatory default ObjectSpace root field in `ExecutionContext` yet. GE/O
+persistence gives each durable ObjectSpace its own OID. Trusted boot can
+select one durable project with `plan9.ini obootgraph=<OID>` and install its
+Handle in the bootstrap process; other processes receive roots only through
+explicit delegation.
 Persistent graph garbage collection, full cross-volume references and
 physical-hardware verification remain unfinished.
 GE/O v2 has one flat OID allocator and publication domain per volume;
@@ -46,8 +50,9 @@ services and other resources. Neither its launcher nor a parent directory
 automatically confers authority. Trusted program registration may set a
 program OwnerID and give its process explicit initial capabilities.
 Process-control and completion observation are independently delegated.
-Current Pgrp/OContext namespace handling is a legacy implementation
-to remove after ObjectSpace-root support replaces it.
+Current Pgrp/OContext namespace handling remains legacy code to migrate;
+boot-root Handle installation does not itself finish ExecutionContext or
+legacy-namespace replacement.
 
 ## Memory-publication IPC (target)
 
