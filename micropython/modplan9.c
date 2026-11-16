@@ -598,6 +598,30 @@ static mp_obj_t p9_objopenhandle(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenhandle_obj,1,2,p9_objopenhandle);
 
+/* ObjectSpace project operations never expose their backing volume. */
+static mp_obj_t p9_projectopen(size_t n,const mp_obj_t *a){
+ ObjProjectOpen r={0};mp_buffer_info_t b={0};
+ r.volume=mp_obj_get_int(a[0]);r.oid=mp_obj_get_int_truncated(a[1]);r.rights=mp_obj_get_int(a[2]);
+ if(n>3){mp_get_buffer_raise(a[3],&b,MP_BUFFER_READ);r.data=b.buf;r.length=b.len;}
+ return check(obj_open(ObjOpenProject,&r,sizeof r,0,NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectopen_obj,3,4,p9_projectopen);
+static mp_obj_t p9_projectcall(size_t n,const mp_obj_t *a){
+ ObjProjectReq r={0};ObjCall c={0};mp_buffer_info_t b={0};
+ r.operation=mp_obj_get_int(a[1]);
+ if(n>2 && a[2]!=mp_const_none){size_t len;const char *name=mp_obj_str_get_data(a[2],&len);if(len>255)mp_raise_ValueError(MP_ERROR_TEXT("name too long"));memcpy(r.name,name,len);}
+ if(n>3)r.other=mp_obj_get_int(a[3]);if(n>4)r.binding=mp_obj_get_int_truncated(a[4]);
+ if(n>5 && a[5]!=mp_const_none){mp_get_buffer_raise(a[5],&b,MP_BUFFER_READ);r.data=b.buf;r.length=b.len;}
+ if(n>6)r.kind=mp_obj_get_int(a[6]);if(n>7)r.rights=mp_obj_get_int(a[7]);
+ if(n>8)r.epoch=mp_obj_get_int_truncated(a[8]);if(n>9)r.replace=mp_obj_get_int_truncated(a[9]);
+ c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
+ int h=mp_obj_get_int(a[0]);
+ if(obj_invoke(h,&c,sizeof c)<0)raise_err();
+ if(r.operation==ProjectRead){vstr_t v;vstr_init_len(&v,c.result);c.out=v.buf;c.outlen=v.len;
+  if(obj_invoke(h,&c,sizeof c)<0){vstr_clear(&v);raise_err();}return mp_obj_new_bytes_from_vstr(&v);}
+ return mp_obj_new_int_from_ll(c.result);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectcall_obj,2,10,p9_projectcall);
 /* Persistent GE/O through the five-operation ABI only. */
 static mp_obj_t p9_objopenvolume(void){
  return check(obj_open(ObjOpenVolume,NULL,0,0,NULL));
@@ -1292,6 +1316,8 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_open), MP_ROM_PTR(&p9_projectopen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_call), MP_ROM_PTR(&p9_projectcall_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_volume), MP_ROM_PTR(&p9_objopenvolume_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_oid), MP_ROM_PTR(&p9_objopengeoid_obj) },

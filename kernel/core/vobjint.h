@@ -212,3 +212,6 @@ void vobjconsoleinfo(int, ObjConsoleInfo*);
 int vconsoleisinput(Vobj*);
 
 #endif
+
+int vobjprojectopen(ObjProjectOpen*, VobjId*);
+void vobjprojectcall(int, ObjCall*);

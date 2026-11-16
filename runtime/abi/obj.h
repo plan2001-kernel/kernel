@@ -21,6 +21,7 @@
 
 #define OBJ_ABI_VERSION 2
 #include "objectspace.h"
+#include "project.h"
 
 struct Ospawn;
 
@@ -37,6 +38,7 @@ enum {
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
+	ObjOpenProject = 18,
 	ObjOpenSpaceGraph	= 17,	/* authorized restore from GE/O snapshot OID */
 };
 
@@ -125,6 +127,7 @@ enum {
 	ObjOpSpaceEnumerate = 56,	/* paged stable-snapshot metadata */
 	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
 	ObjOpConsoleInfo = 59, /* Vmeta on a console input region: geometry */
+	ObjOpProject = 60,
 	ObjOpSpaceSave = 58,	/* durable, atomic graph snapshot (GE/O v2) */
 };
 

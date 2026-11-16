@@ -222,6 +222,8 @@ struct Vspace {
 	Vobj *object;                   /* weak: registry owner removes on final put */
 	Vspace *next;
 	uvlong epoch, nextid;
+    Ohand *project;
+    uvlong projectoid;
 	int nbindings, revoked;
 	/* A restored root owns the otherwise weak nested ObjectSpace nodes.
 	 * Bindings remain weak, preventing graph cycles from leaking objects. */
@@ -465,7 +467,8 @@ vobjput(Vobj *o)
 		}
 		for(i = 0; i < s->npersist_children; i++)
 			vobjput(s->persist_children[i]);
-		free(s);
+		oshandput(s->project);
+        free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
 
@@ -2363,6 +2366,9 @@ vobjinfo(int handle, VobjInfo *out)
 	out->abi_version = VOBJ_ABI_VERSION;
 	out->rights = h->rights;
 	out->holds = o->ref.ref;
+	if(o->kind == VkindObjectSpace && o->priv != nil && ((Vspace*)o->priv)->project != nil){
+        Vspace *s=o->priv;out->oid=s->projectoid;out->space=0;osvolumeid(s->project,out->volume);
+    }
 	if((o->kind == VkindGe || o->kind == VkindGeVolume) && o->priv != nil){
 		out->space = 0;
 		out->oid = o->oid;
@@ -4233,3 +4239,5 @@ vobjconsoleinfo(int handle, ObjConsoleInfo *out)
     vhandput(h);
     memmove(out, &info, sizeof info);
 }
+
+#include "vproject.inc"
