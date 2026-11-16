@@ -249,6 +249,8 @@ int main(void)
         emit("PASS: authorized immutable aliases, stat/lstat/access and directory enumeration\n");
     }
     compositions();
+    /* Diagnostic kernel consoles cannot be delegated by fork. */
+    (void)close(0); (void)close(1); (void)close(2);
     check(mkdir("/tmp/cwd-source",0700)==0 && chdir("/tmp/cwd-source")==0,"open cwd view");
     fixture("here","cwd");
     check(rename("/tmp/cwd-source","/tmp/cwd-renamed")==0,"rename live cwd");
@@ -259,8 +261,7 @@ int main(void)
     struct stat cwd_stat;check(stat("cwd-renamed/here",&cwd_stat)==0,"cwd returns to retained parent");
     check(chdir("/../../")==0,"parent traversal stays within delegated root");
     emit("PASS: cwd capabilities survive rename and exec; caller-relative parent traversal\n");
-    /* Native diagnostic console cannot delegate. Commands inherit pipe fds. */
-    (void)close(0); (void)close(1); (void)close(2);
+    /* Commands inherit pipe descriptors. */
     /* Leave fourteen unrelated pipe descriptors open across real exec.
      * This needs more than sixteen native grants, not just the old eight. */
     {
