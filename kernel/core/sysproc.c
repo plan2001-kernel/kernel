@@ -1603,7 +1603,7 @@ sysspawn(sysva_list list)
 	argv = sysva_arg(list, char**);
 	argc = (int)sysva_arg(list, int);
 	opt = sysva_arg(list, struct Ospawn*);
-	soh = vobjholdohand(space, VkindGeVolume, Vexecute);
+	soh = vobjholdexec(space, &oid);
 	if(waserror()){
 		oshandput(soh);
 		nexterror();

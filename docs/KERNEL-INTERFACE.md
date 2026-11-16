@@ -379,3 +379,13 @@ The future C1–C10 recovery invariants are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md#console/session-contract-kernel-owned-minimum-and-future-invariants).
 Ethernet L2, UART rescue, remote terminals, interactive panic recovery,
 network program loading, and multi-volume GE/O are not implemented.
+
+### Scoped executable SPAWN
+
+`SPAWN(handle, oid, argv, argc, options)` accepts either an explicitly
+`Vexecute`-authorized GE/O volume and selected nonzero OID, or an
+object-scoped `Vexecute` GE Handle with `oid=0`. The latter obtains the stored
+OID from that live capability and rejects any caller-supplied substitution.
+Normal grant lineage, revocation, ELF validation, memory budgets and child
+inheritance checks apply to both forms. A path, OID or owner identity never
+creates execution authority.
