@@ -11,7 +11,7 @@ KERNEL=$(cd "$1" && pwd)
 IMAGE=$(realpath "$2")
 REPORTS=$(cd "$3" && pwd)
 MODE=${4:-default}
-if [ "$MODE" != f6 ] && [ "$MODE" != project ] && [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ] && [ "$MODE" != multicall-pipeline ]; then
+if [ "$MODE" != toolchain ] && [ "$MODE" != f6 ] && [ "$MODE" != project ] && [ "$MODE" != default ] && [ "$MODE" != newlib-supervised ] && [ "$MODE" != ash ] && [ "$MODE" != multicall ] && [ "$MODE" != multicall-eof ] && [ "$MODE" != multicall-essentials ] && [ "$MODE" != multicall-pipeline ]; then
   echo "unsupported acceptance mode: $MODE" >&2
   exit 2
 fi
@@ -65,7 +65,7 @@ owner=unixSupervisorF5
 args=0x4f45584543000006${UX_GEO_PERSIST:+ 0x4f45584543000007}
 required=true
 EOF
-if [ "$MODE" = f6 ]; then
+if [ "$MODE" = f6 ] || [ "$MODE" = toolchain ]; then
   cat >> "$OUT/processes.conf" <<EOF
 [process.unixInitF6]
 source=geo:PARTUUID=$puuid:OID=0x4f45584543000005
@@ -107,7 +107,7 @@ for phase in "${phases[@]}"; do
   QOB_CURRENT_PID=$!
 
   case "$MODE" in
-    f6|project) accept_mode="$MODE-$phase" ;;
+    f6|project|toolchain) accept_mode="$MODE-$phase" ;;
     default) accept_mode="${UX_GEO_PERSIST:+persist-}$phase" ;;
     *) accept_mode="$MODE" ;;
   esac
@@ -117,7 +117,7 @@ for phase in "${phases[@]}"; do
   qob_cleanup
 done
 
-if [ "$MODE" = f6 ] || [ "$MODE" = project ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
+if [ "$MODE" = toolchain ] || [ "$MODE" = f6 ] || [ "$MODE" = project ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
   echo "PASS: native ash $MODE acceptance; bootable disk at $OUT/disk.img"
   exit 0
 fi

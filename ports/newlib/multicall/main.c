@@ -10,6 +10,9 @@
 #include "../full/project_fs.h"
 #include <sys/stat.h>
 #include "../full/plan2001_full.h"
+#ifdef PLAN2001_NATIVE_TOOLCHAIN
+#include "../../tinycc/install.h"
+#endif
 extern int p9_busybox_main(int, char **);
 
 int main(int argc, char **argv)
@@ -32,6 +35,16 @@ int main(int argc, char **argv)
          * volume. It never opens a volume or grants rights by itself. */
         if (!volume || errno || !oid || !*argv[1] || *end ||
             p9_process_bind_executable("/bin/busybox", volume, oid)) return 125;
+#ifdef PLAN2001_NATIVE_TOOLCHAIN
+        /* This profile explicitly authorizes only the seeded compiler. An
+         * installed name or a newly linked ELF never registers new code. */
+        PjObject compiler={0};
+        if (!p9_project_resolve("/usr/bin/tcc",&compiler)) {
+            int installed=compiler.kind==VkindGe && compiler.id.oid==P2001_TCC_OID;
+            pj_close(&compiler);
+            if (!installed || p9_process_bind_executable("/usr/bin/tcc",volume,P2001_TCC_OID)) return 125;
+        } else if (errno!=ENOENT) return 125;
+#endif
         if (dup2(1, 2) < 0) return 125;
         char *shell[] = {"sh", "-i", NULL};
         puts("PLAN2001-MULTICALL-READY (persistent ObjectSpace files; external applets)");

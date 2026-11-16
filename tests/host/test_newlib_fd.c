@@ -30,6 +30,15 @@ int p9_backend_stream(int fd,int handles[2],int *role)
 { (void)fd; (void)handles; (void)role; errno=ENOTSUP; return -1; }
 int p9_file_export(P9Plan *p) { (void)p; return -1; }
 int p9_file_import(int handle) { (void)handle; return -1; }
+/* Namespace export is not part of this descriptor-only contract fixture. */
+int p9_project_root(void) { return 0; }
+int p9_file_export_cwd(P9FdImage *i,P9Plan *p) { (void)i; (void)p; return -1; }
+int p9_file_import_cwd(const P9FdImage *i,const int *h,unsigned n)
+{ (void)i; (void)h; (void)n; return -1; }
+int p9_file_export_fd(int fd,P9Plan *p,int *a,int *b)
+{ (void)fd; (void)p; (void)a; (void)b; return -1; }
+int p9_file_import_fd(int fd,int h,int region,int flags)
+{ (void)fd; (void)h; (void)region; (void)flags; return -1; }
 int p9_file_ref(int fd,int delta) { (void)fd; (void)delta; return -1; }
 long sysctl(unsigned scope,unsigned operation,SysctlReq *req,long size)
 { (void)scope; (void)operation; (void)req; (void)size; return -1; }
