@@ -19,7 +19,7 @@
 #ifndef PLAN2001_ABI_OBJ_H
 #define PLAN2001_ABI_OBJ_H
 
-#define OBJ_ABI_VERSION 2
+#define OBJ_ABI_VERSION 3
 #include "objectspace.h"
 #include "project.h"
 

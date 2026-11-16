@@ -23,7 +23,7 @@ for name in ("vobjspacecreate", "vobjspacebind", "vobjspaceunbind",
 for name in ("space_new", "space_bind", "space_unbind", "space_resolve",
              "space_list"):
     assert "MP_QSTR_" + name in userspace, name
-assert "#define OBJ_ABI_VERSION 2" in abi
+assert "#define OBJ_ABI_VERSION 3" in abi
 assert "VkindObjectSpace = 19" in vobj
 assert "ObjKindObjectSpace = 5" in abi
 assert "ObjSpaceLabelMax = 256" in records

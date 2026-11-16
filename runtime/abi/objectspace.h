@@ -1,5 +1,5 @@
 /* ObjectSpace ABI v1: no directory paths, no mandatory parent, no Pgrp.
- * The object ABI uses version 2 for these additional operations.
+ * The object ABI uses version 3 for these additional operations.
  * Labels are local nonempty NUL-terminated byte sequences, not paths.
  * Multiple bindings may have identical labels: BindingID disambiguates.
  * relation is an opaque application-defined classification; no kernel
