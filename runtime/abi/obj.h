@@ -19,8 +19,9 @@
 #ifndef PLAN2001_ABI_OBJ_H
 #define PLAN2001_ABI_OBJ_H
 
-#define OBJ_ABI_VERSION 2
+#define OBJ_ABI_VERSION 3
 #include "objectspace.h"
+#include "project.h"
 
 struct Ospawn;
 
@@ -37,7 +38,7 @@ enum {
 	ObjOpenConsole		= 13,	/* native process output stream */
 	ObjOpenDevices		= 15,	/* authorized common device catalog */
 	ObjOpenDevice		= 16,	/* selection through a catalog Handle */
-	ObjOpenSpaceGraph	= 17,	/* authorized restore from GE/O snapshot OID */
+	ObjOpenProject = 18,
 };
 
 /* obj_create kinds.  ObjKindBytes is volatile immutable content and
@@ -125,7 +126,7 @@ enum {
 	ObjOpSpaceEnumerate = 56,	/* paged stable-snapshot metadata */
 	ObjOpCapRevoke = 57,	/* invalidate previously derived descendants */
 	ObjOpConsoleInfo = 59, /* Vmeta on a console input region: geometry */
-	ObjOpSpaceSave = 58,	/* durable, atomic graph snapshot (GE/O v2) */
+	ObjOpProject = 60,
 };
 
 /* ObjOpRegionMap arg1 flags. */

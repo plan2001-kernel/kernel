@@ -1,7 +1,7 @@
 # ObjectSpace: native capability graph
 
 **Target architecture**, November 2026. The implemented core graph runtime
-is a proof of concept, and GE/O persistence is an experimental phase-4 layer;
+is a proof of concept, and GE/O persistence is an experimental durable project layer;
 neither is the completed kernel migration.
 No historical object ABI, disk format, Unix or Plan 9 compatibility is required.
 
@@ -94,8 +94,8 @@ is intentionally bumped to v2.
 | `ObjOpSpaceResolve=55` | space Vread | attenuated target Handle |
 | `ObjOpSpaceEnumerate=56` | space Vmeta | paged edge metadata + epoch |
 
-C layouts: `runtime/abi/objectspace.h`. Limits: 64 edges per space,
-47 label bytes + NUL, eight entries per enumeration page. Each binding
+C layouts: `runtime/abi/objectspace.h`. Names contain at most 255 bytes plus NUL; entries grow dynamically. Enumeration
+returns up to eight entries per page. Each binding
 increments a generation counter. Enumeration with a previous epoch
 rejects concurrent modifications, avoiding mixed snapshots.
 
@@ -126,101 +126,12 @@ p.space_unbind(root, a)
 # reader retains its capability: unlink is not revoke.
 ```
 
-## Persistent GE/O integration (phase 4, experimental)
+## Durable projects
 
-GE/O v2 retains one flat OID allocator, one published version and one
-transaction domain per volume; there is **no SpaceID** or path selector.
-The API is deliberately explicit: `space_save(space, volume, graph_oid)`
-commits the serialized ObjectSpace snapshot as **one** GE/O object and
-returns the published version. `space_load(volume, graph_oid)` validates
-the snapshot and returns a new process-local ObjectSpace Handle. The
-caller must first allocate the graph OID with `obj_create_ge`. Neither
-operation opens a volume implicitly or reformats any existing O volume.
-
-The version-2 disk image is one checksummed record containing a graph
-header, at most 16 ObjectSpace nodes, and up to 64 bindings per node
-(1024 total). Each graph-local node has its own BindingID high-water mark
-and epoch; edges carry either a GE/O target OID or a graph-local node
-index. The root is node zero. The save discovers reachable nested spaces,
-pins them, locks all graph nodes in a stable order, and rejects stale or
-changing topology. GE/O publishes the complete image under one version.
-No process-local Handle, pointer, boot incarnation or OwnerID is stored
-as authority. Rejected objects include volatile bytes, devices, processes
-and regions.
-
-Restore requires an authorized `VkindGeVolume` Handle with
-`Vread|Vdelegate`. Each target is independently reopened with owner-
-record integrity checking and Vcap ancestry derived from the *current*
-volume Handle, attenuated by the saved ceiling. It rejects malformed
-headers, unsupported versions, checksum mismatches, duplicate or
-non-monotonic BindingIDs, missing objects and excess rights. Failed
-restore closes the unpublished partial graph. Knowing an OID or reading
-serialized rights never grants a capability.
-
-### Trusted boot root
-
-Persistent root selection is explicit and separate from the graph payload.
-Trusted boot reads `obootgraph=<OID>` from `plan9.ini`; the OID names one
-durable graph object on the same GE/O volume selected by `obootvol`
-(`PARTUUID=...`). No SpaceID, path, native directory, `init` selector or
-payload field selects a root. The selector grants no authority by itself:
-restoration opens the boot volume through the existing bootstrap volume
-capability, applies the same validation as `space_load`, and installs the
-restored `VkindObjectSpace` Handle only in the bootstrap process. That
-process can then see the root through `plan9.space_roots()` without a
-manual `space_load` call. Other processes still receive zero or more roots
-only through explicit Handle delegation; there is no ambient root or CWD.
-
-The boot process restores once, after `OEXECUTE` has replaced the loader's
-Handles. Every target capability is derived from the *current* boot volume
-grant, and saved rights must fit both that grant and the capability
-vocabulary. Owner records, graph version, length and checksum are checked
-before any root Handle is installed. With no `obootgraph`, boot continues
-normally and installs no automatic root. A configured selector that is
-syntactically invalid, names a missing object, has a corrupt/torn record,
-or requests unavailable rights fails closed with an actionable diagnostic;
-boot never chooses another OID, bypasses a capability check, or reformats
-or mutates storage as recovery. Removing the selector or restoring a known
-committed graph is the non-destructive recovery path. A committed graph
-replacement becomes the next boot's root; an uncommitted staged write is
-not visible.
-
-**Implementation status and limits:** The version-2 record can encode
-nested ObjectSpaces, aliases and cycles using local node indices. During
-restore all nodes are allocated first and then their weak inter-node
-edges are rebuilt. The restored root pins the graph's other nodes for
-its lifetime, without introducing strong edge cycles. CI includes a
-two-boot three-node nested ObjectSpace test. CI covers graph aliasing and cycles, and the new native two-process
-bind/unbind-versus-snapshot stress case verifies that each restored
-multi-node snapshot is complete and that its final image survives reboot.
-`tools/host/objectspace/run-boot-root.sh` additionally proves the trusted
-selector, automatic restoration, committed replacement, uncommitted crash
-recovery and negative selector/record/grant cases across real QEMU/OVMF
-boots. Garbage collection, full cross-volume references and physical
-hardware remain outstanding. Phase 4 is not complete until those
-requirements are addressed and verified.
-
-Native tests in `tools/host/objectspace/run-persistent.sh` use one
-disposable GE/O disk across repeated real QEMU boots: snapshot creation,
-replacement, nested and cyclic graph reification, crash injection,
-concurrent multi-node mutation and reboot verification. No test writes
-to a physical block device. The extended QEMU harness now also injects boot-only fault point 105
-inside `objtxcommit`, immediately after staging flush and before the
-published-version header update. It kills QEMU at the deterministic marker,
-boots the same disk again, and checks that the previous graph remains intact.
-Point 106 extends the QEMU harness into GE's actual superblock sync:
-the guest deliberately writes only the first 40 bytes of one publication
-superblock and flushes them before the host kills QEMU. After restarting
-the exact same disposable disk, the test requires a valid, complete old
-or new graph. This models a torn logical superblock update, but **does
-not prove real hardware sector tearing, cache durability, or every
-possible write ordering**. The graph model still restricts leaves to GE/O.
-
-Passing compilation or v1 regression tests alone is
-not evidence of crash recovery or torn-write safety.
-
-NEVER silently reformat a hardware O volume; do not restore legacy
-SpaceID selectors or tag/hashtag schema.
+[Durable project namespaces](PROJECT-NAMESPACES.md) define persistent
+ObjectSpaces, their own GE/O identities, transactional binding changes,
+scoped project delegation and userspace union/intersection views. The former
+whole-graph node-index snapshot format and save/load API have been removed.
 
 ## Execution, IPC and user-space projection (target)
 

@@ -598,6 +598,62 @@ static mp_obj_t p9_objopenhandle(size_t n,const mp_obj_t *a){
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_objopenhandle_obj,1,2,p9_objopenhandle);
 
+extern mp_obj_t p9_project_new_module(void);
+extern mp_obj_t p9_project_exec(mp_obj_t,mp_obj_t,mp_obj_t);
+static MP_DEFINE_CONST_FUN_OBJ_0(p9_projectnewmodule_obj,p9_project_new_module);
+static MP_DEFINE_CONST_FUN_OBJ_3(p9_projectexec_obj,p9_project_exec);
+static mp_obj_t p9_projectidentity(mp_obj_t handle){
+ VobjInfo i;if(obj_info(mp_obj_get_int(handle),&i)<0)raise_err();
+ mp_obj_t a[2]={mp_obj_new_bytes(i.volume,16),mp_obj_new_int_from_ull(i.oid)};
+ return mp_obj_new_tuple(2,a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_projectidentity_obj,p9_projectidentity);
+/* ObjectSpace project operations never expose their backing volume. */
+static mp_obj_t p9_projectopen(size_t n,const mp_obj_t *a){
+ ObjProjectOpen r={0};mp_buffer_info_t b={0};
+ r.volume=mp_obj_get_int(a[0]);r.oid=mp_obj_get_int_truncated(a[1]);r.rights=mp_obj_get_int(a[2]);
+ if(n>3){mp_get_buffer_raise(a[3],&b,MP_BUFFER_READ);r.data=b.buf;r.length=b.len;}
+ return check(obj_open(ObjOpenProject,&r,sizeof r,0,NULL));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectopen_obj,3,4,p9_projectopen);
+static mp_obj_t p9_projectboot(size_t n,const mp_obj_t *a){
+ long volume=obj_open(ObjOpenVolume,NULL,0,0,NULL);if(volume<0)raise_err();
+ ObjProjectOpen r={0};r.volume=volume;r.oid=mp_obj_get_int_truncated(a[0]);
+ r.rights=n>1?mp_obj_get_int(a[1]):Vread|Vmeta|Vdelegate|Vexecute;
+ long h=obj_open(ObjOpenProject,&r,sizeof r,0,NULL);
+ if(h<0){char error[128];rerrstr(error,sizeof error);obj_close(volume);werrstr("%s",error);raise_err();}
+ obj_close(volume);return mp_obj_new_int(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectboot_obj,1,2,p9_projectboot);
+static mp_obj_t p9_projectsnapshot(mp_obj_t handle){
+ ObjProjectReq r={0};ObjCall c={0};r.operation=ProjectRead;
+ c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
+ int h=mp_obj_get_int(handle);if(obj_invoke(h,&c,sizeof c)<0)raise_err();
+ vstr_t v;vstr_init_len(&v,c.result);c.out=v.buf;c.outlen=v.len;
+ if(obj_invoke(h,&c,sizeof c)<0){vstr_clear(&v);raise_err();}
+ mp_obj_t a[2]={mp_obj_new_bytes_from_vstr(&v),mp_obj_new_int_from_ull(c.aux)};
+ return mp_obj_new_tuple(2,a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(p9_projectsnapshot_obj,p9_projectsnapshot);
+static mp_obj_t p9_projectcall(size_t n,const mp_obj_t *a){
+ ObjProjectReq r={0};ObjCall c={0};mp_buffer_info_t b={0};
+ r.operation=mp_obj_get_int(a[1]);
+ if(n>2 && a[2]!=mp_const_none){size_t len;const char *name=mp_obj_str_get_data(a[2],&len);if(len>255)mp_raise_ValueError(MP_ERROR_TEXT("name too long"));memcpy(r.name,name,len);}
+ if(n>3)r.other=mp_obj_get_int(a[3]);if(n>4)r.binding=mp_obj_get_int_truncated(a[4]);
+ if(n>5 && a[5]!=mp_const_none){mp_get_buffer_raise(a[5],&b,MP_BUFFER_READ);r.data=b.buf;r.length=b.len;}
+ if(n>6)r.kind=mp_obj_get_int(a[6]);if(n>7)r.rights=mp_obj_get_int(a[7]);
+ if(n>8)r.epoch=mp_obj_get_int_truncated(a[8]);if(n>9)r.replace=mp_obj_get_int_truncated(a[9]);
+ if(n>10 && a[10]!=mp_const_none){mp_buffer_info_t m;mp_get_buffer_raise(a[10],&m,MP_BUFFER_READ);r.metadata=m.buf;r.metadata_length=m.len;}
+ if(n>11 && a[11]!=mp_const_none){mp_buffer_info_t m;mp_get_buffer_raise(a[11],&m,MP_BUFFER_READ);r.other_metadata=m.buf;r.other_metadata_length=m.len;}
+ if(n>12)r.other_epoch=mp_obj_get_int_truncated(a[12]);
+ c.version=OBJ_ABI_VERSION;c.op=ObjOpProject;c.in=&r;c.inlen=sizeof r;
+ int h=mp_obj_get_int(a[0]);
+ if(obj_invoke(h,&c,sizeof c)<0)raise_err();
+ if(r.operation==ProjectRead || r.operation==ProjectMetadata){vstr_t v;vstr_init_len(&v,c.result);c.out=v.buf;c.outlen=v.len;
+  if(obj_invoke(h,&c,sizeof c)<0){vstr_clear(&v);raise_err();}return mp_obj_new_bytes_from_vstr(&v);}
+ return mp_obj_new_int_from_ll(c.result);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(p9_projectcall_obj,2,13,p9_projectcall);
 /* Persistent GE/O through the five-operation ABI only. */
 static mp_obj_t p9_objopenvolume(void){
  return check(obj_open(ObjOpenVolume,NULL,0,0,NULL));
@@ -676,34 +732,6 @@ p9_spacenew(void)
     return check(obj_create(0, ObjKindObjectSpace, NULL, 0, NULL));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(p9_spacenew_obj, p9_spacenew);
-/* GE/O graph snapshots: explicit volume capability, never an ambient OID. */
-static mp_obj_t
-p9_spacesave(mp_obj_t space, mp_obj_t volume, mp_obj_t oid)
-{
-    ObjSpaceDiskReq r;
-    ObjCall c = p9_spacecall(ObjOpSpaceSave);
-    memset(&r, 0, sizeof r);
-    r.volume = mp_obj_get_int(volume);
-    r.oid = (unsigned long long)mp_obj_get_uint(oid);
-    c.in = &r;
-    c.inlen = sizeof r;
-    check(obj_invoke(mp_obj_get_int(space), &c, sizeof c));
-    return mp_obj_new_int_from_ull(c.aux);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(p9_spacesave_obj, p9_spacesave);
-
-static mp_obj_t
-p9_spaceload(mp_obj_t volume, mp_obj_t oid)
-{
-    ObjSpaceDiskReq r;
-    memset(&r, 0, sizeof r);
-    r.volume = mp_obj_get_int(volume);
-    r.oid = (unsigned long long)mp_obj_get_uint(oid);
-    return check(obj_open(ObjOpenSpaceGraph, &r, sizeof r, 0, NULL));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(p9_spaceload_obj, p9_spaceload);
-
-
 static mp_obj_t
 p9_spacebind(size_t n, const mp_obj_t *a)
 {
@@ -1292,6 +1320,13 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_ep_ctl), MP_ROM_PTR(&p9_devusbep_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_usb_clear_halt), MP_ROM_PTR(&p9_devusbclearhalt_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_device_ether_detach), MP_ROM_PTR(&p9_devedetach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_boot), MP_ROM_PTR(&p9_projectboot_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_snapshot), MP_ROM_PTR(&p9_projectsnapshot_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_identity), MP_ROM_PTR(&p9_projectidentity_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_module), MP_ROM_PTR(&p9_projectnewmodule_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_exec), MP_ROM_PTR(&p9_projectexec_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_open), MP_ROM_PTR(&p9_projectopen_obj) },
+    { MP_ROM_QSTR(MP_QSTR_project_call), MP_ROM_PTR(&p9_projectcall_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_volume), MP_ROM_PTR(&p9_objopenvolume_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_create_ge), MP_ROM_PTR(&p9_objcreatege_obj) },
     { MP_ROM_QSTR(MP_QSTR_obj_open_ge_oid), MP_ROM_PTR(&p9_objopengeoid_obj) },
@@ -1301,8 +1336,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_cap_revoke), MP_ROM_PTR(&p9_caprevoke_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_roots), MP_ROM_PTR(&p9_spaceroots_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_new), MP_ROM_PTR(&p9_spacenew_obj) },
-    { MP_ROM_QSTR(MP_QSTR_space_save), MP_ROM_PTR(&p9_spacesave_obj) },
-    { MP_ROM_QSTR(MP_QSTR_space_load), MP_ROM_PTR(&p9_spaceload_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_bind), MP_ROM_PTR(&p9_spacebind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_unbind), MP_ROM_PTR(&p9_spaceunbind_obj) },
     { MP_ROM_QSTR(MP_QSTR_space_resolve), MP_ROM_PTR(&p9_spaceresolve_obj) },
@@ -1340,8 +1373,6 @@ static const mp_rom_map_elem_t plan9_globals[] = {
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_UNBIND), MP_ROM_INT(ObjOpSpaceUnbind) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_RESOLVE), MP_ROM_INT(ObjOpSpaceResolve) },
     { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_ENUMERATE), MP_ROM_INT(ObjOpSpaceEnumerate) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OP_SPACE_SAVE), MP_ROM_INT(ObjOpSpaceSave) },
-    { MP_ROM_QSTR(MP_QSTR_OBJ_OPEN_SPACE_GRAPH), MP_ROM_INT(ObjOpenSpaceGraph) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_NAMES), MP_ROM_INT(ObjSpaceRelationNames) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_CONTAINS), MP_ROM_INT(ObjSpaceRelationContains) },
     { MP_ROM_QSTR(MP_QSTR_SPACE_RELATION_IMPORTS), MP_ROM_INT(ObjSpaceRelationImports) },

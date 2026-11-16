@@ -105,6 +105,10 @@ struct Vcap {
 static Lock vcaplock;
 enum { VcapDepthMax = 128 };
 static void vcapput(Vcap*);
+typedef struct ProjectGuard ProjectGuard;
+struct ProjectGuard {Ref ref;Vcap *cap;ProjectGuard *next;};
+static void projectguardput(ProjectGuard*);
+static int projectguardvalid(ProjectGuard*);
 
 struct Vhand {
 	Ref	ref;
@@ -222,12 +226,11 @@ struct Vspace {
 	Vobj *object;                   /* weak: registry owner removes on final put */
 	Vspace *next;
 	uvlong epoch, nextid;
+    Ohand *project;
+    uvlong projectoid;
 	int nbindings, revoked;
-	/* A restored root owns the otherwise weak nested ObjectSpace nodes.
-	 * Bindings remain weak, preventing graph cycles from leaking objects. */
-	int npersist_children;
-	Vobj *persist_children[16];
-	VspaceBinding entries[ObjSpaceBindingMax];
+	int capacity;
+    VspaceBinding *entries;
 };
 static Lock vspaceregistrylock;
 static Vspace *vspaceregistry;
@@ -463,9 +466,9 @@ vobjput(Vobj *o)
 			if(s->entries[i].target != nil)
 				vobjput(s->entries[i].target);
 		}
-		for(i = 0; i < s->npersist_children; i++)
-			vobjput(s->persist_children[i]);
-		free(s);
+		oshandput(s->project);
+        free(s->entries);
+        free(s);
 	}else if(o->kind == VkindProcess && o->priv != nil){
 		Procstat *st = o->priv;
 
@@ -478,6 +481,7 @@ vobjput(Vobj *o)
 	{
 		ulong size = o->size;
 		free(o->data);
+        projectguardput(o->projectguard);
 		free(o);
 		vrelease(size);
 	}
@@ -540,6 +544,32 @@ vcapput(Vcap *c)
 	}
 }
 
+static void projectguardput(ProjectGuard *g)
+{
+    while(g && decref(&g->ref)==0){ProjectGuard *next=g->next;vcapput(g->cap);free(g);g=next;}
+}
+static int projectguardvalid(ProjectGuard *g)
+{
+    int valid=1;lock(&vcaplock);
+    for(;g;g=g->next)if(!vcapvalidlocked(g->cap)){valid=0;break;}
+    unlock(&vcaplock);return valid;
+}
+static ProjectGuard *projectguardnode(Vcap *cap,ProjectGuard *next)
+{
+    ProjectGuard *g=mallocz(sizeof *g,1);if(g==nil)error(Enomem);
+    g->ref.ref=1;g->cap=cap;incref(&cap->ref);g->next=next;if(next)incref(&next->ref);return g;
+}
+static ProjectGuard *projectguardjoin(ProjectGuard *a,ProjectGuard *b)
+{
+    ProjectGuard *result=b,*tail=nil;
+    if(result)incref(&result->ref);
+    if(waserror()){projectguardput(result);nexterror();}
+    for(;a;a=a->next){
+        /* Order is irrelevant: every dependency must remain admitted. */
+        tail=projectguardnode(a->cap,result);projectguardput(result);result=tail;
+    }
+    poperror();return result;
+}
 static void
 vcaprevokechildren(Vcap *c)
 {
@@ -1809,7 +1839,7 @@ vlookupin(Proc *p, int handle, int need)
 		error(Ebadarg);
 	/* An already-open Handle remains closeable but cannot be used after
 	 * revocation of any ancestor grant, including after process inheritance. */
-	if(!vcapvalid(h->cap)){
+	if(!vcapvalid(h->cap) || !projectguardvalid(h->obj->projectguard)){
 		vhandput(h);
 		error(Eperm);
 	}
@@ -2363,6 +2393,9 @@ vobjinfo(int handle, VobjInfo *out)
 	out->abi_version = VOBJ_ABI_VERSION;
 	out->rights = h->rights;
 	out->holds = o->ref.ref;
+	if(o->kind == VkindObjectSpace && o->priv != nil && ((Vspace*)o->priv)->project != nil){
+        Vspace *s=o->priv;out->oid=s->projectoid;out->space=0;osvolumeid(s->project,out->volume);
+    }
 	if((o->kind == VkindGe || o->kind == VkindGeVolume) && o->priv != nil){
 		out->space = 0;
 		out->oid = o->oid;
@@ -3722,6 +3755,7 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 		error(Ebadarg);
 	vspacelabelcheck(req->label);
 	o = vspacehandle(handle, Vcontrol);
+    if(((Vspace*)o->priv)->project){vobjput(o);return vobjprojectbind(handle,req);}
 	if(waserror()){vcapput(grant);vhandput(target);vobjput(o);nexterror();}
 	target = vlookup(req->target, Vdelegate);
 	rights = req->rights == 0 ? target->rights : req->rights;
@@ -3730,11 +3764,27 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 		error(Eperm);
 	grant = vcapnew(target->cap);
 	s = o->priv;
-	lock(&s->lk);
-	if(s->revoked || s->nbindings == ObjSpaceBindingMax ||
+    VspaceBinding *grown=nil,*retired=nil;
+    int capacity;
+    for(;;){
+        lock(&s->lk);
+        if(s->nbindings<s->capacity)break;
+        capacity=s->capacity?s->capacity*2:8;
+        unlock(&s->lk);
+        if(capacity<0 || (uvlong)capacity*sizeof *grown>64*1024*1024)error(Enomem);
+        grown=mallocz(capacity*sizeof *grown,1);if(grown==nil)error(Enomem);
+        lock(&s->lk);
+        if(s->nbindings==s->capacity && capacity>s->capacity){
+            if(s->nbindings)memmove(grown,s->entries,s->nbindings*sizeof *grown);
+            retired=s->entries;s->entries=grown;grown=nil;s->capacity=capacity;break;
+        }
+        unlock(&s->lk);free(grown);grown=nil;
+    }
+	if(s->revoked ||
 	   s->nextid == ~(uvlong)0){
 		unlock(&s->lk);
-		error(s->revoked ? Eperm : "objectspace: binding limit");
+        free(retired);
+		error(s->revoked ? Eperm : "objectspace: binding IDs exhausted");
 	}
 	b = &s->entries[s->nbindings++];
 	memset(b, 0, sizeof *b);
@@ -3747,12 +3797,13 @@ vobjspacebind(int handle, ObjSpaceBindReq *req)
 	b->incarnation = target->obj->incarnation;
 	b->space = target->obj->space;
 	b->oid = target->obj->oid;
-	if(b->kind != VkindObjectSpace){
+	if(b->kind != VkindObjectSpace || ((Vspace*)target->obj->priv)->project!=nil){
 		b->target = target->obj;
 		incref(&b->target->ref);
 	}
 	s->epoch++;
 	unlock(&s->lk);
+    free(retired);
 	poperror();
 	vhandput(target);
 	vobjput(o);
@@ -3770,6 +3821,7 @@ vobjspaceunbind(int handle, uvlong id)
 	if(id == 0) error(Ebadarg);
 	o = vspacehandle(handle, Vcontrol);
 	s = o->priv;
+    if(s->project){vobjput(o);vobjprojectunbind(handle,id);return;}
 	lock(&s->lk);
 	if(s->revoked){
 		unlock(&s->lk);
@@ -3806,6 +3858,7 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 	int i, allowed, result;
 	if(id == 0 || rights > Vall) error(Ebadarg);
 	o = vspacehandle(handle, Vread);
+    if(((Vspace*)o->priv)->project){vobjput(o);return vobjprojectresolve(handle,id,rights);}
 	if(waserror()){vcapput(grant);vobjput(target);vobjput(o);nexterror();}
 	s = o->priv;
 	lock(&s->lk);
@@ -3837,6 +3890,7 @@ vobjspaceresolve(int handle, uvlong id, uvlong rights)
 	unlock(&s->lk);
 	if(target == nil) target = vspaceweakref(incarnation, oid);
 	if(target == nil) error("objectspace: stale target");
+    if(!projectguardvalid(target->projectguard))error(Eperm);
 	result = vobjinstallchild(target, allowed, grant);
 	poperror();
 	vcapput(grant);
@@ -3857,9 +3911,10 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 	int i, n = 0;
 	if(out == nil || epoch == nil || max < 1 || max > ObjSpacePageMax)
 		error(Ebadarg);
-	if(cursor > ObjSpaceBindingMax) error(Ebadarg);
+	if(cursor > 0x7fffffffULL) error(Ebadarg);
 	o = vspacehandle(handle, Vmeta);
 	s = o->priv;
+    if(s->project){vobjput(o);return vobjprojectenumerate(handle,cursor,generation,out,max,epoch);}
 	lock(&s->lk);
 	if(s->revoked || (generation != 0 && generation != s->epoch)){
 		unlock(&s->lk);
@@ -3878,7 +3933,7 @@ vobjspaceenumerate(int handle, uvlong cursor, uvlong generation,
 		r->kind = b->kind;
 		r->rights = b->rights;
 		r->relation = b->relation;
-		if(!vcapvalid(b->cap))
+		if(!vcapvalid(b->cap) || (b->target && !projectguardvalid(b->target->projectguard)))
 			r->flags |= ObjSpaceFlagRevoked;
 		memmove(r->label, b->label, sizeof r->label);
 	}
@@ -4172,7 +4227,7 @@ vobjopenstream(uvlong provider, void *req, long len, uvlong rights, VobjId *id)
 }
 
 /* The persistent ObjectSpace engine lives next to the Vhand/Vcap internals. */
-#include "vspacepersist.inc"
+#include "vprojectboot.inc"
 
 /*
  * OPEN(Handle): duplicate an existing authorized capability with an equal or
@@ -4233,3 +4288,5 @@ vobjconsoleinfo(int handle, ObjConsoleInfo *out)
     vhandput(h);
     memmove(out, &info, sizeof info);
 }
+
+#include "vproject.inc"

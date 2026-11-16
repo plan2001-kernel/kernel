@@ -146,15 +146,13 @@ sysobjopen(sysva_list list)
 		if(req == nil || len != sizeof(ObjOpenConsoleReq))
 			error(Ebadarg);
 		return vobjconsoleopen(req, len, rights, (VobjId*)id);
-	case ObjOpenSpaceGraph:
-	{
-		ObjSpaceDiskReq r;
-		if(req == nil || len != sizeof r || rights != 0)
-			error(Ebadarg);
-		validaddr((uintptr)req, sizeof r, 0);
-		memmove(&r, req, sizeof r);
-		return vobjspaceload(&r, (VobjId*)id);
-	}
+	case ObjOpenProject:
+    {
+        ObjProjectOpen r;
+        if(req == nil || len != sizeof r || rights != 0) error(Ebadarg);
+        validaddr((uintptr)req,sizeof r,0);memmove(&r,req,sizeof r);
+        return vobjprojectopen(&r,(VobjId*)id);
+    }
 	case ObjOpenDevices:
         if(req != nil || len != 0)
             error(Ebadarg);
@@ -235,20 +233,9 @@ sysobjinvoke(sysva_list list)
 			error(Ebadarg);
 		c.result = vobjcaprevoke(handle);
 		break;
-	case ObjOpSpaceSave:
-	{
-		ObjSpaceDiskReq r;
-		uvlong version;
-		if(c.in == nil || c.inlen != sizeof r || c.out != nil ||
-		   c.outlen != 0 || c.arg0 != 0 || c.arg1 != 0)
-			error(Ebadarg);
-		validaddr((uintptr)c.in, sizeof r, 0);
-		memmove(&r, c.in, sizeof r);
-		vobjspacesave(handle, &r, &version);
-		c.result = 0;
-		c.aux = version;
-		break;
-	}
+	case ObjOpProject:
+        vobjprojectcall(handle,&c);
+        break;
 	case ObjOpSpaceBind:
 	{
 		ObjSpaceBindReq b;

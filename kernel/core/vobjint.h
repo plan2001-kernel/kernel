@@ -32,6 +32,7 @@ struct Vobj {
 	ulong	size;
 	uchar	*data;		/* immutable snapshot, may be nil */
 	void	*priv;		/* provider-private state */
+    void *projectguard; /* immutable, refcounted namespace authority dependencies */
 };
 
 /* Core operations exported to concrete providers. */
@@ -59,8 +60,6 @@ int	vobjputoid(int handle, uvlong oid, void *buf, long n);
 int	vobjconsoleopen(void *req, long len, uvlong rights, VobjId *id);
 /* ObjectSpace graph is independent of Pgrp, GE SpaceID, and process ancestry. */
 int	vobjspacecreate(VobjId *id);
-void	vobjspacesave(int spacehandle, ObjSpaceDiskReq*, uvlong *version);
-int	vobjspaceload(ObjSpaceDiskReq*, VobjId *id);
 uvlong	vobjspacebind(int spacehandle, ObjSpaceBindReq *req);
 void	vobjspaceunbind(int spacehandle, uvlong bindingid);
 int	vobjspaceresolve(int spacehandle, uvlong bindingid, uvlong rights);
@@ -212,3 +211,13 @@ void vobjconsoleinfo(int, ObjConsoleInfo*);
 int vconsoleisinput(Vobj*);
 
 #endif
+
+int vobjprojectopen(ObjProjectOpen*, VobjId*);
+void vobjprojectcall(int, ObjCall*);
+
+uvlong vobjprojectbind(int,ObjSpaceBindReq*);
+void vobjprojectunbind(int,uvlong);
+int vobjprojectresolve(int,uvlong,uvlong);
+int vobjprojectenumerate(int,uvlong,uvlong,ObjSpaceEntry*,int,uvlong*);
+
+long osreadhandmetak(Ohand*,uvlong,void*,long,uvlong*);

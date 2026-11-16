@@ -592,7 +592,7 @@ oscopycap(Ohand *src, uvlong oid)
 		free(n);
 		error("O: capability open failed");
 	}
- if(!src->bootstrap && src->caps != 2){
+ if(!src->bootstrap){
   n->origin = src->origin ? src->origin : src;
   incref(&n->origin->ref);
  }
@@ -751,7 +751,7 @@ osownerfault(int point)
 }
 
 static long
-osreadhandcore(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver, int user)
+osreadhandcore(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver, int user, int metadata)
 {
 	uvlong v = 0;
 	long r;
@@ -767,7 +767,7 @@ osreadhandcore(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver, int user)
 		qunlock(ohgate(oh));
 		nexterror();
 	}
-	oauthorize(oh, oid, Oread);
+	oauthorize(oh, oid, metadata?0:Oread);
 	osownercheck(oh, oid);
 	r = oobjget(oh->tx, oid, buf, n, &v);
 	poperror();
@@ -780,7 +780,7 @@ osreadhandcore(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver, int user)
 long
 osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 {
-	return osreadhandcore(oh, oid, buf, n, ver, 1);
+	return osreadhandcore(oh, oid, buf, n, ver, 1, 0);
 }
 
 /* Kernel-only data pointers. Both paths enforce Ohand rights, owner-record
@@ -788,7 +788,15 @@ osreadhand(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 long
 osreadhandk(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
 {
-	return osreadhandcore(oh, oid, buf, n, ver, 0);
+	return osreadhandcore(oh, oid, buf, n, ver, 0, 0);
+}
+
+/* Kernel-only scoped metadata read after Vmeta admission. The caller must
+ * expose only the footer-selected opaque metadata, never raw content. */
+long
+osreadhandmetak(Ohand *oh, uvlong oid, void *buf, long n, uvlong *ver)
+{
+    return osreadhandcore(oh,oid,buf,n,ver,0,1);
 }
 
 static void

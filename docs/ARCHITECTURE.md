@@ -28,8 +28,7 @@ Their authorization now uses capability admission, GE/O Ohand scope,
 trusted bootstrap gates and provider-specific safety checks.
 
 The implemented ObjectSpace runtime uses the existing five-call object ABI.
-Processes have explicit ObjectSpace roots. GE/O v2 persistence supports one
-checksummed graph snapshot per durable OID, and
+Processes have explicit ObjectSpace roots. GE/O persistence gives each durable ObjectSpace its own OID, and
 trusted boot can select one graph with `plan9.ini obootgraph=<OID>` and
 restore it automatically into the bootstrap process as an explicit Handle.
 Persistent graph garbage collection, full cross-volume references and

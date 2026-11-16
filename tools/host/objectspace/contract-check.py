@@ -23,10 +23,11 @@ for name in ("vobjspacecreate", "vobjspacebind", "vobjspaceunbind",
 for name in ("space_new", "space_bind", "space_unbind", "space_resolve",
              "space_list"):
     assert "MP_QSTR_" + name in userspace, name
-assert "#define OBJ_ABI_VERSION 2" in abi
+assert "#define OBJ_ABI_VERSION 3" in abi
 assert "VkindObjectSpace = 19" in vobj
 assert "ObjKindObjectSpace = 5" in abi
-assert "ObjSpaceBindingMax = 64" in records
+assert "ObjSpaceLabelMax = 256" in records
+assert "VspaceBinding *entries" in provider
 assert "ObjSpaceFlagStale" in records
 assert "vspaceweakref" in provider and "vspaceregistryremove" in provider
 assert "vobjspacecreate(&vid)" in dispatch
@@ -34,9 +35,9 @@ boot = (root / "kernel/amd64/ouser.c").read_text()
 proc = (root / "kernel/core/sysproc.c").read_text()
 assert 'getconf("obootgraph")' in boot
 assert "osbootrootselect(" in boot
-persist = (root / "kernel/core/vspacepersist.inc").read_text()
+persist = (root / "kernel/core/vprojectboot.inc").read_text()
 assert "osbootrootrestore" in persist and "osbootrootselect" in persist
 assert "osbootrootrestore();" in proc
 assert "obootgraph=<OID>" in (root / "docs/OBJECTSPACE.md").read_text()
-assert (root / "tools/host/objectspace/run-boot-root.sh").is_file()
+assert (root / "tools/host/project/run.sh").is_file()
 print("PASS: static ObjectSpace ABI and kernel/userspace closure")
