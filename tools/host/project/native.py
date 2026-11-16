@@ -108,6 +108,14 @@ def run():
     left.remove('alias')
     assert ns.links(sharedfile)==2
     shared.root_oid=p.project_identity(root)[1]
+    p.program_register('project-reader','project-reader',v,0x4f45584543000003)
+    reader=p.project_call(root,8,None,0,0,None,0,1|8|128|8192)
+    childcode="import plan9 as p; import project; roots=p.space_roots(); assert len(roots)==1; assert len(p.obj_list())==1; ns=project.from_handle(roots[0]); assert ns.open('src/moi').raw()==b'updated\\n'; ns.activate(); import pkg; assert pkg.value==73; p.exits('')"
+    process=p.program_launch('project-reader',('project-reader','-c',childcode),((reader,1|8|128|8192),))
+    state=p.process_wait(process,30000)
+    assert state[1]=='',state
+    p.obj_close(process);p.obj_close(reader)
+    print('PROJECT-ISOLATED-READER-PASS')
     print('PROJECT-SCALE-PASS')
     print('PROJECT-COMPOSITION-PASS')
     print('PROJECT-IMPORT-PASS')
