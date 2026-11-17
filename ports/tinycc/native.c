@@ -76,3 +76,18 @@ int p2001_tcc_close(int fd)
     while(*p){Input *i=*p;if(i->fd==fd){*p=i->next;free(i->data);free(i);break;}p=&i->next;}
     return close(fd);
 }
+
+#ifdef PLAN2001_TCC_DRIVER
+#include <stdio.h>
+#include "program.h"
+extern int p2001_tcc_main(int,char **);
+int main(int argc,char **argv)
+{
+    if(argc>=2 && !strcmp(argv[1],"--register")){
+        if(argc!=3){fprintf(stderr,"usage: tcc --register PROGRAM\n");return 2;}
+        if(p9_program_register(argv[2])){perror(p9_program_diagnostic());return 1;}
+        printf("registered %s\n",argv[2]);return 0;
+    }
+    return p2001_tcc_main(argc,argv);
+}
+#endif

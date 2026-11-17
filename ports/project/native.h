@@ -15,6 +15,7 @@ int pj_blob(PjObject *,unsigned char **,size_t *,size_t *,size_t *);
 int pj_empty(const UxMeta *,unsigned char **,size_t *);
 int pj_resolve(PjObject *,const char *,PjObject *);
 int pj_create(PjObject *,const char *,unsigned,const void *,size_t,PjObject *);
+int pj_create_attenuated(PjObject *,const char *,unsigned,const void *,size_t,unsigned,PjObject *);
 int pj_link(PjObject *,const char *,PjObject *);
 int pj_remove(PjObject *,const char *,int);
 int pj_rename(PjObject *,const char *,PjObject *,const char *,int);

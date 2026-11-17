@@ -9,7 +9,7 @@ import subprocess
 from newlib_full_link import audit
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_UNITS = ('syscalls','process','inherit','file_state','fd_table','posix',
+RUNTIME_UNITS = ('syscalls','process','program','elf_validate','inherit','file_state','fd_table','posix',
     'stdio_process','dirent','ash_posix','pipe','pvd','uxfs','uxobject','objtail',
     'uxshell','uxservice','uxfd','project_native','project_record','rt_stubs-newlib')
 
@@ -44,7 +44,7 @@ def main():
             '-isystem',str(reports/'newlib-full/include'),'-isystem',gccinc,'-I'+str(src)]
         objects=[]
         for name,source in [('tcc',src/'tcc.c'),('native',ROOT/'ports/tinycc/native.c')]:
-            obj=out/(name+'.o');run(flags+['-c',source,'-o',obj]);objects.append(obj)
+            obj=out/(name+'.o');run(flags+(['-Dmain=p2001_tcc_main'] if name=='tcc' else ['-DPLAN2001_TCC_DRIVER=1'])+['-c',source,'-o',obj]);objects.append(obj)
         rt=reports/'newlib-target'
         native=[rt/(x+'.o') for x in RUNTIME_UNITS]
         if (rt/'project_stage.o').exists(): native.append(rt/'project_stage.o')

@@ -41,8 +41,9 @@ for phase in initial reboot; do
     exit 1
   fi
 done
+grep -q 'admitted snapshot executable survived cold reboot' "$OUT/boot-tinycc-reboot.log"
 grep -q 'guest-linked ELF survived cold reboot' "$OUT/boot-tinycc-reboot.log"
-printf '{"guest_compilation":"PASS","guest_static_link":"PASS","cold_reboot":"PASS","generated_elf_execution":"NOT RUN (P4)","hardware":"NOT RUN","arm64":"NOT RUN"}\n' > "$OUT/result.json"
+printf '{"guest_compilation":"PASS","guest_static_link":"PASS","cold_reboot":"PASS","generated_elf_execution":"PASS","scoped_capability_denial":"PASS","hardware":"NOT RUN","arm64":"NOT RUN"}\n' > "$OUT/result.json"
 # Preserve the actual guest mutations when creating the interactive F6 image.
 source "$OUT/disk.layout"
 dd if="$OUT/disk.img" of="$OUT/installed-o.img" bs=512 skip="$o_start_lba" count="$o_sectors" conv=sparse status=none
