@@ -1,0 +1,33 @@
+{
+  "mkdir": {
+    "missing_interfaces": [
+      "umask/creation-mode metadata for -p",
+      "chmod for -m"
+    ],
+    "reason": "Basic creation is supported; -p and explicit mode changes fail with ENOSYS instead of claiming unsupported permission semantics."
+  },
+  "mv": {
+    "missing_interfaces": [
+      "cross-volume rename",
+      "Unix permission/ownership preservation"
+    ],
+    "reason": "Same-volume native rename publishes both namespaces atomically and preserves open source and replaced destination objects."
+  },
+  "rm": {
+    "missing_interfaces": [
+      "automatic orphan reclamation"
+    ],
+    "reason": "Unlink removes a name and updates durable link counts. Open capabilities remain usable; the delegated view root is protected."
+  },
+  "sed": {
+    "missing_interfaces": [
+      "O_CREAT|O_EXCL for in-place temporary files",
+      "fchmod/fchown metadata preservation"
+    ],
+    "reason": "Stream/file-to-stdout editing is supported. -i fails without replacing the original file; unsupported metadata preservation is checked."
+  },
+  "awk": {
+    "missing_interfaces": [],
+    "reason": "Fields, regex, arithmetic/libm, system and command streams use native adapters. Commands remain subject to native argument, child and fd limits; SPAWN uses the shared 1024-Handle capacity."
+  }
+}

@@ -1,0 +1,79 @@
+name: Native compiler and Nuklear GUI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    working-directory: userland
+
+jobs:
+  amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build and QEMU dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc-14 g++-14 \
+            binutils clang lld make git autoconf automake libtool texinfo flex bison \
+            python3 python3-pil curl file mtools ovmf qemu-system-x86 patch
+      - name: Resolve the checked-out kernel revision and pinned toolchain sources
+        run: |
+          python3 tools/ci/fetch_sources.py --lock config/sources.json --dest "$RUNNER_TEMP/deps" --reports "$RUNNER_TEMP/reports"
+          python3 tools/ci/fetch_toolchain.py --dest "$RUNNER_TEMP/tinycc" --reports "$RUNNER_TEMP/reports"
+          python3 tools/ci/fetch_gui.py --dest "$RUNNER_TEMP/nuklear" --reports "$RUNNER_TEMP/reports"
+          bash tools/ci/build_newlib_libc.sh "$RUNNER_TEMP/newlib" "$RUNNER_TEMP/reports"
+      - name: Host adapter and installer checks
+        env:
+          PLAN2001_KERNEL: ${{ runner.temp }}/deps/kernel
+        run: |
+          python3 -m unittest discover -s tools/ci -p 'test_*.py' -v
+          bash tools/ci/test_tinycc_host.sh "$PLAN2001_KERNEL"
+          bash tools/ci/test_surface_host.sh "$PLAN2001_KERNEL"
+          bash tools/ci/test_unix_stages.sh 6 "$PLAN2001_KERNEL"
+          bash tools/ci/test_newlib_fd.sh "$PLAN2001_KERNEL"
+      - name: Build native kernel and image tools
+        working-directory: ${{ runner.temp }}/deps/kernel
+        env:
+          CC: gcc-14
+        run: |
+          tools/build-gcc.sh --kernel -j 4
+          tools/build-efi-gcc.sh -j 4
+          tools/build-mpy-gcc.sh -j 4
+          tools/build.sh
+      - name: Require guest compilation, static linking, persistence and F6 shell use
+        run: |
+          bash tools/ci/build_toolchain_image.sh "$RUNNER_TEMP/deps/kernel" "$RUNNER_TEMP/deps/busybox" \
+            "$RUNNER_TEMP/tinycc" "$RUNNER_TEMP/newlib" "$RUNNER_TEMP/reports" "$RUNNER_TEMP/toolchain-image" "$RUNNER_TEMP/nuklear"
+          (cd "$RUNNER_TEMP/toolchain-image" && sha256sum -c SHA256SUMS)
+      - name: Upload source provenance and guest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-toolchain-evidence
+          path: |
+            ${{ runner.temp }}/reports/sources.json
+            ${{ runner.temp }}/reports/toolchain-sources.json
+            ${{ runner.temp }}/reports/gui-sources.json
+            ${{ runner.temp }}/reports/*.log
+            ${{ runner.temp }}/toolchain-image/toolchain/build.log
+            ${{ runner.temp }}/toolchain-image/toolchain/manifest.json
+            ${{ runner.temp }}/toolchain-image/compile/*.log
+            ${{ runner.temp }}/toolchain-image/compile/result.json
+            ${{ runner.temp }}/toolchain-image/console/**/*.log
+            ${{ runner.temp }}/toolchain-image/console/**/screens/**/*.txt
+            ${{ runner.temp }}/toolchain-image/console/**/screens/**/*.ppm
+      - name: Upload native image with corresponding sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan2001-native-toolchain-amd64
+          path: |
+            ${{ runner.temp }}/toolchain-image/plan2001-toolchain-amd64.img
+            ${{ runner.temp }}/toolchain-image/*source.tar.gz
+            ${{ runner.temp }}/toolchain-image/verification.json
+            ${{ runner.temp }}/toolchain-image/SHA256SUMS

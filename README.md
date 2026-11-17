@@ -30,6 +30,15 @@ foundation, shared BootInfo handoff, console, memory initialization and timer
 interrupts, but is not yet a full-system port. Neither architecture is an
 exclusive long-term target.
 
+## Repository layout
+
+The kernel and its native user programs are developed together here. The
+kernel sources and ABI stay at the repository root. [Userland](userland/README.md)
+contains BusyBox, Newlib adapters, TinyCC and native graphical programs.
+Both are tested from the same checkout. The
+[former userland repository](https://github.com/plan2001-kernel/userland)
+holds historical issues, pull requests and CI evidence.
+
 ## Build and test
 
 For the current AMD64 implementation (requires suitable GCC/binutils and

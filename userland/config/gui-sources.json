@@ -1,0 +1,7 @@
+{
+  "nuklear": {
+    "url": "https://github.com/Immediate-Mode-UI/Nuklear.git",
+    "commit": "bab18497df988c171fd0d82baad798e1e0e34259",
+    "license": "MIT (upstream alternative A)"
+  }
+}

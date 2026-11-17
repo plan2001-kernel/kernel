@@ -1,0 +1,119 @@
+name: Unix userland stages 4-7 (independent evidence)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: userland
+
+jobs:
+  stage4-geo:
+    name: "4: filesystem operations and GE/O restart contract"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host filesystem / GE/O capability mock, reboot, corruption
+        run: bash tools/ci/test_unix_stages.sh 4 "$GITHUB_WORKSPACE"
+      - name: Limitations
+        if: always()
+        run: |
+          echo 'Stage 4 tests use a transactional GE/O mock; real F5 writes/reboot require an explicitly delegated volume Handle and manifest OID.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Real GE/O two-boot persistence: NOT RUN in this job.' >> "$GITHUB_STEP_SUMMARY"
+
+  stage5-ash:
+    name: "5: upstream ash freestanding compile and libc blocker audit"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get pinned BusyBox 1.36.1 source
+        run: |
+          python3 - <<'PY'
+          import json,os,subprocess
+          info=json.load(open('config/sources.json'))['busybox']
+          dest=os.environ['RUNNER_TEMP']+'/busybox'
+          subprocess.run(['git','clone','https://github.com/'+info['repository']+'.git',dest],check=True)
+          subprocess.run(['git','-C',dest,'checkout','--detach',info['commit']],check=True)
+          actual=subprocess.check_output(['git','-C',dest,'rev-parse','HEAD'],text=True).strip()
+          assert actual == info['commit']
+          PY
+      - name: Compile and test initial freestanding libc fnmatch dependency
+        run: |
+          gcc -std=c11 -O1 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Iports/unix tests/host/test_fnmatch.c ports/unix/fnmatch.c \
+            -o "$RUNNER_TEMP/test-fnmatch"
+          "$RUNNER_TEMP/test-fnmatch"
+          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+            -ffreestanding -nostdinc -fno-builtin -Iports/unix \
+            -c ports/unix/fnmatch.c -o "$RUNNER_TEMP/native-fnmatch.o"
+      - name: Install pinned upstream Newlib build requirements
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-14 g++-14 autoconf automake libtool texinfo flex bison
+
+      - name: Build upstream Newlib 4.6.0 headers and genuine libc
+        run: |
+          bash tools/ci/build_newlib_libc.sh \
+            "$RUNNER_TEMP/newlib-pinned" "$RUNNER_TEMP/ash-newlib-reports"
+
+      - name: Compile ORIGINAL BusyBox ash with real Newlib POSIX sysroot
+        run: |
+          bash tools/ci/probe_busybox_ash_newlib.sh \
+            "$RUNNER_TEMP/busybox" "$RUNNER_TEMP/ash-newlib-reports" \
+            "$RUNNER_TEMP/ash-newlib-reports/ash-probe"
+
+      - name: Publish ash compilation and POSIX interface audit
+        if: always()
+        run: |
+          for p in "$RUNNER_TEMP/ash-newlib-reports/newlib-full-build.md" \
+                   "$RUNNER_TEMP/ash-newlib-reports/ash-probe/ash-newlib-summary.md"; do
+            if [ -f "$p" ]; then
+              cat "$p" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "**NOT COMPLETED:** $p" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Store upstream ash/Newlib real-sysroot diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage5-ash-newlib-posix-compiler
+          path: |
+            ${{ runner.temp }}/ash-newlib-reports/newlib-full-build.log
+            ${{ runner.temp }}/ash-newlib-reports/newlib-full-build.md
+            ${{ runner.temp }}/ash-newlib-reports/ash-probe/*
+          if-no-files-found: warn
+
+  stage6-spawn:
+    name: "6: native SPAWN and explicit descriptor grants"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test ABI layout, validation, opaque wait and freestanding compilation
+        run: bash tools/ci/test_unix_stages.sh 6 "$GITHUB_WORKSPACE"
+      - name: Limitations
+        if: always()
+        run: |
+          echo 'Kernel SPAWN wrapper and descriptor-grant ABI: host test + native object compile.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Separate external ls ELF execution in QEMU: NOT RUN here.' >> "$GITHUB_STEP_SUMMARY"
+
+  stage7-streams:
+    name: "7: shell redirection and bounded userland pipe"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test >, >>, |, cat, error paths, external ls invocation
+        run: bash tools/ci/test_unix_stages.sh 7 "$GITHUB_WORKSPACE"
+      - name: Limitations
+        if: always()
+        run: |
+          echo 'Pipes are bounded sequential userland buffers, not concurrent processes or full POSIX pipe/dup2.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Real QEMU acceptance is separately covered by the F5 workflow; not proved by host tests.' >> "$GITHUB_STEP_SUMMARY"

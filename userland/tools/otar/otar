@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""Offline transactional tar transfer to existing GE/O v2 project roots."""
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import stat
+import struct
+import subprocess
+import sys
+import tarfile
+import tempfile
+from decimal import Decimal
+
+HERE=Path(__file__).resolve().parent
+# tools/otar -> userland -> sibling kernel
+KERNEL=HERE.parents[2]/'kernel'
+MAX=64*1024*1024
+REF=0x4e53524546494e44
+GE,SPACE=3,19
+READ,META,DELEGATE,WRITE,EXEC=1,8,128,256,8192
+ADMISSION=READ|META|DELEGATE|EXEC
+
+def require(ok,msg):
+    if not ok: raise ValueError(msg)
+
+def fnv(data):
+    v=14695981039346656037
+    for b in data:v=((v^b)*1099511628211)&((1<<64)-1)
+    return v
+
+def record(blob):
+    raw,meta=unpack(blob)
+    require(len(raw)>=40 and raw[:8]==b'P2PROJ01','not a P2PROJ01 project root (legacy UXFS unsupported)')
+    epoch,high,count=struct.unpack_from('>QQQ',raw,8)
+    require(epoch and fnv(raw[:-8])==int.from_bytes(raw[-8:],'big'),'invalid project checksum/epoch')
+    entries=[];off=32;previous=0
+    require(count<=(len(raw)-40)//33,'invalid project count')
+    for _ in range(count):
+        require(off+32<=len(raw)-8,'short project entry')
+        binding,oid,rights,relation,kind,n=struct.unpack_from('>QQIIII',raw,off);off+=32
+        name=raw[off:off+n];off+=n
+        require(previous<binding<=high and oid and 0<rights<=65535 and kind in (GE,SPACE) and 0<n<=255 and len(name)==n and b'\0' not in name,'invalid project binding')
+        previous=binding;entries.append([binding,oid,rights,relation,kind,name])
+    require(off==len(raw)-8,'trailing project bytes')
+    return {'epoch':epoch,'high':high,'entries':entries,'meta':meta}
+
+def encode_record(d):
+    raw=b'P2PROJ01'+struct.pack('>QQQ',d['epoch'],d['high'],len(d['entries']))
+    for b,o,r,rel,k,n in d['entries']:raw+=struct.pack('>QQIIII',b,o & ((1<<64)-1),r,rel,k,len(n))+n
+    return pack(raw+struct.pack('>Q',fnv(raw)),d['meta'])
+
+def components(path,absolute=False):
+    raw=os.fsencode(path)
+    require(b'\0' not in raw,'NUL in path')
+    if absolute:
+        require(raw.startswith(b'/'),'destination must be absolute');raw=raw[1:]
+    else:
+        require(not raw.startswith(b'/'),'absolute archive path rejected')
+        while raw.startswith(b'./'):raw=raw[2:]
+        if raw in (b'.',b''):return []
+    raw=raw.rstrip(b'/')
+    if not raw:return []
+    parts=raw.split(b'/')
+    require(all(p not in (b'',b'.',b'..') and len(p)<=255 for p in parts),'unsafe or too long path')
+    require(len(raw)<=4094,'path too long')
+    return parts
+
+class Backend:
+    def __init__(self,binary,fd,size,write):
+        self.p=subprocess.Popen([str(binary),str(fd),str(size),str(int(write))],stdin=subprocess.PIPE,stdout=subprocess.PIPE,pass_fds=[fd])
+        require(self.p.stdout.readline()==b'READY\n','GE/O backend could not open volume')
+    def call(self,op,oid=0,owner=0,data=b''):
+        self.p.stdin.write(f'{op} {oid} {owner} {len(data)}\n'.encode());self.p.stdin.write(data);self.p.stdin.flush()
+        answer=self.p.stdout.readline().split();require(len(answer)==2,'GE/O backend terminated')
+        rc,n=map(int,answer);require(rc>=0,'GE/O operation failed (publication may have completed; inspect before retry)')
+        if op=='G':
+            if rc:return None
+            b=self.p.stdout.read(n);require(len(b)==n,'short backend read');return b
+        return n
+    def get(self,oid):return self.call('G',oid)
+    def owner(self,oid):return self.call('O',oid)
+    def close(self):
+        if self.p.poll() is None:
+            with contextlib.suppress(BrokenPipeError):self.p.stdin.write(b'Q\n');self.p.stdin.flush()
+            self.p.stdin.close()
+            try:self.p.wait(timeout=10)
+            except subprocess.TimeoutExpired:self.p.kill();self.p.wait()
+        self.p.stdout.close()
+
+class Tree:
+    def __init__(self,backend,root):
+        self.b=backend;self.root=root;self.blobs={};self.dirs={};self.dirty=set();self.pending={};self.new=[];self.refs={};self.stats={'created':0,'updated':0,'skipped':0}
+        self.dir(root);self.owner=backend.owner(root);require(self.owner,'root has no immutable owner metadata')
+    def blob(self,oid):
+        if oid not in self.blobs:
+            v=self.b.get(oid);require(v is not None,f'missing object {oid:#x}');self.blobs[oid]=v
+        return self.blobs[oid]
+    def dir(self,oid):
+        if oid not in self.dirs:
+            d=record(self.blob(oid))
+            try:m=decode(d['meta'])
+            except (ValueError,TypeError,UnicodeError):m={}
+            require(not isinstance(m,dict) or 'project_view' not in m,'composed project views are not writable offline')
+            self.dirs[oid]=d
+        return self.dirs[oid]
+    def find(self,parent,label):
+        matches=[e for e in self.dir(parent)['entries'] if e[5]==label]
+        require(len(matches)<=1,'ambiguous project label')
+        return matches[0] if matches else None
+    def fresh(self,blob,kind):
+        oid=-(len(self.new)+1);self.new.append(oid);self.blobs[oid]=blob;self.pending[oid]=blob;return oid
+    def bind(self,parent,label,oid,kind,rights):
+        d=self.dir(parent);d['high']+=1;d['entries'].append([d['high'],oid,rights,0,kind,label]);self.dirty.add(parent);self.refs[oid]=self.refs.get(oid,0)+1
+    def walk(self,parts,create=False):
+        oid=self.root;rights=65535
+        for label in parts:
+            require(rights&DELEGATE,'parent does not delegate traversal')
+            e=self.find(oid,label)
+            if e is None:
+                require(create,'destination directory missing')
+                require(rights&WRITE,'parent is read-only')
+                new=self.fresh(encode_record({'epoch':1,'high':0,'entries':[],'meta':cbor(origin(label,True,None))}),SPACE)
+                self.bind(oid,label,new,SPACE,rights);e=self.find(oid,label);self.stats['created']+=1
+            require(e[4]==SPACE,'path component is not a directory')
+            oid=e[1];rights &= e[2]
+        return oid,rights
+    def store(self,parts,data,meta,directory=False,reuse=None):
+        require(parts,'cannot replace root')
+        require(parts[0]!=b'.programs','ordinary import cannot write program admission catalog')
+        parent,rights=self.walk(parts[:-1],True);require(rights&WRITE,'parent is read-only')
+        e=self.find(parent,parts[-1]);kind=SPACE if directory else GE
+        require(e is None or e[4]==kind,'file/directory type conflict')
+        if reuse is not None:
+            require(not directory and (e is None or e[1]==reuse),'reuse target already names another object')
+            require(unpack(self.blob(reuse))[0]==data,'reused object does not match archive file bytes')
+            require(self.b.owner(reuse),'reused object has no owner metadata')
+            if e:self.stats['skipped']+=1
+            else:self.bind(parent,parts[-1],reuse,GE,rights);self.stats['created']+=1
+            return
+        if e:
+            oid=e[1];require((rights&e[2])&WRITE,'target is read-only')
+            raw,oldmeta=unpack(self.blob(oid));newmeta=merge_metadata(oldmeta,meta)
+            blob=pack(raw if directory else data,newmeta)
+            if blob==self.blob(oid):self.stats['skipped']+=1;return
+            if directory:self.dir(oid)['meta']=newmeta;self.dirty.add(oid)
+            else:self.blobs[oid]=blob;self.pending[oid]=blob
+            self.stats['updated']+=1
+        else:
+            blob=encode_record({'epoch':1,'high':0,'entries':[],'meta':meta}) if directory else pack(data,meta)
+            oid=self.fresh(blob,kind);self.bind(parent,parts[-1],oid,kind,rights);self.stats['created']+=1
+    def enumerate(self,parts):
+        start,_=self.walk(parts)
+        def visit(oid,path,ancestors):
+            require(oid not in ancestors,'cycle in Unix directory projection')
+            yield path,oid,SPACE
+            for e in self.dir(oid)['entries']:
+                label=e[5];require(label not in (b'.',b'..') and b'/' not in label,'non-Unix label')
+                if not path and label==b'.programs':continue
+                require(e[2]&READ,'unreadable binding')
+                p=path+[label]
+                if e[4]==SPACE:yield from visit(e[1],p,ancestors|{oid})
+                else:yield p,e[1],GE
+        yield from visit(start,[],set())
+    def publish(self,dry=False):
+        # Prepare and validate ALL structural records and reference counts before
+        # allocating anything. Early allocations may become unreachable orphans.
+        for oid in self.dirty:
+            d=self.dirs[oid];d['epoch']+=1;self.pending[oid]=encode_record(d)
+        if not self.pending:return 0
+        refblob=self.b.get(REF)
+        refcounts={}
+        if refblob:
+            raw,meta=unpack(refblob);require(len(raw)>=24 and raw[:8]==b'P2NREF01','invalid reference index')
+            count=int.from_bytes(raw[8:16],'big');require(len(raw)==24+16*count and fnv(raw[:-8])==int.from_bytes(raw[-8:],'big'),'reference index checksum/count')
+            for i in range(count):
+                oid,n=struct.unpack_from('>QQ',raw,16+16*i);require(oid not in refcounts,'duplicate reference count');refcounts[oid]=n
+        for oid,delta in self.refs.items():
+            require(0<=refcounts.get(oid,0)+delta<(1<<64),'invalid reference count update')
+        # Exact bound includes the full reference index and rewritten directories.
+        total=sum(map(len,self.pending.values()))+56+16*(len(refcounts)+len(self.refs))
+        require(total<=MAX,'import exceeds 64 MiB GE/O transaction limit including metadata; split archive')
+        if dry:return total
+        if not self.pending:return 0
+        remap={oid:self.b.call('C',owner=self.owner) for oid in self.new}
+        for oid,d in self.dirs.items():
+            if oid in self.pending:
+                for e in d['entries']:e[1]=remap.get(e[1],e[1])
+                self.pending[oid]=encode_record(d)
+        for oid,delta in self.refs.items():
+            oid=remap.get(oid,oid);refcounts[oid]=refcounts.get(oid,0)+delta
+        if self.refs:
+            raw=b'P2NREF01'+struct.pack('>Q',len(refcounts))+b''.join(struct.pack('>QQ',o,n) for o,n in sorted(refcounts.items()))
+            self.pending[REF]=pack(raw+struct.pack('>Q',fnv(raw)))
+        owners={oid:(self.owner if oid<0 or oid==REF and not refblob else self.b.owner(oid)) for oid in self.pending}
+        require(all(owners.values()),'object without owner metadata')
+        for oid,blob in self.pending.items():self.b.call('P',remap.get(oid,oid),owners[oid],blob)
+        self.b.call('K')
+        for oid,blob in self.pending.items():require(self.b.get(remap.get(oid,oid))==blob,'post-publication object verification failed')
+        return total
+
+def origin(label,directory,member):
+    name=os.fsdecode(label)
+    result={'profile':'plan2001.unix.v1','name':name.encode('utf-8','replace').decode(),'name_bytes':label,'created':None,'media_type':'inode/directory' if directory else 'application/octet-stream'}
+    if member and member.pax_headers:result['tar_pax']=dict(member.pax_headers)
+    result['unix']={'mode':(stat.S_IFDIR if directory else stat.S_IFREG)|(member.mode if member else 0o700),'uid':member.uid if member else 0,'gid':member.gid if member else 0,'mtime_ns':int(Decimal(str(member.mtime))*1000000000) if member else None,'ctime_ns':None,'atime_ns':None,'birthtime_ns':None,'rdev':0}
+    return result
+
+def merge_metadata(old,new):
+    try:before=decode(old);after=decode(new)
+    except (ValueError,TypeError,UnicodeError):return old
+    if not isinstance(before,dict) or not isinstance(after,dict):return old
+    original={key:before[key] for key in ('name','name_bytes','created') if key in before}
+    result=dict(before);result.update(after);result.update(original)
+    if isinstance(before.get('unix'),dict):
+        unix=dict(before['unix']);unix.update(after.get('unix',{}))
+        for key in ('birthtime_ns','ctime_ns','atime_ns'):
+            if unix.get(key) is None and key in before['unix']:unix[key]=before['unix'][key]
+        result['unix']=unix
+    return cbor(result)
+
+def read_archive(path):
+    members=[];seen={};total=0
+    with tarfile.open(path,'r:*') as archive:
+        for m in archive:
+            require((m.isfile() or m.isdir()) and not m.issparse(),'unsupported tar member (only non-sparse regular files and directories)')
+            parts=components(m.name)
+            if not parts:
+                require(m.isdir(),'empty file path');continue
+            key=tuple(parts);require(key not in seen,'duplicate tar path');seen[key]=m.isdir()
+            require(0<=m.size<=MAX and m.uid>=0 and m.gid>=0,'invalid tar member size/identity');total+=m.size
+            require(total<=MAX,'archive raw data exceeds 64 MiB transaction limit')
+            source=archive.extractfile(m) if m.isfile() else None
+            data=source.read(MAX+1) if source else b''
+            require(len(data)==(m.size if m.isfile() else 0),'truncated tar member')
+            meta=origin(parts[-1],m.isdir(),m)
+            if m.isfile():meta['raw_sha256']=hashlib.sha256(data).digest()
+            members.append((parts,data,cbor(meta),m.isdir()))
+    for path,isdir in seen.items():
+        require(all(seen.get(path[:i],True) for i in range(1,len(path))),'file is used as parent directory')
+    return members
+
+def tar_export(tree,path,destination):
+    with open(destination,'xb') as out,tarfile.open(fileobj=out,mode='w',format=tarfile.PAX_FORMAT) as archive:
+        for parts,oid,kind in tree.enumerate(path):
+            if not parts:continue
+            raw,meta=unpack(tree.blob(oid))
+            try:m=decode(meta)
+            except (ValueError,TypeError,UnicodeError):m={}
+            u=m.get('unix',{}) if isinstance(m,dict) else {}
+            if not isinstance(u,dict):u={}
+            t=tarfile.TarInfo(os.fsdecode(b'/'.join(parts)));t.type=tarfile.DIRTYPE if kind==SPACE else tarfile.REGTYPE
+            t.mode=u.get('mode',0o700)&0o7777;t.uid=u.get('uid',0);t.gid=u.get('gid',0)
+            ns=u.get('mtime_ns');t.mtime=0 if ns is None else ns//1000000000
+            if ns is not None:t.pax_headers['mtime']=str(Decimal(ns)/1000000000)
+            t.size=0 if kind==SPACE else len(raw);archive.addfile(t,None if kind==SPACE else io.BytesIO(raw))
+
+def backup(tree,destination,base=()):
+    root,_=tree.walk(base)
+    objects={};kinds={};pending=[(root,SPACE)]
+    while pending:
+        oid,kind=pending.pop()
+        if oid in objects:
+            require(kinds[oid]==kind,'inconsistent object kinds');continue
+        blob=tree.blob(oid);unpack(blob);objects[oid]=blob;kinds[oid]=kind
+        if kind==SPACE:
+            for e in record(blob)['entries']:pending.append((e[1],e[4]))
+    manifest=cbor({'version':1,'root':root,'objects':{oid:{'sha256':hashlib.sha256(blob).digest(),'kind':kinds[oid],'owner':tree.b.owner(oid)} for oid,blob in objects.items()}})
+    with open(destination,'xb') as out,tarfile.open(fileobj=out,mode='w',format=tarfile.USTAR_FORMAT) as a:
+        for name,data in [('manifest.cbor',manifest)]+[(f'objects/{oid:016x}.p2o',blob) for oid,blob in sorted(objects.items())]:
+            t=tarfile.TarInfo(name);t.size=len(data);t.mode=0o600;a.addfile(t,io.BytesIO(data))
+
+def restore_members(path):
+    with tarfile.open(path,'r:') as a:
+        names={};total=0
+        for m in a:
+            require(m.isfile() and m.name not in names and 0<=m.size<=MAX,'invalid backup member');total+=m.size;require(total<=MAX,'backup exceeds transaction limit');names[m.name]=a.extractfile(m).read()
+    require('manifest.cbor' in names,'missing backup manifest');manifest=decode(names.pop('manifest.cbor'));require(manifest['version']==1,'unknown backup version')
+    blobs={};kinds={}
+    for oid,info in manifest['objects'].items():
+        blob=names.pop(f'objects/{oid:016x}.p2o');require(hashlib.sha256(blob).digest()==info['sha256'],'backup checksum mismatch');unpack(blob);blobs[oid]=blob;kinds[oid]=info['kind']
+        require(kinds[oid] in (GE,SPACE),'invalid backup object kind')
+    require(not names,'unexpected backup members')
+    require(kinds[manifest['root']]==SPACE,'backup root is not a directory')
+    for oid,blob in blobs.items():
+        if kinds[oid]==SPACE:
+            for e in record(blob)['entries']:require(e[1] in blobs and kinds[e[1]]==e[4],'missing or mistyped backup binding target')
+    return manifest['root'],blobs,kinds
+
+def restore_graph(tree,snapshot,base):
+    root,blobs,kinds=snapshot
+    destination,rights=tree.walk(base,True);require(rights&WRITE,'restore destination is read-only')
+    dest=tree.dir(destination);require(not dest['entries'],'restore destination must be empty')
+    mapping={root:destination};pending=[root];seen=set()
+    while pending:
+        source=pending.pop()
+        if source in seen:continue
+        seen.add(source)
+        if kinds[source]!=SPACE:continue
+        d=record(blobs[source]);out=[]
+        for e in d['entries']:
+            if e[5]==b'.programs':continue # Restoring bytes never admits programs.
+            child=e[1]
+            if child not in mapping:mapping[child]=tree.fresh(blobs[child],kinds[child])
+            entry=list(e);entry[1]=mapping[child];entry[2]&=rights
+            require(entry[2],'restored binding has no permitted rights')
+            if source==root:
+                dest['high']+=1;entry[0]=dest['high']
+            out.append(entry);tree.refs[entry[1]]=tree.refs.get(entry[1],0)+1;pending.append(child)
+        target=mapping[source]
+        if source==root:d['entries']=out;d['high']=dest['high'];d['epoch']=dest['epoch']
+        else:d['entries']=out
+        tree.dirs[target]=d;tree.dirty.add(target)
+    tree.stats['created']+=len(mapping)-1
+
+
+def main():
+    global pack,unpack,cbor,decode
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--kernel',type=Path,default=KERNEL)
+    p.add_argument('--backend',type=Path,default=HERE.parents[1]/'.agent-work/otar/backend/otar-ge')
+    p.add_argument('operation',choices=['inspect','list','import','export','backup','restore','admit'])
+    p.add_argument('volume');p.add_argument('archive',nargs='?')
+    p.add_argument('--reuse-object',action='append',default=[],metavar='ABSOLUTE_PATH=OID',help='explicitly reuse a byte-identical seeded object instead of allocating an identity')
+    p.add_argument('--root',type=lambda s:int(s,0));p.add_argument('--directory','-C',default='/');p.add_argument('--dry-run',action='store_true')
+    # Accept the requested tar-like spellings without guessing positional order.
+    args=sys.argv[1:]
+    for flag,op in [('-xf','import'),('-cf','export')]:
+        if flag in args:
+            i=args.index(flag);require(i+2<len(args),f'{flag} needs ARCHIVE VOLUME')
+            args=args[:i]+[op,args[i+2],args[i+1]]+args[i+3:];break
+    a=p.parse_args(args);sys.path.insert(0,str(a.kernel/'tools/host'))
+    from object_format import pack,unpack,cbor,decode
+    mutating=a.operation in ('import','restore','admit') and not a.dry_run
+    if a.operation in ('import','restore'):
+        require(a.archive,'archive required');members=read_archive(a.archive) if a.operation=='import' else restore_members(a.archive)
+    require(a.backend.is_file(),f'build GE/O backend first: python3 {HERE}/build_backend.py --output {a.backend.parent}')
+    flags=os.O_RDWR if mutating else os.O_RDONLY
+    st=os.stat(a.volume);require(stat.S_ISREG(st.st_mode) or stat.S_ISBLK(st.st_mode),'target must be volume file or partition')
+    if stat.S_ISBLK(st.st_mode):
+        device=Path('/sys/dev/block')/f'{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}'
+        require((device/'partition').exists(),'whole-disk block devices are not accepted')
+        flags|=os.O_EXCL
+    fd=os.open(a.volume,flags);backend=None
+    try:
+        require(os.fstat(fd).st_ino==st.st_ino and os.fstat(fd).st_rdev==st.st_rdev,'target changed during open')
+        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        size=os.lseek(fd,0,os.SEEK_END)
+        backend=Backend(a.backend,fd,size,mutating)
+        if a.operation=='inspect':
+            d=json.loads(subprocess.check_output([sys.executable,str(a.kernel/'tools/host/oinspect.py'),f'/proc/self/fd/{fd}'],pass_fds=[fd]))
+            roots=[]
+            for oid in d['objects']:
+                blob=backend.get(int(oid,16))
+                try:r=record(blob)
+                except ValueError:continue
+                roots.append({'oid':'0x'+oid,'bindings':len(r['entries'])})
+            print(json.dumps({'volume':d['volume'],'owner_mode':d['owner_mode'],'project_objects':roots},indent=2));return
+        require(a.root is not None and 0<a.root<(1<<64),'--root must be a nonzero unsigned 64-bit OID');tree=Tree(backend,a.root);base=components(a.directory,True)
+        if a.operation=='list':
+            for parts,oid,kind in tree.enumerate(base):print(f'{oid:#018x} {"dir " if kind==SPACE else "file"} /{os.fsdecode(b"/".join(parts))}')
+        elif a.operation in ('import','restore'):
+            reuse={}
+            for item in a.reuse_object:
+                name,oid=item.rsplit('=',1);path=tuple(components(name,True));require(path not in reuse,'duplicate reuse selector');value=int(oid,0);require(0<value<(1<<64),'invalid reuse OID');reuse[path]=value
+            if a.operation=='restore':
+                require(not reuse,'reuse selectors are only for ordinary import');restore_graph(tree,members,base)
+            else:
+                for parts,data,meta,directory in members:tree.store(base+parts,data,meta,directory,reuse.pop(tuple(base+parts),None))
+            require(not reuse,'reuse selector absent from archive')
+            total=tree.publish(a.dry_run);print(json.dumps({'dry_run':a.dry_run,**tree.stats,'transaction_bytes_bound':total}))
+        elif a.operation=='export':require(a.archive,'output archive required');tar_export(tree,base,a.archive)
+        elif a.operation=='backup':require(a.archive,'output archive required');backup(tree,a.archive,base)
+        elif a.operation=='admit':
+            require(a.archive,'program path required');parts=components(a.archive,True);require(parts and parts[0]!=b'.programs','invalid program path')
+            parent,rights=tree.walk(parts[:-1]);e=tree.find(parent,parts[-1]);require(e and e[4]==GE and (e[2]&rights&ADMISSION)==ADMISSION,'program source lacks required rights')
+            blob=tree.blob(e[1]);raw,meta=unpack(blob);validate_elf(raw)
+            catalog,crights=tree.walk([b'.programs']+parts[:-1],True);require(crights&WRITE,'catalog is read-only')
+            old=tree.find(catalog,parts[-1]);oid=tree.fresh(blob,GE)
+            if old:
+                require(old[4]==GE,'admission path is directory');tree.dir(catalog)['entries'].remove(old);tree.refs[old[1]]=tree.refs.get(old[1],0)-1
+            tree.bind(catalog,parts[-1],oid,GE,ADMISSION);tree.publish(a.dry_run)
+            print('Admission snapshot '+('validated' if a.dry_run else 'published')+': '+a.archive)
+    finally:
+        if backend:backend.close()
+        os.close(fd)
+
+def validate_elf(p):
+    require(len(p)>=64 and p[:7]==b'\x7fELF\2\1\1','not native AMD64 ELF')
+    h=struct.unpack_from('<HHIQQQIHHHHHH',p,16);typ,machine,version,entry,phoff,_,_,eh,phsize,count,*_=h
+    require((typ,machine,version,eh,phsize)==(2,62,1,64,56) and 0<count<=64 and 64<=phoff<=len(p)-count*56,'unsupported ELF header')
+    text=data=None;memory=0;loads=0
+    for i in range(count):
+        kind,flags,off,va,_,size,span,align=struct.unpack_from('<IIQQQQQQ',p,phoff+56*i)
+        require(kind not in (2,3,7),'dynamic/interpreter/TLS ELF unsupported')
+        if kind!=1:continue
+        loads+=1;memory+=span
+        require(loads<=2 and off<=len(p) and size<=len(p)-off and size<=span and 0x200000<=va<0x7fff00000000 and span<=0x7fff00000000-va and align==4096 and va%4096==off%4096 and span<=256*1024*1024 and memory<=256*1024*1024,'invalid ELF segment')
+        if flags==5:
+            require(text is None and va==0x200000 and size and size==span and va<=entry<va+size,'invalid text segment');text=(va+size+4095)&~4095
+        elif flags==6:require(data is None and va%4096==0,'invalid data segment');data=va
+        else:raise ValueError('unsupported ELF permissions')
+    require(loads==2 and text is not None and data is not None and data>=text,'invalid ELF load layout')
+
+if __name__=='__main__':
+    try:main()
+    except (ValueError,OSError,KeyError,TypeError,tarfile.TarError,subprocess.SubprocessError) as e:
+        print(f'otar: {e}',file=sys.stderr);sys.exit(1)
