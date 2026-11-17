@@ -2223,6 +2223,28 @@ vobjholdohand(int handle, int kind, int rights)
  return oh;
 }
 
+/* A scoped executable grant fixes the stored OID; callers cannot substitute
+ * a different object through the same capability. */
+Ohand*
+vobjholdexec(int handle, uvlong *oid)
+{
+ Vhand *h;
+ Ohand *oh;
+ h = vlookup(handle, Vexecute);
+ if(h->obj->priv == nil ||
+    (h->obj->kind != VkindGeVolume && h->obj->kind != VkindGe)){
+  vhandput(h);error(Ebadarg);
+ }
+ if(h->obj->kind == VkindGe){
+  if(*oid != 0 || h->obj->oid == 0){vhandput(h);error(Ebadarg);}
+  *oid = h->obj->oid;
+ }
+ oh = h->obj->priv;
+ incref(&oh->ref);
+ vhandput(h);
+ return oh;
+}
+
 int
 vobjcreatege(int volumehandle, void *buf, long n, uvlong *oidp)
 {

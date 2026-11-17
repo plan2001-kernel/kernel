@@ -187,6 +187,7 @@ void	osbootrootrestore(void);
 int	vobjrightsfromo(int rights);
 int	vobjinstallohand(Ohand*, int kind);
 Ohand*	vobjholdohand(int handle, int kind, int rights);
+Ohand*	vobjholdexec(int handle, uvlong *oid);
 Ohand*	osopenvolume(void);
 void	oshandput(Ohand*);
 long	osreadhand(Ohand*, uvlong oid, void *buf, long n, uvlong *ver);
