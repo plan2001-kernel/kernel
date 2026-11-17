@@ -1,0 +1,86 @@
+--- a/tcc.h
++++ b/tcc.h
+@@ -203,0 +204,4 @@
++#ifdef TCC_TARGET_PLAN2001
++# undef TCC_IS_NATIVE /* no unmediated executable-memory or -run path */
++#endif
++
+@@ -2027,0 +2032,11 @@
++
++#ifdef TCC_TARGET_PLAN2001
++int p2001_tcc_open(const char *, int, ...);
++ssize_t p2001_tcc_read(int, void *, size_t);
++off_t p2001_tcc_lseek(int, off_t, int);
++int p2001_tcc_close(int);
++#define open p2001_tcc_open
++#define read p2001_tcc_read
++#define lseek p2001_tcc_lseek
++#define close p2001_tcc_close
++#endif
+--- a/tccpp.c
++++ b/tccpp.c
+@@ -3552 +3552,3 @@
+-# if defined TCC_TARGET_MACHO
++# if defined TCC_TARGET_PLAN2001
++    "__plan2001__\0"
++# elif defined TCC_TARGET_MACHO
+--- a/tccelf.c
++++ b/tccelf.c
+@@ -1767,0 +1768,5 @@
++#ifdef TCC_TARGET_PLAN2001
++    if (s1->output_type != TCC_OUTPUT_DLL)
++        tcc_add_crt(s1, "crt1.o");
++    return;
++#endif
+@@ -1802,0 +1808,3 @@
++#ifdef TCC_TARGET_PLAN2001
++    return;
++#endif
+@@ -1835,0 +1844,12 @@
++    /* Native static runtime; never select a Linux startup or dynamic loader. */
++#ifdef TCC_TARGET_PLAN2001
++    if (!s1->nostdlib) {
++        for (int pass = 0; pass < 3; ++pass) {
++            tcc_add_library(s1, "plan2001");
++            tcc_add_library(s1, "c");
++            tcc_add_library(s1, "m");
++            tcc_add_support(s1, TCC_LIBTCC1);
++        }
++    }
++    return;
++#endif
+@@ -2361,2 +2381,2 @@
+-#if TARGETOS_NetBSD || TARGETOS_FreeBSD
+-	    /* NetBSD only supports 2 PT_LOAD sections.
++#if TARGETOS_NetBSD || TARGETOS_FreeBSD || defined TCC_TARGET_PLAN2001
++	    /* These targets support only 2 PT_LOAD sections.
+@@ -2486,0 +2507,5 @@
++#ifdef TCC_TARGET_PLAN2001
++            /* The native data mapping requires a page-aligned base. Pad
++             * file and memory together rather than duplicating a partial page. */
++            align = s_align - 1;
++#else
+@@ -2494,0 +2520 @@
++#endif
+@@ -2831,0 +2858,8 @@
++#ifdef TCC_TARGET_PLAN2001
++    /* GE/O publishes complete values. Coalesce sequential ELF output rather
++     * than rewriting the whole persistent object for every small stdio write. */
++    if (setvbuf(f, NULL, _IOFBF, 1024 * 1024)) {
++        fclose(f);
++        return tcc_error_noabort("cannot buffer ELF output");
++    }
++#endif
+@@ -2843 +2877,2 @@
+-    fclose(f);
++    if (fclose(f))
++        ret = tcc_error_noabort("cannot finish ELF output: %s", strerror(errno));
+--- a/tcc.c
++++ b/tcc.c
+@@ -312,0 +313,4 @@
++#ifdef TCC_TARGET_PLAN2001
++            tcc_error_noabort("cross-target forwarding is unavailable on Plan2001");
++            ret = 1;
++#else
+@@ -313,0 +318 @@
++#endif

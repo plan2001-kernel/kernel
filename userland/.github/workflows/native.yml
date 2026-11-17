@@ -1,0 +1,136 @@
+name: Native Plan2001 libc link and QEMU baseline
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/native.yml'
+      - 'config/sources.json'
+      - 'tools/ci/**'
+      - 'docs/BUILD.md'
+      - 'docs/PORTING.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/native.yml'
+      - 'config/sources.json'
+      - 'tools/ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-userland-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-abi-and-qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out userland
+        uses: actions/checkout@v4
+
+      - name: Install pinned kernel build and QEMU dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-14 binutils clang lld file mtools ovmf \
+            qemu-system-x86 python3
+
+      - name: Fetch exact kernel and BusyBox revisions
+        run: |
+          python3 tools/ci/fetch_sources.py \
+            --lock config/sources.json \
+            --dest "${{ runner.temp }}/plan2001-sources" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Build real AMD64 kernel and UEFI boot loader
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/plan2001-sources/kernel
+        run: |
+          tools/build-gcc.sh --kernel -j 4
+          tools/build-efi-gcc.sh -j 4
+
+      - name: Build native MicroPython, Plan2001 libc archive and host volume tools
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/plan2001-sources/kernel
+        run: |
+          tools/build-mpy-gcc.sh -j 4
+          tools/build.sh
+
+      - name: Link upstream BusyBox true applet against Plan2001 libc
+        run: |
+          python3 tools/ci/native_probe.py \
+            --kernel "${{ runner.temp }}/plan2001-sources/kernel" \
+            --busybox "${{ runner.temp }}/plan2001-sources/busybox" \
+            --reports "${{ runner.temp }}/plan2001-reports" \
+            --cc gcc-14
+
+      - name: Boot the real Plan2001 AMD64 kernel and MicroPython in QEMU
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/plan2001-sources/kernel
+        run: |
+          bash tools/qemu-o-boot.sh --no-build --accel kvm:tcg \
+            --timeout 180 --obootexec 0x4f45584543000003 \
+            --output-dir "${{ runner.temp }}/plan2001-reports/qemu"
+
+      - name: Boot the native BusyBox true applet in Plan2001 QEMU
+        run: |
+          bash tools/ci/guest_true.sh \
+            "${{ runner.temp }}/plan2001-sources/kernel" \
+            "${{ runner.temp }}/plan2001-reports/native-true/busybox-true-plan2001.elf" \
+            "${{ runner.temp }}/plan2001-reports"
+
+      - name: Summarize native tests without overstating guest applet coverage
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Native libc and QEMU checks'
+            echo
+            echo 'The native link uses the original BusyBox true.c with a minimal libbb diagnostic header, the real Plan2001 libc archive, startup and syscall stubs.'
+            echo
+            if [ -f "${{ runner.temp }}/plan2001-reports/native-link.md" ]; then
+              cat "${{ runner.temp }}/plan2001-reports/native-link.md"
+            else
+              echo 'Native BusyBox applet link: **NOT COMPLETED**.'
+            fi
+            echo
+            if [ -f "${{ runner.temp }}/plan2001-reports/qemu/report.txt" ]; then
+              echo 'Plan2001 MicroPython QEMU baseline report:'
+              echo '~~~'
+              cat "${{ runner.temp }}/plan2001-reports/qemu/report.txt" | tail -50
+              echo '~~~'
+            else
+              echo 'QEMU boot: **NOT COMPLETED**.'
+            fi
+            echo
+            if [ -f "${{ runner.temp }}/plan2001-reports/busybox-true-guest.md" ]; then
+              cat "${{ runner.temp }}/plan2001-reports/busybox-true-guest.md"
+            else
+              echo 'BusyBox true guest run: **NOT COMPLETED**.'
+            fi
+            echo '**NOT RUN:** full BusyBox multicall link, POSIX compatibility, physical hardware.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload native link and QEMU logs (never disk images)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-plan2001-link-and-qemu-reports
+          path: |
+            ${{ runner.temp }}/plan2001-reports/*.md
+            ${{ runner.temp }}/plan2001-reports/*.log
+            ${{ runner.temp }}/plan2001-reports/*.txt
+            ${{ runner.temp }}/plan2001-reports/*.json
+            ${{ runner.temp }}/plan2001-reports/qemu/*.log
+            ${{ runner.temp }}/plan2001-reports/qemu/report.txt
+            ${{ runner.temp }}/plan2001-reports/qemu/ream/*.log
+            ${{ runner.temp }}/plan2001-reports/qemu-busybox-true/*.log
+            ${{ runner.temp }}/plan2001-reports/qemu-busybox-true/*.json
+          if-no-files-found: warn
+          retention-days: 14

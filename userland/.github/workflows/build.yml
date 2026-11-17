@@ -1,0 +1,66 @@
+name: Userland build dependencies and static host control
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: userland-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-and-host-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out userland
+        uses: actions/checkout@v4
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential binutils file
+
+      - name: Fetch pinned kernel and BusyBox as sibling trees
+        run: |
+          python3 tools/ci/fetch_sources.py \
+            --lock config/sources.json \
+            --dest "${{ runner.temp }}/plan2001-sources" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Audit native ABI and Plan2001 libc inputs
+        run: |
+          python3 tools/ci/audit_kernel.py \
+            --kernel "${{ runner.temp }}/plan2001-sources/kernel" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Build and smoke-test static Linux host-control BusyBox
+        run: |
+          python3 tools/ci/host_control.py \
+            --busybox "${{ runner.temp }}/plan2001-sources/busybox" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Publish truthful test scope
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "${{ runner.temp }}/plan2001-reports/SUMMARY.md" ]; then
+            cat "${{ runner.temp }}/plan2001-reports/SUMMARY.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "${{ runner.temp }}/plan2001-reports/host-control.md" ]; then
+            cat "${{ runner.temp }}/plan2001-reports/host-control.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload source inventory, config and build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: userland-dependency-and-host-control
+          path: ${{ runner.temp }}/plan2001-reports/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,102 @@
+name: Plan2001 libc ABI audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/libc-audit.yml'
+      - 'config/sources.json'
+      - 'tools/ci/**'
+      - 'docs/libc-audit.md'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: userland-libc-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  libc-abi-symbols:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out userland sources
+        uses: actions/checkout@v4
+
+      - name: Install compiler and archive inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-14 binutils file python3
+
+      - name: Verify audit helper behavior
+        run: python3 -m unittest discover -s tools/ci -p 'test_libc_audit.py' -v
+
+      - name: Fetch exact immutable kernel and BusyBox inputs
+        run: |
+          python3 tools/ci/fetch_sources.py \
+            --lock config/sources.json \
+            --dest "${{ runner.temp }}/plan2001-sources" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Build pinned native Plan2001 libc and user startup objects
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/plan2001-sources/kernel
+        run: tools/build-mpy-gcc.sh -j 4
+
+      - name: Build Linux-host BusyBox static control and its reference objects
+        run: |
+          python3 tools/ci/host_control.py \
+            --busybox "${{ runner.temp }}/plan2001-sources/busybox" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Link unmodified BusyBox true applet against native libc
+        run: |
+          python3 tools/ci/native_probe.py \
+            --kernel "${{ runner.temp }}/plan2001-sources/kernel" \
+            --busybox "${{ runner.temp }}/plan2001-sources/busybox" \
+            --reports "${{ runner.temp }}/plan2001-reports" \
+            --cc gcc-14
+
+      - name: Audit exported libc symbols and BusyBox object requirements
+        run: |
+          python3 tools/ci/libc_audit.py \
+            --kernel "${{ runner.temp }}/plan2001-sources/kernel" \
+            --busybox "${{ runner.temp }}/plan2001-sources/busybox" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Publish scope and findings
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Plan2001 libc ABI audit'
+            echo
+            if [ -f "${{ runner.temp }}/plan2001-reports/libc-audit.md" ]; then
+              cat "${{ runner.temp }}/plan2001-reports/libc-audit.md"
+            else
+              echo '**NOT COMPLETED:** detailed symbol audit. See step logs.'
+            fi
+            echo
+            echo '**Not demonstrated by this workflow:** BusyBox multicall'
+            echo 'target link, native POSIX semantics, BusyBox QEMU execution,'
+            echo 'or physical hardware execution.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload audit evidence (not binaries or disk images)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan2001-libc-abi-audit
+          path: |
+            ${{ runner.temp }}/plan2001-reports/*.md
+            ${{ runner.temp }}/plan2001-reports/*.json
+            ${{ runner.temp }}/plan2001-reports/*.log
+            ${{ runner.temp }}/plan2001-reports/*.txt
+            ${{ runner.temp }}/plan2001-reports/*.config
+          if-no-files-found: warn
+          retention-days: 14

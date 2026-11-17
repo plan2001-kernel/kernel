@@ -1,0 +1,128 @@
+name: BusyBox native target build and QEMU smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/busybox-target.yml'
+      - 'config/sources.json'
+      - 'ports/busybox/**'
+      - 'tools/ci/build_busybox_target.py'
+      - 'tools/ci/guest_busybox.sh'
+      - 'docs/BUILD.md'
+      - 'docs/BUSYBOX-TARGET.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/busybox-target.yml'
+      - 'config/sources.json'
+      - 'ports/busybox/**'
+      - 'tools/ci/build_busybox_target.py'
+      - 'tools/ci/guest_busybox.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: busybox-target-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-busybox-qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Check out userland port
+        uses: actions/checkout@v4
+
+      - name: Install native build, QEMU and OVMF dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-14 binutils clang lld file mtools ovmf \
+            qemu-system-x86 python3
+
+      - name: Fetch pinned kernel and upstream BusyBox
+        run: |
+          python3 tools/ci/fetch_sources.py \
+            --lock config/sources.json \
+            --dest "${{ runner.temp }}/plan2001-sources" \
+            --reports "${{ runner.temp }}/plan2001-reports"
+
+      - name: Build native Plan2001 AMD64 kernel and UEFI loader
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/plan2001-sources/kernel
+        run: |
+          tools/build-gcc.sh --kernel -j 4
+          tools/build-efi-gcc.sh -j 4
+
+      - name: Build native Plan2001 libc, startup, and O-volume tools
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/plan2001-sources/kernel
+        run: |
+          tools/build-mpy-gcc.sh -j 4
+          tools/build.sh
+
+      - name: Cross-compile original BusyBox true, false, echo to native ELF
+        run: |
+          python3 tools/ci/build_busybox_target.py \
+            --kernel "${{ runner.temp }}/plan2001-sources/kernel" \
+            --busybox "${{ runner.temp }}/plan2001-sources/busybox" \
+            --reports "${{ runner.temp }}/plan2001-reports" \
+            --cc gcc-14
+
+      - name: Execute the native BusyBox applets in real Plan2001 QEMU
+        run: |
+          bash tools/ci/guest_busybox.sh \
+            "${{ runner.temp }}/plan2001-sources/kernel" \
+            "${{ runner.temp }}/plan2001-reports/busybox-target/busybox-smoke-plan2001.elf" \
+            "${{ runner.temp }}/plan2001-reports"
+
+      - name: Publish runnable native BusyBox subset ELF
+        uses: actions/upload-artifact@v4
+        with:
+          name: busybox-plan2001-amd64
+          path: ${{ runner.temp }}/plan2001-reports/busybox-target/busybox-plan2001.elf
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish build and guest-test result
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## BusyBox target cross-compile and Plan2001 QEMU'
+            echo
+            if [ -f "${{ runner.temp }}/plan2001-reports/busybox-target-build.md" ]; then
+              cat "${{ runner.temp }}/plan2001-reports/busybox-target-build.md"
+            else
+              echo 'Target applet build: **NOT COMPLETED**.'
+            fi
+            echo
+            if [ -f "${{ runner.temp }}/plan2001-reports/busybox-guest.md" ]; then
+              cat "${{ runner.temp }}/plan2001-reports/busybox-guest.md"
+            else
+              echo 'Plan2001 QEMU applet execution: **NOT COMPLETED**.'
+            fi
+            echo
+            echo '**Not included:** complete upstream BusyBox Makefile port,'
+            echo 'native POSIX layer, interactive shell, hardware.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload native reports and guest serial logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: busybox-native-target-qemu
+          path: |
+            ${{ runner.temp }}/plan2001-reports/*.md
+            ${{ runner.temp }}/plan2001-reports/*.json
+            ${{ runner.temp }}/plan2001-reports/*.txt
+            ${{ runner.temp }}/plan2001-reports/*.log
+            ${{ runner.temp }}/plan2001-reports/qemu-busybox/*.log
+            ${{ runner.temp }}/plan2001-reports/qemu-busybox/*.json
+            ${{ runner.temp }}/plan2001-reports/busybox-target/*.readelf.txt
+          if-no-files-found: warn
+          retention-days: 14

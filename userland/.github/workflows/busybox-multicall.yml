@@ -1,0 +1,102 @@
+name: Native upstream BusyBox multicall
+
+on:
+  pull_request:
+    paths: ['ports/**', 'tests/**', 'tools/ci/**', 'config/**', '.github/workflows/busybox-multicall.yml']
+  push:
+    branches: [main]
+    paths: ['ports/**', 'tests/**', 'tools/ci/**', 'config/**', '.github/workflows/busybox-multicall.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build and guest dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc-14 g++-14 \
+            binutils clang lld make git autoconf automake libtool texinfo flex bison \
+            python3 python3-pil curl file mtools ovmf qemu-system-x86
+      - name: Resolve current kernel main and pinned BusyBox
+        run: |
+          python3 tools/ci/fetch_sources.py --lock config/sources.json \
+            --dest "$RUNNER_TEMP/deps" --reports "$RUNNER_TEMP/reports"
+      - name: Host inventory and native adapter contracts
+        run: |
+          python3 -m unittest discover -s tools/ci -p 'test_*.py' -v
+          bash tools/ci/test_pvd.sh
+          bash tools/ci/test_newlib_fd.sh "$RUNNER_TEMP/deps/kernel"
+      - name: Build pinned target Newlib
+        run: bash tools/ci/build_newlib_libc.sh "$RUNNER_TEMP/newlib" "$RUNNER_TEMP/reports"
+      - name: Build kernel, startup, native syscall stubs and image tools
+        working-directory: ${{ runner.temp }}/deps/kernel
+        env:
+          CC: gcc-14
+        run: |
+          tools/build-gcc.sh --kernel -j 4
+          tools/build-efi-gcc.sh -j 4
+          tools/build-mpy-gcc.sh -j 4
+          tools/build.sh
+      - name: Native static ELF, every enabled applet, external ash and F5 image tests
+        id: image
+        run: |
+          bash tools/ci/build_multicall_image.sh "$RUNNER_TEMP/deps/kernel" \
+            "$RUNNER_TEMP/deps/busybox" "$RUNNER_TEMP/newlib" \
+            "$RUNNER_TEMP/reports" "$RUNNER_TEMP/multicall-image"
+          (cd "$RUNNER_TEMP/multicall-image" && sha256sum -c SHA256SUMS)
+      - name: Report exact evidence boundaries
+        if: always()
+        run: |
+          echo '### Native BusyBox multicall' >> "$GITHUB_STEP_SUMMARY"
+          case "${{ steps.image.outcome }}" in
+            success) echo 'PASS: static native ELF, all enabled applet guest tests, virtio F5 image and corresponding sources. AHCI is reported separately below.' >> "$GITHUB_STEP_SUMMARY" ;;
+            failure) echo 'FAIL: native image gate; inspect build and guest logs.' >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo 'NOT RUN: native image gate did not execute to completion.' >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+          if [ -f "$RUNNER_TEMP/multicall-image/verification.json" ]; then cat "$RUNNER_TEMP/multicall-image/verification.json" >> "$GITHUB_STEP_SUMMARY"; fi
+          echo 'NOT RUN: physical hardware and ARM64. Disabled applets remain pending native feasibility audit; #17 is incomplete.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload native manifests and guest evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-busybox-multicall-evidence
+          path: |
+            ${{ runner.temp }}/reports/sources.json
+            ${{ runner.temp }}/reports/*.log
+            ${{ runner.temp }}/reports/busybox-multicall/*.json
+            ${{ runner.temp }}/reports/busybox-multicall/*.list*
+            ${{ runner.temp }}/reports/busybox-multicall/*.txt
+            ${{ runner.temp }}/reports/busybox-multicall/*.config
+            ${{ runner.temp }}/reports/busybox-multicall/build.log
+            ${{ runner.temp }}/multicall-image/native/**/*.log
+            ${{ runner.temp }}/multicall-image/native/**/*.json
+            ${{ runner.temp }}/multicall-image/f6-console/**/*.log
+            ${{ runner.temp }}/multicall-image/f6-console/**/screens/**/*.txt
+            ${{ runner.temp }}/multicall-image/eof-console/**/*.log
+            ${{ runner.temp }}/multicall-image/eof-console/**/screens/**/*.txt
+            ${{ runner.temp }}/multicall-image/essentials-console/**/*.log
+            ${{ runner.temp }}/multicall-image/essentials-console/**/screens/**/*.txt
+            ${{ runner.temp }}/multicall-image/qemu-busybox-f5*/**/*.log
+            ${{ runner.temp }}/multicall-image/qemu-busybox-f5*/screens/**/*.txt
+            ${{ runner.temp }}/multicall-image/SHA256SUMS
+          retention-days: 14
+      - name: Upload distributable with corresponding sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan2001-busybox-amd64-initial-profile
+          path: |
+            ${{ runner.temp }}/multicall-image/plan2001-busybox-amd64.img
+            ${{ runner.temp }}/multicall-image/busybox.elf
+            ${{ runner.temp }}/multicall-image/*source.tar.gz
+            ${{ runner.temp }}/multicall-image/*.json
+            ${{ runner.temp }}/multicall-image/*.config
+            ${{ runner.temp }}/multicall-image/LICENSE.busybox
+            ${{ runner.temp }}/multicall-image/README.md
+            ${{ runner.temp }}/multicall-image/SHA256SUMS
+          retention-days: 14

@@ -1,0 +1,11 @@
+{
+  "tinycc": {
+    "url": "https://repo.or.cz/tinycc.git",
+    "commit": "f830a1697e159056b75de40a60464bc43ee670a3",
+    "license": "LGPL-2.1-or-later"
+  },
+  "newlib": {
+    "commit": "8ba4275b83ec27529f67e0d477611fa6d8d6e6bd",
+    "license_file": "COPYING.NEWLIB"
+  }
+}

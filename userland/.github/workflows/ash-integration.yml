@@ -1,0 +1,220 @@
+name: Ash integration - native process, full Newlib and UEFI QEMU
+
+on:
+  push:
+    branches: [feature/ash-hardware-boot, main]
+    paths:
+      - '.github/workflows/ash-integration.yml'
+      - 'ports/newlib/**'
+      - 'ports/unix/**'
+      - 'tools/ci/**'
+      - 'config/**'
+  pull_request:
+    paths:
+      - '.github/workflows/ash-integration.yml'
+      - 'ports/newlib/**'
+      - 'ports/unix/**'
+      - 'tools/ci/**'
+      - 'config/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ash-integration-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  INTEGRATION_KERNEL_SHA: c2714daeea31e6d658192946f5d7c890eaf7984f
+
+jobs:
+  controller-selection:
+    name: AHCI controller selection is passed to the actual QEMU process
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert ash QEMU controller switch is wired to command line
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path("tools/ci/guest_busybox_f5.sh").read_text()
+          start = src.find('  "$QOB_QEMU" -name')
+          assert start >= 0, "QEMU invocation not found"
+          end = src.find("\n  QOB_CURRENT_PID=", start)
+          assert end > start, "QEMU invocation boundary not found"
+          invocation = src[start:end]
+          expected = '"${disk_device[@]}"'
+          assert expected in invocation, (
+              "AHCI review blocker: UX_HW_CONTROLLER is parsed, but the "
+              "disk_device array is not passed to QEMU; both modes boot virtio"
+          )
+          print("PASS: controller selection is present in QEMU invocation")
+          PY
+      - name: Explain known hardware validation limitation
+        if: always()
+        run: |
+          echo 'The QEMU launcher must pass the selected controller device array to QEMU, never silently fall back to virtio.' >> "$GITHUB_STEP_SUMMARY"
+
+  host-contracts:
+    name: Host Unix/PVD/UXPIPE/Newlib descriptor contracts (kernel PR64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out exact kernel dependency SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/kernel"
+          git -C "$RUNNER_TEMP/kernel" remote add origin https://github.com/plan2001-kernel/kernel.git
+          git -C "$RUNNER_TEMP/kernel" fetch --depth=1 --no-tags origin "$INTEGRATION_KERNEL_SHA"
+          git -C "$RUNNER_TEMP/kernel" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/kernel" rev-parse HEAD)" = "$INTEGRATION_KERNEL_SHA"
+          echo "Kernel dependency: $INTEGRATION_KERNEL_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Run all Python CI helper regressions
+        run: python3 -m unittest discover -s tools/ci -p 'test_*.py' -v
+      - name: Compile and run PVD/init host sanitizer tests
+        run: bash tools/ci/test_pvd.sh
+      - name: Compile and run UXFS/GE-O rollback host sanitizer tests
+        run: bash tools/ci/test_unix_stages.sh 4 "$RUNNER_TEMP/kernel"
+      - name: Compile and run supervisor/spawn host sanitizer tests
+        run: bash tools/ci/test_unix_stages.sh 6 "$RUNNER_TEMP/kernel"
+      - name: Compile and run UXPIPE/RPC/shell host sanitizer tests
+        run: bash tools/ci/test_unix_stages.sh 7 "$RUNNER_TEMP/kernel"
+      - name: Run Newlib fd alias, poll, EOF, cleanup and rollback tests
+        run: bash tools/ci/test_newlib_fd.sh "$RUNNER_TEMP/kernel"
+      - name: State test scope
+        if: always()
+        run: |
+          echo 'Host contracts use mocks and sanitizers; they are not native QEMU evidence.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Kernel PR64 exact SHA is an explicit review dependency, not the moving kernel main branch.' >> "$GITHUB_STEP_SUMMARY"
+
+  real-kernel-process:
+    name: Native Newlib fork/exec/signal and real BusyBox ash QEMU
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AMD64/Newlib/QEMU dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-14 g++-14 binutils clang lld make git \
+            autoconf automake libtool texinfo flex bison \
+            python3 python3-pil curl file mtools ovmf qemu-system-x86
+      - name: Check out exact kernel PR64 dependency (not moving main)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/kernel"
+          git -C "$RUNNER_TEMP/kernel" remote add origin https://github.com/plan2001-kernel/kernel.git
+          git -C "$RUNNER_TEMP/kernel" fetch --depth=1 --no-tags origin "$INTEGRATION_KERNEL_SHA"
+          git -C "$RUNNER_TEMP/kernel" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/kernel" rev-parse HEAD)" = "$INTEGRATION_KERNEL_SHA"
+          printf 'Kernel dependency: %s\n' "$INTEGRATION_KERNEL_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build upstream Newlib 4.6.0 (separate sysroot)
+        run: bash tools/ci/build_newlib_libc.sh "$RUNNER_TEMP/newlib-pinned" "$RUNNER_TEMP/newlib-reports"
+      - name: Run Newlib descriptor contract under UBSan before boot
+        run: bash tools/ci/test_newlib_fd.sh "$RUNNER_TEMP/kernel"
+      - name: Build native kernel and UEFI loader
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/kernel
+        run: |
+          tools/build-gcc.sh --kernel -j 4
+          tools/build-efi-gcc.sh -j 4
+      - name: Build MicroPython runtime, native syscall stubs and GE/O host tools
+        env:
+          CC: gcc-14
+        working-directory: ${{ runner.temp }}/kernel
+        run: |
+          tools/build-mpy-gcc.sh -j 4
+          tools/build.sh
+      - name: Static link full Newlib and process probes
+        run: |
+          python3 tools/ci/newlib_full_link.py \
+            --kernel "$RUNNER_TEMP/kernel" \
+            --reports "$RUNNER_TEMP/newlib-reports" --cc gcc-14
+      - name: QEMU full Newlib stdio, heap, libm and startup
+        run: |
+          bash tools/ci/newlib_full_guest.sh \
+            "$RUNNER_TEMP/kernel" \
+            "$RUNNER_TEMP/newlib-reports/newlib-target/newlib-boot.elf" \
+            "$RUNNER_TEMP/newlib-reports"
+      - name: QEMU fork/exec, fd inheritance, signal and alarm acceptance
+        run: |
+          bash tools/ci/newlib_full_guest.sh \
+            "$RUNNER_TEMP/kernel" \
+            "$RUNNER_TEMP/newlib-reports/newlib-target/newlib-process.elf" \
+            "$RUNNER_TEMP/newlib-reports" process
+      - name: Fetch pinned upstream BusyBox 1.36.1 for full ash build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUSYBOX_SHA=$(python3 -c 'import json; print(json.load(open("config/sources.json"))["busybox"]["commit"])')
+          git init -q "$RUNNER_TEMP/busybox"
+          git -C "$RUNNER_TEMP/busybox" remote add origin https://github.com/mirror/busybox.git
+          git -C "$RUNNER_TEMP/busybox" fetch --depth=1 --no-tags origin "$BUSYBOX_SHA"
+          git -C "$RUNNER_TEMP/busybox" checkout --detach -q FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/busybox" rev-parse HEAD)" = "$BUSYBOX_SHA"
+      - name: Link genuine upstream BusyBox ash with Newlib and audit ELF
+        shell: bash
+        run: |
+          if ! python3 tools/ci/build_ash.py \
+            --kernel "$RUNNER_TEMP/kernel" \
+            --busybox "$RUNNER_TEMP/busybox" \
+            --reports "$RUNNER_TEMP/newlib-reports"; then
+            echo '=== Upstream ash compiler/linker diagnostics ===' >&2
+            tail -n 160 "$RUNNER_TEMP/newlib-reports/ash-native/build.log" >&2 || true
+            exit 1
+          fi
+      - name: Build distributable GPT UEFI ash image and verify bundle checksums
+        run: |
+          bash tools/ci/build_hw_boot.sh \
+            "$RUNNER_TEMP/kernel" \
+            "$RUNNER_TEMP/busybox" \
+            "$RUNNER_TEMP/newlib-reports" \
+            "$RUNNER_TEMP/ash-hw-image"
+          test -s "$RUNNER_TEMP/ash-hw-image/plan2001-ash-amd64.img"
+          test -s "$RUNNER_TEMP/ash-hw-image/plan2001-ash-amd64.img.gz"
+          (cd "$RUNNER_TEMP/ash-hw-image" && sha256sum -c SHA256SUMS)
+      - name: Summarize native evidence and limitations
+        if: always()
+        shell: bash
+        run: |
+          echo '### Integration CI against explicitly pinned kernel alarm-service dependency' >> "$GITHUB_STEP_SUMMARY"
+          for f in newlib-full-build.md newlib-target-build.md newlib-full-guest.md; do
+            if [ -f "$RUNNER_TEMP/newlib-reports/$f" ]; then
+              cat "$RUNNER_TEMP/newlib-reports/$f" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "NOT COMPLETED: $f" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo 'Hardware-image builder requires genuine ash interactive QEMU acceptance on virtio and AHCI before publication.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Kernel dependency remains PR #64 exact SHA until merged into kernel main; ordinary source policy remains live kernel main.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT RUN: physical hardware, ARM64, full BusyBox applet distribution, concurrent persistent Unix file service.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reproducible QEMU evidence (without disk images)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ash-integration-qemu
+          path: |
+            ${{ runner.temp }}/newlib-reports/*.md
+            ${{ runner.temp }}/newlib-reports/*.log
+            ${{ runner.temp }}/newlib-reports/newlib-target/*.json
+            ${{ runner.temp }}/newlib-reports/newlib-target/*.txt
+            ${{ runner.temp }}/newlib-reports/ash-native/*.json
+            ${{ runner.temp }}/newlib-reports/ash-native/build.log
+            ${{ runner.temp }}/newlib-reports/qemu-busybox-f5/*.log
+            ${{ runner.temp }}/newlib-reports/qemu-busybox-f5/screens/**/*.txt
+            ${{ runner.temp }}/ash-hw-image/SHA256SUMS
+            ${{ runner.temp }}/ash-hw-image/ash-build.json
+            ${{ runner.temp }}/ash-hw-image/qemu-busybox-f5/*.log
+            ${{ runner.temp }}/ash-hw-image/qemu-busybox-f5/screens/**/*.txt
+            ${{ runner.temp }}/newlib-reports/qemu-newlib-full/*.log
+            ${{ runner.temp }}/newlib-reports/qemu-newlib-full/*.json
+          if-no-files-found: warn
+          retention-days: 14
