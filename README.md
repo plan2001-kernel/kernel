@@ -45,6 +45,7 @@ The native diagnostic workflow links the upstream BusyBox `true.c` applet agains
 
 ## Documentation
 
+- [Classification of computer use by user purpose (A–D) and application review](docs/USER-PURPOSE-CLASSIFICATION.md)
 - [Operator-free logical search matrix (stream-filter design proposal)](docs/LOGICAL-SEARCH-MATRIX.md)
 - [Build mechanism and local Debian commands](docs/BUILD.md)
 - [GitHub Actions libc ABI audit and evidence](docs/libc-audit.md)
