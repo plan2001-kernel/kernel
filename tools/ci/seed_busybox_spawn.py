@@ -35,7 +35,10 @@ def main():
     parser.add_argument("--init", required=True, type=Path)
     parser.add_argument("--reports", required=True, type=Path)
     parser.add_argument("--image", required=True, type=Path)
+    parser.add_argument("--f6-project", action="store_true", help="seed independent F5 and F6 durable roots")
     args = parser.parse_args()
+    if args.f6_project and (not args.project_root or args.unix_manifest):
+        parser.error("--f6-project requires --project-root and excludes --unix-manifest")
 
     kernel = args.kernel.resolve()
     import sys
@@ -89,7 +92,7 @@ def main():
                                                  encoding="ascii")
             if command[0] == str(formatter) and args.project_root:
                 from seed_project_root import provision as project_seed
-                project_seed(seed,kernel)
+                project_seed(seed,kernel,second_root=args.f6_project)
             if command[0] == str(formatter) and args.unix_manifest:
                 from seed_unix_manifest import provision
                 provision(seed,kernel)
@@ -107,6 +110,11 @@ def main():
     verified = [(MPY_OID, frame_file(mp,"application/x-elf")), (BUSYBOX_OID, frame_file(args.elf,"application/x-elf"))]
     if args.extra_elf:
         verified.append((UNIX_CHILD_OID, frame_file(args.extra_elf,"application/x-elf")))
+    if args.project_root:
+        from seed_project_root import initial_root, PROJECT_OID, F6_PROJECT_OID
+        verified.append((PROJECT_OID, initial_root(kernel)))
+        if args.f6_project:
+            verified.append((F6_PROJECT_OID, initial_root(kernel)))
     if args.unix_manifest:
         from seed_unix_manifest import MANIFEST_OID, initial_manifest
         verified.append((MANIFEST_OID, initial_manifest(kernel)))
@@ -126,6 +134,9 @@ def main():
                                   if args.extra_elf else None),
         "additional_f5_child_sha256": (sha(frame_file(args.extra_elf,"application/x-elf"))
                                       if args.extra_elf else None),
+        "project_root_oids": ([f"{PROJECT_OID:016x}"] +
+                              ([f"{F6_PROJECT_OID:016x}"] if args.f6_project else [])
+                              if args.project_root else []),
         "image_size": image.stat().st_size,
         "result": "PASS: fresh GE/O volume contains both native ELFs",
     }

@@ -76,6 +76,8 @@ jobs:
             ${{ runner.temp }}/reports/busybox-multicall/build.log
             ${{ runner.temp }}/multicall-image/native/**/*.log
             ${{ runner.temp }}/multicall-image/native/**/*.json
+            ${{ runner.temp }}/multicall-image/f6-console/**/*.log
+            ${{ runner.temp }}/multicall-image/f6-console/**/screens/**/*.txt
             ${{ runner.temp }}/multicall-image/eof-console/**/*.log
             ${{ runner.temp }}/multicall-image/eof-console/**/screens/**/*.txt
             ${{ runner.temp }}/multicall-image/essentials-console/**/*.log
