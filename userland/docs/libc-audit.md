@@ -4,8 +4,8 @@ This audit is an executable, evidence-producing **diagnostic**, not a POSIX
 compatibility certification. It complements the existing native link and QEMU
 workflow without modifying the kernel. Its input revisions are exclusively
 the source policy in [../config/sources.json](../config/sources.json):
-BusyBox is pinned by immutable SHA, while kernel `main` is resolved and
-recorded as a concrete SHA on each source-fetching run.
+BusyBox is pinned by immutable SHA. The workflow records the revision of
+the checkout that contains both kernel and userland.
 
 ## Run the audit
 
@@ -97,17 +97,3 @@ python3 tools/ci/libc_audit.py \
 
 The source fetcher deliberately refuses an existing checkout. These
 `/tmp` paths are examples of scratch space, **not** Plan2001 GE/O volumes.
-
-## Follow-on work
-
-**Historical follow-up (now implemented in a separate native workflow):**
-For genuine BusyBox `echo`, the acceptance test had to compile the
-target's real `echo_main` and its actual required BusyBox library code
-against native headers and native C runtime. Add adapters only in userland:
-PVD, descriptors, environment, exit/stdio. Preserve native capability
-enforcement and do not introduce Linux syscalls or pathname operations
-into the kernel. A separate Plan2001 QEMU test must then verify console
-output and process completion. The native single-applet `true` link and
-the Linux host-control `echo` are not that test. The later native target,
-ash and multicall workflows now provide separate guest evidence; consult
-the exact workflow run and kernel SHA before claiming compatibility.

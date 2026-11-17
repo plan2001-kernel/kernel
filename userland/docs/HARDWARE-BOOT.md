@@ -6,11 +6,9 @@ statically to Newlib and the Plan2001 userspace adapters. The builder writes
 regular files only; it never selects or overwrites a physical disk.
 
 Prerequisites: build the native AMD64 kernel, EFI loader, MicroPython/startup,
-formatter and mpy-cross in the kernel tree. Build Newlib using
-`tools/ci/build_newlib_libc.sh`. The kernel needs the normal alarm-service startup, now merged into kernel
-`main` via PR #64 (2026-11-15). A pinned integration checkout may retain
-the pre-merge review SHA; record the exact kernel revision. Source inputs
-stay outside userland. Then run:
+formatter and mpy-cross from the same checkout. Build Newlib using
+`tools/ci/build_newlib_libc.sh`. The ash profile uses the kernel alarm service
+for asynchronous signals. Run this from `userland/`:
 
 ```sh
 bash tools/ci/build_hw_boot.sh KERNEL_SOURCE BUSYBOX_SOURCE NEWLIB_REPORTS FRESH_OUTPUT

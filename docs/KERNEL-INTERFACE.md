@@ -67,7 +67,7 @@ Processes are independent contexts; launch ancestry never grants ownership.
 
 ## CURRENT IMPLEMENTATION
 
-Immutable single-owner identity is implemented on AMD64. Every process has a
+Immutable OwnerID provenance is implemented on AMD64. Every process has a
 trusted `OwnerID`; children created by fork/spawn inherit the caller's owner,
 while a registered-program launch uses the program's owner. `OwnerID` 0 is
 reserved for kernel-internal execution; user-visible owners, including
@@ -372,12 +372,12 @@ session-only interactive REPL **without** running `init.run()`, selecting
 a GE/O object graph or automatically committing storage. The executable
 still comes from its manifest GE/O OID. Unlike `-I`, `-R` requires
 a kernel-provided console session, and Ctrl+D exits that process only.
-This mode avoids unrelated concurrent GE/O write transactions in the
-console acceptance. `-I` and `-N` keep their previous boot semantics.
+Use [`--repl-init=OID`](MPY-REPL.md) to explicitly load a framed Python
+initializer before entering the same console REPL.
 
 The future C1–C10 recovery invariants are documented in
 [ARCHITECTURE.md](ARCHITECTURE.md#console/session-contract-kernel-owned-minimum-and-future-invariants).
-Ethernet L2, UART rescue, remote terminals, interactive panic recovery,
+Ethernet L2 console transport, UART rescue, remote terminals, interactive panic recovery,
 network program loading, and multi-volume GE/O are not implemented.
 
 ### Scoped executable SPAWN

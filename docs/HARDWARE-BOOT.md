@@ -152,7 +152,7 @@ Run the plan first. It reads the ESP and GRUB state but writes only its report
 under `build/gcc/o-install`:
 
 ```sh
-tools/gcc-o-install.sh --plan \
+tools/host/gcc-o-install.sh --plan \
   --device <GE_O_DEVICE> \
   --partuuid <GE_O_PARTUUID> \
   --bootmanifest /path/to/processes.conf \
@@ -171,13 +171,13 @@ On any failure the installer restores the backed-up ESP files and the previous
 GRUB files.
 
 ```sh
-sudo -n tools/gcc-o-install.sh --install \
+sudo -n tools/host/gcc-o-install.sh --install \
   --device <GE_O_DEVICE> \
   --partuuid <GE_O_PARTUUID> \
   --bootmanifest /path/to/processes.conf \
   --ncpu 2
 
-tools/gcc-o-install.sh --verify \
+tools/host/gcc-o-install.sh --verify \
   --device <GE_O_DEVICE> \
   --partuuid <GE_O_PARTUUID> \
   --bootmanifest /path/to/processes.conf \
@@ -185,7 +185,9 @@ tools/gcc-o-install.sh --verify \
 ```
 
 `--verify` must receive the same selector flags as the original install,
-including `--bootmanifest`; it compares the installed `plan9.ini` and
+including `--bootmanifest` and any explicit `--bootview F1..F9`. The installer
+requires a manifest for views F2–F9. A graphical view is selected after its
+first frame. The verifier compares the installed `plan9.ini` and
 `processes.conf` byte-for-byte with the intended staged bytes and checks the
 single canonical GRUB entry. Avoid manual post-install edits of these files,
 because they would fail `--verify`.

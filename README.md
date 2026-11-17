@@ -72,6 +72,8 @@ early-boot PASS is not a claim of physical-hardware validation.
 - [Portable object framing](docs/OBJECT-TAIL.md)
 - [Kernel interface: target and current status](docs/KERNEL-INTERFACE.md)
 - [AMD64 UEFI hardware boot, manifest and rollback guide](docs/HARDWARE-BOOT.md)
+- [Native MicroPython boot REPL initialization](docs/MPY-REPL.md)
+- [Device ABI](docs/DEVICE-ABI.md)
 - [Development workflow](docs/DEVELOPMENT-WORKFLOW.md)
 - [Olio ja objekti: tietoteoreettinen manifesti (suomeksi)](docs/OLIO-OBJEKTI-MANIFESTI.md)
 

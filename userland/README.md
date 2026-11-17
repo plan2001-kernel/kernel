@@ -34,9 +34,9 @@ The familiar `/bin`, `/usr`, `/etc`, and `/tmp` directories are userland project
 
 The [build workflow](docs/BUILD.md) tests kernel and userland from the same checkout and records that revision alongside the pinned BusyBox source. The Linux-host static BusyBox control is built separately from the native Plan2001 executables.
 
-The native diagnostic workflow links the upstream BusyBox `true.c` applet against Plan2001's runtime and runs separate guest checks. The [F5 console test](docs/BUSYBOX-F5.md) also builds a native BusyBox-bearing ELF, executes upstream `echo_main` on kernel manifest slot 4 and reads PS/2 keyboard input through kernel-granted console regions, with real QEMU VGA verification. The dedicated [libc ABI audit](docs/libc-audit.md) compares host-compiled BusyBox object references with native library exports. These checks are not evidence of complete POSIX compatibility.
+The native diagnostic workflow links the upstream BusyBox `true.c` applet against Plan2001's runtime and runs separate guest checks. The [F5 console test](../.github/workflows/busybox-f5.yml) also builds a native BusyBox-bearing ELF, executes upstream `echo_main` on kernel manifest slot 4 and reads PS/2 keyboard input through kernel-granted console regions, with real QEMU VGA verification. The dedicated [libc ABI audit](docs/libc-audit.md) compares host-compiled BusyBox object references with native library exports. These checks are not evidence of complete POSIX compatibility.
 
-## Implementation milestones
+## Supported profiles
 
 1. **Implemented:** dependency and static-link audit, native Newlib/POSIX adapters and small BusyBox applets in AMD64 QEMU fixtures.
 2. **Implemented with limits:** capability-backed process launch, `fork`/`execve`/`waitpid`, signals, redirection and UXPIPE pipelines.
@@ -49,40 +49,21 @@ The native diagnostic workflow links the upstream BusyBox `true.c` applet agains
 - [Operator-free logical search matrix (stream-filter design proposal)](docs/LOGICAL-SEARCH-MATRIX.md)
 - [Build mechanism and local Debian commands](docs/BUILD.md)
 - [GitHub Actions libc ABI audit and evidence](docs/libc-audit.md)
-- [Native BusyBox target subset build and QEMU smoke test](docs/BUSYBOX-TARGET.md)
-- [Userspace PVD and memory-only Unix directory tree (stage 2)](docs/UNIX-PVD.md)
-- [MicroPython native BusyBox child-process launch, QEMU and command example](docs/BUSYBOX-SPAWN.md)
-- [Native F5 console I/O adapter, capability rings and QEMU acceptance](docs/BUSYBOX-F5.md)
 - [GitHub Actions build workflow](../.github/workflows/build.yml)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Minimal POSIX profile](docs/POSIX-PROFILE.md)
-- [BusyBox porting plan](docs/PORTING.md)
+- [Native BusyBox multicall](docs/BUSYBOX-MULTICALL.md)
+- [Native graphics and Nuklear](docs/NATIVE-GRAPHICS.md)
+- [Native TinyCC and Newlib](docs/TINYCC-BOOTSTRAP.md)
+- [Unix supervisor and console capabilities](docs/UNIX-SUPERVISOR.md)
 - [BusyBox ash compilation and Newlib POSIX integration](docs/ASH-NEWLIB.md)
 - [Native Unix process, file-descriptor and signal projection](docs/UNIX-PROCESS.md)
 - [UEFI ash boot image, hardware limitations and operator guide](docs/HARDWARE-BOOT.md)
 - [Native ash/Newlib QEMU integration gate](../.github/workflows/ash-integration.yml)
-- [Shared GE/O UXFS service over capability-only UXPIPE RPC](docs/UXFS-SHARED-GEO.md)
 - [Development instructions](AGENTS.md)
 
 The authoritative native definitions are in the [kernel ObjectSpace architecture](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECTSPACE.md) and [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md).
 
 ## Licensing
 
-BusyBox is GPLv2-licensed. Record source provenance and licenses before importing BusyBox sources or kernel runtime code. No third-party sources are included at this stage.
-
-## Historical stage 2 fixture: volatile Unix paths
-
-The F5 acceptance process now carries a bounded userspace Present View Descriptor
-(PVD) and the memory-only /bin, /dev, /etc, /home, /tmp, /usr/bin and /var
-directory tree. Its interim console builtins implement pwd, cd and ls; these
-are **not** upstream BusyBox applets or ash. GitHub Actions tests path rules
-with host sanitizers and PS/2+VGA QEMU. Stage 2 alone provided no init, persisted objects, or
-native pathname authority. See [PVD design](docs/UNIX-PVD.md).
-
-## Historical stage 3 fixture: Unix init boot entry
-
-The stage-3 F5 boot-manifest executable starts a [native Unix-init entry](docs/UNIX-INIT.md)
-that constructs a fresh PVD root and hands it to its statically linked builtin
-shell. The prompt starts at `unix:/$` and follows cwd. GitHub Actions verifies
-a fresh root across **two QEMU boots of the same disposable GE/O disk**.
-That stage-3 shell is the legacy builtin evaluator, not upstream ash; the separate ash hardware-boot profile uses a genuine ash ELF and a trusted F5 supervisor.
+BusyBox is GPLv2-licensed. Record source provenance and licenses before importing BusyBox sources or kernel runtime code. The build fetches pinned upstream sources and tracks target patches separately.

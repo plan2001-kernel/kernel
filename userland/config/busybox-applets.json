@@ -17,8 +17,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -248,8 +248,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -270,8 +270,8 @@
       "missing_interfaces": [],
       "reason": "Fields, regex, arithmetic/libm, system and command streams use native adapters. Commands remain subject to native argument, child, fd and eight-grant limits.",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -330,8 +330,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -626,8 +626,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -895,8 +895,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -1088,8 +1088,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -1346,8 +1346,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -1539,8 +1539,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -1580,8 +1580,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -1792,8 +1792,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -1947,8 +1947,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -2406,8 +2406,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -2542,8 +2542,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -3674,8 +3674,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -4087,8 +4087,8 @@
       ],
       "reason": "Basic creation is supported; -p and explicit mode changes fail with ENOSYS instead of claiming unsupported permission semantics.",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -4462,8 +4462,8 @@
       ],
       "reason": "Same-service regular-file rename preserves source open descriptions. Replacing an open destination returns EBUSY; directory moves are unsupported.",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -5149,8 +5149,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -5228,8 +5228,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -5594,8 +5594,8 @@
       ],
       "reason": "Regular and recursive removal are supported. Removing an open file returns EBUSY; root/cwd and nonempty-directory rules remain enforced.",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -5912,8 +5912,8 @@
       ],
       "reason": "Stream/file-to-stdout editing is supported. -i fails without replacing the original file; unsupported metadata preservation is checked.",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -6276,8 +6276,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -6515,8 +6515,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -6917,8 +6917,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -7015,8 +7015,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -7075,8 +7075,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -7211,8 +7211,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -7290,8 +7290,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -7749,8 +7749,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {
@@ -8170,8 +8170,8 @@
       "missing_interfaces": [],
       "reason": "",
       "verification": [
-        "docs/evidence/busybox-essentials.json",
-        "docs/evidence/busybox-essentials-native.log"
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials.json",
+        "https://github.com/plan2001-kernel/kernel/blob/f67aa3de173e4ebbfd508d57d1b46371739171a6/userland/docs/evidence/busybox-essentials-native.log"
       ],
       "variants": [
         {

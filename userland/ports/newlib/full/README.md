@@ -23,7 +23,7 @@ native ELFs, symbol audits and real QEMU serial logs (14-day retention).
 1. Sparse-checkout Newlib tag and check its exact commit SHA.
 2. Compile complete upstream libc.a, libm.a and public headers.
    Audit printf, snprintf, malloc, free and reentrancy symbols.
-3. Compile the pinned native kernel, UEFI loader, MicroPython and ABI stubs.
+3. Compile the same-checkout native kernel, UEFI loader, MicroPython and ABI stubs.
 4. Compile native startup and target syscall adapters against real
    Newlib headers, not Linux headers.
 5. Link two AMD64 ET_EXEC images without Plan9 libc-user.a; audit exactly
