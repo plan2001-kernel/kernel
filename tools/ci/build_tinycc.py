@@ -9,7 +9,7 @@ import subprocess
 from newlib_full_link import audit
 
 ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_UNITS = ('syscalls','process','program','elf_validate','inherit','file_state','fd_table','posix',
+RUNTIME_UNITS = ('syscalls','process','surface','program','elf_validate','inherit','file_state','fd_table','posix',
     'stdio_process','dirent','ash_posix','pipe','pvd','uxfs','uxobject','objtail',
     'uxshell','uxservice','uxfd','project_native','project_record','rt_stubs-newlib')
 

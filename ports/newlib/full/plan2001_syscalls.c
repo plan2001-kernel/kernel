@@ -28,6 +28,7 @@
 #include "fd_backend.h"
 #include "plan2001_full.h"
 #include "process.h"
+#include "surface.h"
 
 extern long objcreate(unsigned long long, unsigned long long, void *,
                       unsigned long long, void *);
@@ -243,6 +244,7 @@ int p9_full_bind_inherited_uxpipe(void)
     unsigned streams = 0, executable_volumes = 0, i;
     int executable = 0;
     inherited_executable_volume = 0;
+    int surface_seen=0;
     long n;
     memset(&req, 0, sizeof req);
     req.version = SYSCTL_ABI_VERSION;
@@ -259,6 +261,10 @@ int p9_full_bind_inherited_uxpipe(void)
     for(i = 0; i < (unsigned)n; ++i) {
         const VobjListRec *r = &records[i];
         if(r->kind == VkindRegion) {
+            if(r->rights==(Vread|Vwrite|Vmeta|Vdelegate)){
+                if(surface_seen++ || p9_surface_bind((int)r->handle))goto denied;
+                continue;
+            }
             if(streams == 6 || (r->rights != rights[streams] &&
                r->rights != (rights[streams]|Vdelegate)) ||
                r->handle == 0) goto denied;
