@@ -1,9 +1,8 @@
 # Experimental MicroPython set algebra
 
 This prototype tests **set membership instead of pathname traversal** on the
-unchanged Plan2001 GE/O v2 object store. It lives only on
-`experiment/set-theory-mpy`. No kernel ABI, ObjectSpace graph provider,
-filesystem path semantics or GE/O disk format is changed.
+Plan2001 GE/O v2 object store. The module runs in MicroPython and uses the
+existing GE/O ABI and on-disk format.
 
 ## Model
 
@@ -14,7 +13,7 @@ unique 64-bit `ObjectID` members. The relation is logically
 A SetID is identity, **not authority**: each operation requires a previously
 authorized `VkindGeVolume` Handle and is limited by its rights.
 
-For this first prototype `union`, `intersection` and `difference` return
+The `union`, `intersection` and `difference` return
 transient tuples, not extra persistent GE/O objects. Use `materialize` when a
 result should have a new durable SetID.
 
@@ -49,14 +48,14 @@ p.obj_close(v)
 ```
 
 Record the returned SetIDs if you need to reopen them after reboot; a
-human-friendly persistent name catalog and query-language UI are **not** part of
-this first slice. `Store` never silently creates or opens an authorization
+human-friendly persistent name catalog and query-language UI are outside the
+module’s scope. `Store` never silently creates or opens an authorization
 root.
 
 ## Opt-in seeding
 
 The native O runtime cannot import arbitrary `.py` files by path; its imports
-come from its GE/O Environment manifest. The host seeder now optionally
+come from its GE/O Environment manifest. The host seeder optionally
 accepts `--module NAME=PATH`, and `SETTHEORY=1` passes the source into the
 existing `tools/host/mkovol` flow. Ordinary builds and images are unchanged.
 
@@ -81,7 +80,7 @@ SETTHEORY=1 bash tools/qemu-o-boot.sh --accel kvm:tcg --interactive \
 
 ## Scope and limitations
 
-- Up to 65,536 members per set for the initial whole-object implementation.
+- Up to 65,536 members per set for the whole-object implementation.
 - All members are unsigned 64-bit OIDs; across-volume membership is deferred.
 - No path, current directory, parent, recursion or graph traversal.
 - Every mutation rewrites the small set payload and calls `obj_commit`.
@@ -91,5 +90,3 @@ SETTHEORY=1 bash tools/qemu-o-boot.sh --accel kvm:tcg --interactive \
   Possession of a membership record never grants a capability to the member.
 - The caller is responsible for object lifecycle, retention and authorized
   deletion. Set membership is not object ownership.
-- No full native guest or crash/fault test result should be asserted until
-  the test runner has actually been executed and its output inspected.

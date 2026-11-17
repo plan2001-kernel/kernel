@@ -146,42 +146,16 @@ detection, display names, filtering, sorting and navigation belong there.
 No generic FIFO, message queue, Plan 9 9P, path, mount, CWD or TCP stack
 is introduced. Existing one-writer/RO-observer region IPC remains.
 
-## Required migration stages
+## Implementation limits
 
-1. **Volatile graph PoC (implemented foundation):** kernel ObjectSpace ops,
-   MicroPython wrappers, aliases, multiple labels, nested spaces, cycles,
-   rights, stale handling and epoch-based enumeration. QEMU/contract fixtures
-   exist in `tools/host/objectspace/`; run them for each release revision.
-2. **Capability security:** generic Handle derivation, process delegation,
-   selective subtree revocation and explicit OwnerID-independent authorization
-   are implemented for the current providers. GE/O Ohand scope/rights and
-   Kowner record integrity remain enforced. Cross-owner GE/O reads and writes,
-   read-only attenuation, process control and region-writer publication are
-   covered by the native QEMU/OVMF fixture `owner-authority.py`. Hardware
-   permissions, concurrent revocation fault injection and durable grants are
-   not yet proven.
-3. **Execution roots (partial):** bootstrap can install a selected durable
-   root Handle, and descendants can receive explicit delegated roots. A
-   mandatory `ExecutionContext` root field and complete removal of legacy
-   Pgrp/OContext namespace lifecycle are not implemented. Do not introduce
-   obsolete compatibility shims.
-4. **Persistence (implemented foundation):** `ObjOpenProject` and
-   `ObjOpProject` provide per-OID durable ObjectSpaces, atomic binding/file
-   updates and trusted `obootgraph` restoration. The earlier whole-graph
-   save/load format and transitional Ospace/SpaceID API are removed.
-   Cross-volume durable edges, garbage collection and broader recovery/race
-   certification remain outstanding.
-5. **User view and hardening:** PVD, directory/project/container projections,
-   multi-parent navigation, quotas, graph GC or specified lifetime semantics,
-   recovery/race/fuzz tests, AMD64 physical hardware tests.
+Boot can install a selected durable root Handle and grant descendants explicit
+access. A mandatory `ExecutionContext` root, cross-volume durable bindings and
+graph garbage collection remain open design or implementation work. The on-disk
+format does not persist volatile Handle grants.
 
-A phase is not PASS merely because code was committed. Report actual
-build, QEMU, recovery and hardware evidence; mark anything not executed
-**NOT RUN**. No stale phase can declare the complete ObjectSpace target.
+## Capability lineage
 
-## Capability lineage phase: current status
-
-The new `Vcap` records form a tree of *grant derivations*, NOT a hierarchy
+The `Vcap` records form a tree of *grant derivations*, NOT a hierarchy
 of objects or ObjectSpaces. One object can have many independent cap roots.
 Every installed derived Handle retains its ancestors' lineage nodes; none of
 those nodes grants access merely by being an object identifier. Revocation
@@ -190,8 +164,7 @@ scanning other processes or graph spaces. Descendants can be closed after
 revocation. Later derivation from the same source is allowed.
 
 Full-system acceptance is in `tools/host/capability/` with its own
-GitHub Actions workflow. The earlier ObjectSpace-v1 acceptance remains
-required. OwnerID-equality checks have been removed after auditing the current
+GitHub Actions workflow. OwnerID-equality checks have been removed after auditing the current
 GE/O, device and process Handle entry points. Cross-owner authority is now
 tested, including that OwnerID alone is insufficient. The trusted initial
 device catalog and boot-volume setup still deliberately require their
@@ -200,7 +173,7 @@ serialize authority on disk or automatically cancel in-flight provider work.
 Independent testing of timing races, hardware device control and revocation
 during active I/O is still necessary.
 
-## Current OwnerID-independent authorization proof
+## Cross-owner authorization regression
 
 `tools/host/capability/run-owner-authority.sh` boots a real AMD64 guest
 with two registered nonroot OwnerIDs. The test checks positive and negative

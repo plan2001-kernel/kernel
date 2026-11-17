@@ -49,13 +49,8 @@ bash tools/ci/guest_busybox_multicall.sh ../deps/kernel ../reports/busybox-multi
 ## Interactive console
 
 Use Finnish `keymap=fi` and QEMU `-k fi` when testing with a Finnish keyboard.
-Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. Kernel
-PR #66 (Win console switching) and PR #67 (1024-Handle inheritance) were
-merged into kernel `main` on **2026-11-16**. Earlier tests on PR #67's
-`9ac37be` commit are historical evidence, not a claim about newer revisions.
-The multicall workflow resolves kernel `main` at fetch time and records the
-exact SHA; current compatibility must be established from that workflow's
-actual native QEMU result, not merely from the merged PR status.
+Win+F1 selects SystemConsole and Win+F5 selects the Unix shell. The workflow
+records the checkout SHA and uses its native QEMU result for runtime validation.
 
 Ctrl+D on an empty input line produces one EOF read, allowing `cat` to finish
 and ash to read the next command. On a nonempty line it flushes the pending text
@@ -200,6 +195,6 @@ so provision a fresh image rather than silently reformat an existing disk.
 The hardware bundle contains a complete UEFI/GPT boot image, a raw `p5.img`
 GE/O volume, separately inspectable `micropython.p2o` and `busybox.p2o`, source
 archives, provenance and SHA256SUMS. Physical hardware is a user-run check,
-not inferred from QEMU. The multicall shell currently uses volatile shared
-files; the separate persistent-service image exercises durable UXFS through
-its restricted RPC clients. Both use the same framed object contract.
+not inferred from QEMU. The multicall shell uses delegated durable ObjectSpace project capabilities
+for its file view. The separate UXFS service fixture exercises the framed
+manifest and restricted RPC clients.

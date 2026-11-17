@@ -4,15 +4,6 @@
 
 The reference is the familiar *user experience* of Alpine Linux minimal base with static BusyBox. OpenBSD is a secondary reference for command behavior. No Linux or OpenBSD binary ABI is required.
 
-| Stage | Intended user-visible behavior | Primary dependencies |
-| --- | --- | --- |
-| P0 | BusyBox static compile/link dependency audit on Debian | target headers, compiler, C runtime inventory |
-| P1 | Small static `true`, `false`, `echo` applets in Plan2001 QEMU | startup, argv, exit, memory and console |
-| P2 | `pwd`, `cd`, `ls`, `cat`, `cp`, `mv`, `rm`, `mkdir` | PVD, paths, GE/O object data and metadata |
-| P3 | Basic `sh` and command launching | arguments, environments, delegated descriptors and processes |
-| P4 | Redirection, pipelines, waits and simple signals | userspace stream protocol over native regions |
-| P5 | More BusyBox applets and development tools | demand-driven POSIX support |
-
 ## Interface plan
 
 | POSIX function | Proposed mapping |
@@ -26,9 +17,9 @@ The reference is the familiar *user experience* of Alpine Linux minimal base wit
 | `mkdir`, `rmdir` | projected space creation/removal with explicit lifetime checks |
 | `unlink`, `rename`, `link` | binding operations with specified atomicity |
 | `getenv`, `setenv` | userspace environment and explicit inheritance |
-| `fork`, `execve`, `waitpid` | deferred native-process compatibility work |
+| `fork`, `execve`, `waitpid` | bounded adapter over SPAWN, RFORKEX and process Handles |
 | `pipe`, `dup2` | userspace streams and descriptor mapping |
-| `signal`, `termios`, `isatty` | session/console adaptation; deferred details |
+| `signal`, `termios`, `isatty` | asynchronous signals via the native alarm service; limited terminal adaptation |
 
 A missing interface must report a correct error instead of a fake successful stub. Merely linking an API symbol does not prove its POSIX semantics.
 

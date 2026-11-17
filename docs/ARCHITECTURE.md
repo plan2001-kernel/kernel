@@ -39,7 +39,7 @@ Persistent graph garbage collection, full cross-volume references and
 physical-hardware verification remain unfinished.
 GE/O v2 has one flat OID allocator and publication domain per volume;
 there is no SpaceID bucket or implicit storage hierarchy. No prior ABI, on-disk-format or Unix/Plan 9 compatibility
-is required. All phases and limitations are defined in
+is required. Current semantics and limitations are defined in
 [ObjectSpace](OBJECTSPACE.md).
 
 ## Independent processes and object roots
@@ -123,7 +123,7 @@ features have shipped:
 | C9 | Panic path cannot allocate memory or depend on userspace. | Later: interactive panic console; basic panic output retained. |
 | C10 | Missing or broken physical console does not stop the kernel. | Kernel does not require successful PS/2 claim; fallback transport later. |
 
-This phase does not implement Ethernet L2 console, UART recovery, interactive
+The current console does not provide Ethernet L2 console, UART recovery, interactive
 panic-mode input, remote console, multi-volume GE/O, or network loading.
 Do not claim those future invariants are verified by the QEMU session test.
 
@@ -149,39 +149,3 @@ foundation with BootInfo handoff, mappings, console, timer interrupts and
 physical-page allocation, not a full-system scheduler, GE/O, syscalls,
 userspace or device parity. MicroPython is the proof-of-concept userspace.
 Source and tests govern exact current behavior.
-
-## Completed six-stage implementation roadmap (historical)
-
-The phases below record the historical implementation; the current
-ObjectSpace migration roadmap is in OBJECTSPACE.md. Code migration requires a
-separate, explicitly scoped implementation task.
-
-
-Every phase PR records **Added, Deleted, Tests actually run, NOT RUN, and
-Remaining obsolete code**, including exact removed paths. A working new path
-does not excuse leaving replaced code in place. No shims, aliases, dormant
-providers/fixtures, feature toggles or retained syscall numbers exist solely
-for backward compatibility.
-
-1. **Architecture reset:** replace superseded normative instructions across
-   all tracked docs; delete contradicted claims. No code changes.
-2. **Capability memory regions:** implement independent RW-writer/RO-reader
-   mappings, identity, lifetime and revocation. Delete replaced segment user
-   ABI when superseded.
-3. **Atomic publish and WAIT/WAKE:** implement release/acquire publication,
-   RO waits and lost-wakeup prevention. Delete replaced rendezvous/semaphore
-   public ABI when no longer needed.
-4. **MicroPython evidence:** A publishes a task; B reads it and publishes an
-   answer in B's region; A observes; C observes concurrently. Test scalar,
-   delta, immutable record, writer death, interrupt and multiple cores.
-   Delete `ObjectFIFO` from this data path.
-5. **Free processes:** explicit process-control/observation grants,
-   multi-observer completion and launcher-first exit. Delete ancestry-based
-   lifecycle code and obsolete `RFORKEX/PROCWAIT/OTERMINATE` semantics.
-   Retain or reshape namespace views only where justified.
-6. **Delete old kernel IPC (completed):** Ethernet receive and console
-   sessions were migrated to capability regions and WAIT/WAKE. The
-   `ObjectFIFO` and Pipe implementations, provider types, ABI, MicroPython and
-   libc adapters, device adapters, obsolete tests and contradicted docs were
-   physically deleted, along with the kernel IPv6/ARP/ESP stack. Boot, raw L2
-   Ethernet and the console/REPL handoff contract pass on AMD64.

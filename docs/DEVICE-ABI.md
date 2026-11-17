@@ -1,14 +1,10 @@
 # Common device authority and provider semantics
 
-This document records the **current** AMD64 device-opening contract in
-`runtime/abi/obj.h`, including existing capability rights. Those rights
-are not requirements of the single-owner target. Device objects also carry
-the creating process's immutable `OwnerID`; direct device operations and
-control require the same owner even when a Handle has been delegated. The
-receiving side of an offered publication region may map it read-only across
-owners. The
-[target architecture](ARCHITECTURE.md) retains the current region-based
-IPC transport; it does not require a replacement.
+The AMD64 device ABI is defined in [obj.h](../runtime/abi/obj.h). Device
+operations validate the live Handle, its rights and the provider's state.
+Device objects retain immutable `OwnerID` provenance. An explicitly delegated
+Handle can authorize operations across owners; creating a privileged device
+catalog and claiming exclusive hardware remain separate checks.
 
 ## One catalog authority chain
 
@@ -57,8 +53,7 @@ USB-control status operation and separately requires `Vcontrol`.
 In the current ABI, device payload transport is not IOCTL: UART bytes and
 USB transfer requests/completions use object READ/WRITE/SEND/RECV operations.
 Ethernet frames use the transmit and receive capability regions described
-below. The target may change the transport while keeping device
-configuration/control separate from payload.
+below. Device configuration and status use IOCTL.
 A USB control *transfer* is transport with its own send/completion sequence;
 the naming of "control transfer" does not make it an IOCTL.
 
@@ -90,10 +85,9 @@ experimental frames are preserved unchanged (FCS excluded) and no protocol
 policy or L3 parsing exists in the kernel.
 
 Frame fan-out, IP, IPv6, ARP and all upper-layer policy belong to userspace.
-USB control publishes at most one synchronous, non-queued completion. Console
-sessions use two such regions per session (owner-written input and
-client-written output), with diagnostics distinguished by a slot flag. The
-obsolete FIFO, Pipe and kernel IPv6/ARP/ESP providers are deleted.
+USB control publishes at most one synchronous, non-queued completion. The kernel gives manifest console sessions three capability
+regions: kernel-written input and separate client-written stdout and diagnostic
+rings. See [kernel-owned boot process consoles](KERNEL-INTERFACE.md#kernel-owned-boot-process-consoles-amd64).
 
 ## Current reserved identifiers
 

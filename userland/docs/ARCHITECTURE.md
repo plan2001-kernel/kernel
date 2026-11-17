@@ -46,8 +46,7 @@ OwnerID is provenance, not ambient authorization. Unix uid/gid and rwx metadata 
 ## Portable Unix file metadata (target profile)
 
 The binary layout of framed GE/O payloads is specified by the kernel's
-portable-object footer contract. The userspace [Unix metadata profile]
-(OBJECT-METADATA.md) recommends one object-owned descriptive name per OID,
+portable-object footer contract. The userspace [Unix metadata profile](OBJECT-METADATA.md) recommends one object-owned descriptive name per OID,
 creation instant, media type, ordinary stat attributes, optional ACLs and
 extended attributes. Multiple distinct OIDs may share the same object
 name; ObjectSpace labels and Unix pathnames remain unrelated and may be
@@ -59,9 +58,9 @@ Names and metadata never mint kernel capabilities.
 
 ## Processes, streams and console
 
-Native SPAWN/RFORKEX and process Handle observation are not automatically full POSIX fork/exec/wait semantics. Early applets should avoid these dependencies. Later shell execution must explicitly delegate capabilities and descriptor state, preserving applet `argv[0]`.
+The [Unix process adapter](UNIX-PROCESS.md) implements bounded fork/exec/wait using native SPAWN, RFORKEX and process Handles. Shell execution explicitly delegates capabilities and descriptor state and preserves the applet `argv[0]`.
 
-Native IPC uses memory-publication regions with one RW publisher, RO observers and WAIT/WAKE. Future POSIX pipes may be constructed in userland with explicit stream buffering, EOF, backpressure and lifetime semantics. Do not restore a kernel pipe.
+Native IPC uses memory-publication regions with one RW publisher, RO observers and WAIT/WAKE. Userland pipes use UXPIPE, with explicit buffering, EOF, backpressure and endpoint lifetime rules.
 
 Console input/output must respect the native session/device authority model.
 
@@ -77,13 +76,3 @@ cross-volume durable bindings remain outside the current implementation. No
 compatibility-layer test may silently reformat GE/O storage.
 
 Native ABI and implementation details must always be checked in the current [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md) and source before coding.
-
-## First Unix init and F5 shell handoff
-
-The stage-3 AMD64 boot-manifest F5 ELF enters the userland `p2001_unix_init`
-function after validating native stdin/stdout/stderr region grants. Init
-constructs a fresh, process-local volatile PVD with cwd `/`, and passes it
-to a statically linked small shell builtin entry. The console prompt reflects
-the current projected path. There is no Unix init-process ancestry or
-separate shell process yet; no arbitrary ObjectSpace root or GE/O authority
-is created by this memory-only directory tree. See [UNIX-INIT](UNIX-INIT.md).

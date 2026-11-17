@@ -14,9 +14,8 @@ pathname or pipe syscalls into the kernel.
   `1a64f6a20aaf6ea4dbba68bbfa8cc1ab7e5c57c4`.
 - Genuine upstream **Newlib 4.6.0**,
   `8ba4275b83ec27529f67e0d477611fa6d8d6e6bd`.
-- Current kernel `main` is fetched afresh in Actions, as required by source
-  policy. Nothing from Debian glibc, the Linux startup files, or the
-  Plan2001 legacy `libc-user.a` is linked into the Newlib target.
+- The kernel comes from the same checkout. The Newlib target links its own
+  target startup and libraries.
 
 `tools/ci/probe_busybox_ash_newlib.sh` generates the original BusyBox
 `include/autoconf.h` with its own Kconfig tooling. It disables unsupported
@@ -26,10 +25,6 @@ probes *in the disposable CI checkout*, keeping upstream `shell/ash.c`,
 three C files are compiled with `-ffreestanding -nostdinc`, the genuine
 installed Newlib headers, target-only overlays, and
 `-Werror=implicit-function-declaration -Werror=int-conversion`.
-
-The old stage-5 test failed at `sys/times.h` simply because it did **not**
-use Newlib's sysroot. Genuine Newlib already ships this header; the replacement
-CI checks it, rather than inventing a dummy `struct tms`.
 
 ## POSIX implementations that work
 
@@ -75,21 +70,12 @@ No socket or tty service is conjured into existence. `poll` observes readiness o
 terminal control requests fail with `ENOSYS`/`ENOTTY`; fake success would
 allow shell code to corrupt descriptor state or infer false privileges.
 
-## CI evidence
+## Regression workflows
 
-- [Stage 5 upstream ash source, strict Newlib compile PASS][ash-ci]:
-  the three original upstream ash modules compile to AMD64 objects.
-  Stages 4/6/7 of the same workflow also PASS.
-- [Native Plan2001 Newlib QEMU PASS][newlib-ci]: stdout/stderr/stdin,
-  metadata and PVD paths, directory snapshot operations, and the
-  fail-closed resource/tty/poll adapters.
-- [Shared GE/O service and same-disk QEMU cold reboot PASS][geo-ci]
-  is an independent userland service result, **not** evidence that
-  ash itself has been launched.
-
-[ash-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43625250507
-[newlib-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43625250523
-[geo-ci]: https://github.com/plan2001-kernel/userland/actions/runs/43619613723
+The [ash integration workflow](../../.github/workflows/ash-integration.yml)
+checks native process operations, signals and UEFI/QEMU shell execution.
+The [Newlib workflow](../../.github/workflows/newlib-libc.yml) exercises the
+separate native libc adapter and its supervisor-delegated console I/O.
 
 ## Process and signal adapter
 
@@ -99,9 +85,7 @@ SPAWN, Process Handles and region capabilities. Its native probe exercises
 real fork/exec children, three-stream stdio, CLOEXEC, argv/environment, shared
 volatile files and offsets, asynchronous signals, stop/continue, and repeated
 signal-handler `siglongjmp` returns. The native alarm service must run in normal kernel boots; kernel PR #64,
-merged into `main` on 2026-11-15, supplies that startup. The standalone
-ash integration workflow continues to pin an older dependency SHA, whereas
-the multicall workflow resolves kernel `main`.
+merged into `main` on 2026-11-15, supplies that startup. The ash and multicall workflows both build the kernel from the same checkout.
 
 The ash-object undefined-symbol report is an inventory of references before
 linking, not a list of currently unimplemented APIs. A reduced upstream ash plus its required libbb modules is now statically
@@ -110,7 +94,6 @@ tests a standalone genuine ash profile with keyboard/VGA, arithmetic,
 redirection and a forked pipeline. A separate
 [native 30-name BusyBox multicall profile](BUSYBOX-MULTICALL.md) also builds
 and tests upstream applets; neither profile is a full BusyBox distribution.
-The older F5 stage fixture still has a bounded native builtin evaluator.
 Persistent in-process `UxService` inheritance, process groups, terminal job
 control, ARM64 and physical hardware remain outside this adapter's validated
 profile. The multicall file adapter instead uses delegated persistent

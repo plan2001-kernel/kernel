@@ -1,4 +1,4 @@
-# Live-kernel build and test workspace
+# Build and test workspace
 
 This document describes the **source-fetching and host-control workflow**, not the entire native port. The separate [native multicall workflow](BUSYBOX-MULTICALL.md) builds 30 upstream BusyBox command names on Plan2001; full POSIX and full BusyBox support are still incomplete. The host-control workflow produces a **statically linked Linux-host reference BusyBox**. A separate [libc ABI audit](libc-audit.md) builds the native libc archive and links the upstream BusyBox `true.c` applet as a diagnostic, without claiming a multicall port.
 
@@ -79,26 +79,10 @@ The static Linux executable is **not** uploaded as a Plan2001 deliverable. It is
 
 Host-control build logs and the test summary are available under the workflow run's **Artifacts** and **Step summary**. Failure of the host control is a real CI failure; success must not be advertised as target compatibility.
 
-## Historical native-target transition checklist
-
-The following steps described the original transition from host control to
-the native target. Native `true`/`false`/`echo`, ash and the 30-name multicall
-now have separate build and QEMU fixtures; this checklist is **not** the
-current list of unimplemented features. For current support see
-[BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
-
-1. Add a separate `tools/ci/build_target.py` or equivalent that explicitly invokes the verified Plan2001 user toolchain, target startup code, and the adapted native C runtime.
-2. Ensure target objects use no Linux headers, Linux startup objects, Linux syscalls, or host libc.
-3. Produce a statically linked ELF and audit its ABI, entry point, PT_INTERP/dynamic section and undefined symbols.
-4. Add a distinct, clearly named GitHub Actions job that uses the pinned kernel's boot/install/QEMU fixture to prove execution on the **real Plan2001 AMD64 kernel**.
-5. The separate native profiles now add persistent ObjectSpace paths, shell pipes and a bounded POSIX adapter. ARM64 remains a separate future userland port.
-
-Changes needed in native kernel ABI belong to [kernel](https://github.com/plan2001-kernel/kernel), with a separately reviewed PR. Do not introduce POSIX path syscalls into the kernel to satisfy this userspace goal.
-
 ## Dedicated libc audit workflow
 
-The separate [libc audit](libc-audit.md) runs in `.github/workflows/libc-audit.yml` using the same immutable source pins. It builds the actual native libc archive and startup objects, the Linux host-control BusyBox, and a native BusyBox `true.c` diagnostic link. It then computes a reproducible `nm` symbol-gap report and a manifest-versus-source check. The host and target outputs have deliberately separate statuses; a host success is not a Plan2001 multicall success. See the audit document for artifacts, local commands and limitations.
+The separate [libc audit](libc-audit.md) runs in `.github/workflows/libc-audit.yml` using the same checkout and immutable BusyBox pin. It builds the actual native libc archive and startup objects, the Linux host-control BusyBox, and a native BusyBox `true.c` diagnostic link. It then computes a reproducible `nm` symbol-gap report and a manifest-versus-source check. The host and target outputs have deliberately separate statuses; a host success is not a Plan2001 multicall success. See the audit document for artifacts, local commands and limitations.
 
 ## Native BusyBox subset and QEMU
 
-The separate [BusyBox native target guide](BUSYBOX-TARGET.md) documents the dedicated `.github/workflows/busybox-target.yml` job. It builds unmodified upstream `true.c`, `false.c`, and `echo.c` against the pinned Plan2001 libc with a small userland adapter, writes a native AMD64 static ELF, and executes those applets inside the real Plan2001 QEMU guest using a disposable GE/O image. A successful job publishes the executable in a `busybox-plan2001-amd64` artifact and guest serial evidence in `busybox-native-target-qemu`. This is not yet a complete POSIX or full upstream BusyBox port.
+The separate [BusyBox native target workflow](../../.github/workflows/busybox-target.yml) runs a three-applet diagnostic. It builds unmodified upstream `true.c`, `false.c`, and `echo.c` against the pinned Plan2001 libc with a small userland adapter, writes a native AMD64 static ELF, and executes those applets inside the real Plan2001 QEMU guest using a disposable GE/O image. A successful job publishes the executable in a `busybox-plan2001-amd64` artifact and guest serial evidence in `busybox-native-target-qemu`. This is not yet a complete POSIX or full upstream BusyBox port.

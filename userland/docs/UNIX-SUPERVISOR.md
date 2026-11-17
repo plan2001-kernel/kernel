@@ -1,9 +1,8 @@
 # Trusted Unix supervisor and F5 capability delegation
 
-> **Supervisor contract and historical F5 fixture.** This document focuses
+> **Supervisor contract.** This document focuses
 > on capability-safe console delegation, not the child program's complete
-> Unix feature set. The original F5 child was a builtin evaluator; the
-> standalone ash and multicall profiles now provide genuine upstream ash.
+> Unix feature set. Host and guest regressions also exercise the small builtin child.
 > See [HARDWARE-BOOT.md](HARDWARE-BOOT.md) and
 > [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
 
@@ -77,7 +76,7 @@ malformed selectors, equal executable/manifest OIDs and incomplete inherited
 grant sets. The F5 child classifies inherited GE/O Handles by exact rights;
 unknown or excessive GE/O rights fail closed.
 
-## Boot and process tree
+## Boot and process tree for the supervisor fixture
 
 In a trusted boot manifest the supervisor is configured at the F5 slot:
 
@@ -97,7 +96,6 @@ space; the supervisor retains the kernel console and observes the child's
 process Handle. Invalid completion or bridge errors fail closed and
 request child termination instead of silently granting more authority.
 
-The existing direct F5 process remains a backward-compatible option.
 The kernel inserts the boot-manifest process name as argv[0], so the
 manifest's args field must contain the child OID without an extra
 program-name argument. If a manifest contains a redundant name, the

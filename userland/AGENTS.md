@@ -2,7 +2,7 @@
 
 This repository implements a familiar Unix-facing userspace **over** Plan2001. It does not define the kernel's native architecture.
 
-Read `README.md`, `docs/ARCHITECTURE.md`, `docs/POSIX-PROFILE.md`, and `docs/PORTING.md`, and `docs/BUILD.md`. For current native ABI consult [kernel architecture](https://github.com/plan2001-kernel/kernel/blob/main/docs/ARCHITECTURE.md), [ObjectSpace](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECTSPACE.md), and [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md).
+Read `README.md`, `docs/ARCHITECTURE.md`, `docs/POSIX-PROFILE.md` and `docs/BUILD.md`. For current native ABI consult [kernel architecture](https://github.com/plan2001-kernel/kernel/blob/main/docs/ARCHITECTURE.md), [ObjectSpace](https://github.com/plan2001-kernel/kernel/blob/main/docs/OBJECTSPACE.md), and [kernel interface](https://github.com/plan2001-kernel/kernel/blob/main/docs/KERNEL-INTERFACE.md).
 
 ## Rules
 
@@ -19,5 +19,3 @@ Read `README.md`, `docs/ARCHITECTURE.md`, `docs/POSIX-PROFILE.md`, and `docs/POR
 11. Test the kernel and userland from the same repository checkout. Record the checkout SHA in CI and keep BusyBox immutable at the commit in [`config/sources.json`](config/sources.json).
 12. The host-control workflow builds a Linux-host static BusyBox **control**, not a Plan2001 ELF. Distinct native target, SPAWN, legacy F5 builtin-shell and real upstream ash/QEMU workflows exist. Only actual passing guest runs establish runtime behavior; the legacy F5 evaluator is distinct from the genuine ash executable.
 13. Native process and asynchronous signal acceptance requires an AMD64 kernel with the alarm service started in ordinary boots (kernel PR #64).
-
-**First implementation task:** audit a deliberately minimal BusyBox compile/link on Debian against Plan2001's current ABI and C runtime.
