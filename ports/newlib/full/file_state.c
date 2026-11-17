@@ -147,7 +147,8 @@ static uint64_t *offset_lock(OpenFile *f)
 static void offset_unlock(uint64_t *p){int saved=errno;p9_full_region_unmap((uintptr_t)p);errno=saved;}
 int p9_backend_open(const char *path,int flags,...)
 {
-    if(p9_process_executable(path,NULL)){errno=EACCES;return -1;}
+    if(p9_process_executable(path,NULL) &&
+       ((flags&O_ACCMODE)!=O_RDONLY || (flags&(O_CREAT|O_TRUNC)))){errno=EACCES;return -1;}
     int fd;for(fd=0;fd<UXFD_SLOTS && files[fd].object.handle;fd++);if(fd==UXFD_SLOTS){errno=EMFILE;return -1;}
     PjObject o={0};int found=p9_project_resolve(path,&o)==0;
     if(found && (flags&O_CREAT) && (flags&O_EXCL)){pj_close(&o);errno=EEXIST;return -1;}
@@ -211,8 +212,19 @@ int p9_backend_fstat(int fd,struct stat *st){if(fd<3)return p9_raw_fstat(fd,st);
 int p9_backend_isatty(int fd){return fd<3?p9_raw_isatty(fd):0;}
 int _stat(const char *path,struct stat *st)
 {
-    uint64_t oid;if(p9_process_executable(path,&oid)){memset(st,0,sizeof *st);st->st_mode=S_IFREG|0111;st->st_ino=(ino_t)oid;st->st_nlink=1;return 0;}
-    PjObject o;if(p9_project_resolve(path,&o))return -1;int rc=object_stat(&o,st);pj_close(&o);return rc;
+    PjObject o;
+    if(!p9_project_resolve(path,&o)){
+        int rc=object_stat(&o,st);pj_close(&o);return rc;
+    }
+    if(errno!=ENOENT)return -1;
+    /* Legacy applet aliases can remain virtual. Installed executables have
+     * ordinary readable GE/O bytes and report their actual file metadata. */
+    uint64_t oid;
+    if(p9_process_executable(path,&oid)){
+        memset(st,0,sizeof *st);st->st_mode=S_IFREG|0111;
+        st->st_ino=(ino_t)oid;st->st_nlink=1;return 0;
+    }
+    return -1;
 }
 int _lstat(const char *p,struct stat *s){return _stat(p,s);}
 int _chdir(const char *path)

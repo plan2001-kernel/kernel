@@ -17,7 +17,7 @@ if len(sys.argv) not in (5, 6):
     raise SystemExit("usage: f5_console_accept.py MONITOR SERIAL SCREENS FONT [initial|reboot]")
 mode = sys.argv[5] if len(sys.argv) == 6 else "initial"
 if mode not in ("initial", "reboot", "persist-initial", "persist-reboot",
-                "f6-initial", "f6-reboot", "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
+                "toolchain-initial", "toolchain-reboot", "f6-initial", "f6-reboot", "project-initial", "project-reboot", "newlib-supervised", "ash", "multicall", "multicall-eof", "multicall-essentials", "multicall-pipeline"):
     raise SystemExit("invalid boot phase")
 monitor, serial, out, fontfile = map(Path, sys.argv[1:5])
 out.mkdir(parents=True, exist_ok=True)
@@ -155,7 +155,18 @@ try:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
     waitscreen("system-boot", "kernel>", 120)
     focus(5)
-    if mode in ("f6-initial", "f6-reboot"):
+    if mode in ("toolchain-initial", "toolchain-reboot"):
+        waitscreen("f5-ready", "ash$")
+        enter("tcc -v")
+        waitscreen("f5-no-toolchain", "tcc: not found")
+        focus(6)
+        waitscreen("f6-compiler-ready", "ash$")
+        enter("tcc -c /home/hello.c -o /home/shell.o && echo SHELL-COMPILE")
+        waitscreen("shell-compile", "\nSHELL-COMPILE\n", 120)
+        enter("tcc /home/shell.o -o /home/shell && echo SHELL-LINK")
+        waitscreen("shell-link", "\nSHELL-LINK\n", 180)
+        print("PASS: F6 ash invokes installed native TinyCC and links with Newlib: " + mode)
+    elif mode in ("f6-initial", "f6-reboot"):
         for slot, value, other in ((5, "FIVE", "SIX"), (6, "SIX", "FIVE")):
             focus(slot)
             waitscreen(f"f{slot}-ready", "PLAN2001-MULTICALL-READY")

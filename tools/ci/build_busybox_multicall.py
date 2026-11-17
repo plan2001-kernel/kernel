@@ -57,6 +57,7 @@ def main():
     for name in ('kernel', 'busybox', 'reports'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--newlib-source', type=Path, required=True)
+    parser.add_argument('--toolchain', action='store_true', help='authorize the seeded native TinyCC in installed roots')
     parser.add_argument('--update-profile', action='store_true',
                         help='regenerate the reviewed config/inventory after changing OPTIONS')
     args = parser.parse_args()
@@ -214,7 +215,8 @@ def main():
         aliases_obj = out / 'aliases.o'
         run(flags + ['-c', aliases, '-o', aliases_obj])
         main_obj = out / 'main.o'
-        run(flags + ['-c', ROOT / 'ports/newlib/multicall/main.c', '-o', main_obj])
+        run(flags + (['-DPLAN2001_NATIVE_TOOLCHAIN=1'] if args.toolchain else []) +
+            ['-c', ROOT / 'ports/newlib/multicall/main.c', '-o', main_obj])
         archive = out / 'busybox.a'
         archive.unlink(missing_ok=True)
         run(['ar', 'rcs', archive, *objects, *regex_objects])
@@ -263,6 +265,7 @@ def main():
         (out / 'LICENSE.busybox').write_bytes((busybox / 'LICENSE').read_bytes())
         (out / 'manifest.json').write_text(json.dumps({
             'artifact': result, 'busybox': lock['busybox'],
+            'native_toolchain_bootstrap': bool(args.toolchain),
             'config_sha256': hashlib.sha256(config.read_bytes()).hexdigest(),
             'kernel': subprocess.check_output(
                 ['git', '-C', kernel, 'rev-parse', 'HEAD'], text=True).strip(),
