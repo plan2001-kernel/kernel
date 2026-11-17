@@ -41,6 +41,8 @@
 #                      integrity of the copied file, not manifest
 #                      authentication.  Cannot be combined with --obootexec.
 #
+#   --bootview F1..F9  select the initial view (graphical slots wait for first frame)
+#
 # --install requires the GCC ESP directory to exist; --bootstrap may create
 # it.  Both ensure the single canonical GRUB entry and back up every ESP file
 # they replace so a failure can restore both ESP and GRUB.  --plan and
@@ -72,6 +74,7 @@ obootexec=
 obootcpu=
 obootgraph=
 bootmanifest=
+bootview=
 ncpu=1
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -86,9 +89,10 @@ while [ $# -gt 0 ]; do
 	--obootcpu) [ $# -ge 2 ] || { echo "--obootcpu needs a CPU" >&2; exit 2; }; obootcpu=$2; shift ;;
 	--obootgraph) [ $# -ge 2 ] || { echo "--obootgraph needs an OID" >&2; exit 2; }; obootgraph=$2; shift ;;
 	--bootmanifest) [ $# -ge 2 ] || { echo "--bootmanifest needs a file" >&2; exit 2; }; bootmanifest=$2; shift ;;
+	--bootview) [ $# -ge 2 ] || { echo "--bootview needs a view" >&2; exit 2; }; bootview=$2; shift ;;
 	--ncpu) [ $# -ge 2 ] || { echo "--ncpu needs a count" >&2; exit 2; }; ncpu=$2; shift ;;
 	-h|--help) sed -n '2,/^set -euo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
-	*) echo "usage: $0 --plan|--install|--bootstrap|--verify --device DEV --partuuid UUID [--esp PATH] [--obootexec OID] [--obootcpu CPU] [--obootgraph OID] [--bootmanifest FILE] [--ncpu N]" >&2; exit 2 ;;
+	*) echo "usage: $0 --plan|--install|--bootstrap|--verify --device DEV --partuuid UUID [--esp PATH] [--obootexec OID] [--obootcpu CPU] [--obootgraph OID] [--bootmanifest FILE] [--bootview F1..F9] [--ncpu N]" >&2; exit 2 ;;
 	esac
 	shift
 done
@@ -274,6 +278,10 @@ if [ -n "$bootmanifest" ]; then
 	manifest_size=$(stat -c %s "$bootmanifest")
 	manifest_sha=$(sha "$bootmanifest")
 fi
+if [ -n "$bootview" ]; then
+	case "$bootview" in F[1-9]) ;; *) die "--bootview must be F1 through F9" ;; esac
+	[ "$bootview" = F1 ] || [ -n "$bootmanifest" ] || die "--bootview $bootview requires --bootmanifest"
+fi
 valid_dec "$ncpu" "--ncpu"
 ncpu_num=$val_num
 [ "$ncpu_num" -ge 1 ] || die "invalid --ncpu: '$ncpu'"
@@ -367,6 +375,7 @@ write_ini() {
 	[ -z "$obootcpu" ] || printf 'obootcpu=%s\n' "$obootcpu" >>"$f"
 	[ -z "$obootgraph" ] || printf 'obootgraph=%s\n' "$obootgraph" >>"$f"
 	[ -z "$bootmanifest" ] || printf 'bootmanifest=/processes.conf\n' >>"$f"
+	[ -z "$bootview" ] || printf 'bootview=%s\n' "$bootview" >>"$f"
 	[ "$boot_is_mpy" = 1 ] && printf 'obootrepl=1\n' >>"$f"
 	printf '*ncpu=%s\n' "$ncpu" >>"$f"
 }
@@ -404,6 +413,11 @@ check_ini() {
 		grep -qx 'obootrepl=1' "$f" || die "$label plan9.ini obootrepl mismatch"
 	else
 		! grep -q '^obootrepl=' "$f" || die "$label plan9.ini has an unexpected obootrepl"
+	fi
+	if [ -n "$bootview" ]; then
+		grep -qxF "bootview=$bootview" "$f" || die "$label plan9.ini bootview mismatch"
+	else
+		! grep -q '^bootview=' "$f" || die "$label plan9.ini has an unexpected bootview"
 	fi
 	grep -qxF "*ncpu=$ncpu" "$f" || die "$label plan9.ini *ncpu mismatch"
 }
