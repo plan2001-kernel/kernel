@@ -51,15 +51,20 @@ if [ -n "${IKEEXEC:-}" ]; then
  ike_args=(--ike-exec "$IKEEXEC")
 fi
 seed=
+extra_modules=()
+if [ "${SETTHEORY:-0}" = 1 ]; then
+    extra_modules=(--module "settheory=$root/tools/host/settheory/settheory.py")
+    [ -n "$src" ] || { echo "mkovol: SETTHEORY=1 requires SOURCE" >&2; exit 2; }
+fi
 if [ -n "$src" ]; then
 	seed=$(mktemp -d "$root/build/mkovol-seed.XXXXXX")
 	trap 'rm -rf "$seed"' EXIT
 	if [ -n "$nompyexec" ]; then
 		python3 "$here/oseed.py" --source "$src" --seed "$seed" \
-			--mpy-cross "$mpycross" --no-mp "${ike_args[@]}"
+			--mpy-cross "$mpycross" --no-mp "${extra_modules[@]}" "${ike_args[@]}"
 	else
 		python3 "$here/oseed.py" --source "$src" --seed "$seed" \
-			--mp-exec "$mpyexec" --mpy-cross "$mpycross" "${ike_args[@]}"
+			--mp-exec "$mpyexec" --mpy-cross "$mpycross" "${extra_modules[@]}" "${ike_args[@]}"
 	fi
 	"$formato" --seed "$seed" --size "$mb" "$out"
 else
