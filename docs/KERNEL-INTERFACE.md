@@ -389,3 +389,26 @@ OID from that live capability and rejects any caller-supplied substitution.
 Normal grant lineage, revocation, ELF validation, memory budgets and child
 inheritance checks apply to both forms. A path, OID or owner identity never
 creates execution authority.
+
+### Slot-bound console graphics surfaces
+
+`ObjOpenConsoleSurface` takes no request or slot selector. Only the process
+explicitly bound by the boot manifest to a live console session may open its
+surface. It receives a normal region capability with independently attenuable
+read/write/meta/delegate rights. The region can be explicitly delegated to a
+child; neither paths, slot numbers nor owner identity open another surface.
+
+`ObjOpSurfaceInfo` requires `Vmeta` and returns versioned immutable dimensions,
+packed stride, pixel format and byte count. `ObjOpSurfacePresent` requires
+`Vwrite`, takes no buffers or slot arguments, and snapshots exactly that
+region's visible bytes. Pixel memory contains no trusted dimensions/pointers.
+The kernel validates the geometry and preserves its boot marker strip. Pixels
+are uint32 `0x00RRGGBB`; the kernel handles firmware channel order.
+
+The native region single-writer mapping and revocation rules apply. Only the
+focused slot is copied to the physical framebuffer; inactive surfaces retain
+their snapshots for focus restoration. Text output continues in the slot's
+text view while graphics is visible. Releasing the writer mapping restores
+text, and session exit makes the old surface unusable. Unbound children cannot
+open an ambient surface. This adds no physical framebuffer mapping or new IPC
+transport. Current full-system acceptance is AMD64; ARM64 remains unverified.

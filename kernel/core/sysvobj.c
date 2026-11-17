@@ -1460,6 +1460,28 @@ sysregionwake(sysva_list list)
  * device/console records without installing a user-visible writable mapping:
  * holding the single writer slot makes every user mapping read-only and makes
  * REGIONWAIT block instead of returning the no-writer status. */
+static void regionkio(Vregion*, uvlong, void*, ulong, int);
+
+void
+vobjregionreadkern(Vobj *o, uvlong off, void *buf, ulong n)
+{
+    Vregion *r;
+    if(o==nil || o->kind!=VkindRegion || (r=o->priv)==nil || off>o->size || n>o->size-off)error(Ebadarg);
+    qlock(&r->lk);
+    if(waserror()){qunlock(&r->lk);nexterror();}
+    if(r->revoked)error(Eperm);
+    regionkio(r,off,buf,n,0);
+    poperror();qunlock(&r->lk);
+}
+int
+vobjregionhaswriter(Vobj *o)
+{
+    Vregion *r;int active;
+    if(o==nil || o->kind!=VkindRegion || (r=o->priv)==nil)return 0;
+    lock(&r->waitlk);active=r->writeractive && !r->revoked;unlock(&r->waitlk);
+    return active;
+}
+
 int
 vobjregionwriterhold(Vobj *o)
 {
@@ -4312,3 +4334,35 @@ vobjconsoleinfo(int handle, ObjConsoleInfo *out)
 }
 
 #include "vproject.inc"
+
+int
+vobjsurfaceopen(uvlong rights, VobjId *id)
+{
+    Vobj *o;int handle;
+    int allowed=Vread|Vwrite|Vmeta|Vdelegate;
+    if(id!=nil)validaddr((uintptr)id,sizeof *id,1);
+    if(rights==0)rights=allowed;
+    if(rights&~(uvlong)allowed)error(Eperm);
+    o=vconsolesurfaceopen();
+    if(waserror()){vobjput(o);nexterror();}
+    handle=vobjinstallobj(o,(int)rights);
+    if(id!=nil)vobjidentity(handle,id);
+    poperror();vobjput(o);return handle;
+}
+void
+vobjsurfaceinfo(int handle, ObjSurfaceInfo *out)
+{
+    Vobj *o;ObjSurfaceInfo info;
+    validaddr((uintptr)out,sizeof *out,1);
+    o=vobjholdobj(handle,Vmeta);
+    if(!vconsolesurfaceinfo(o,&info)){vobjput(o);error(Ebadarg);}
+    vobjput(o);memmove(out,&info,sizeof info);
+}
+void
+vobjsurfacepresent(int handle)
+{
+    Vobj *o=vobjholdobj(handle,Vwrite);
+    if(waserror()){vobjput(o);nexterror();}
+    vconsolesurfacepresent(o);
+    poperror();vobjput(o);
+}
