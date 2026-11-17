@@ -45,6 +45,8 @@ def provision(seed,kernel,build):
     raw+=records(0x4f4558454300000b,frame_file(build/'bootstrap.elf','application/x-elf'))
     for oid,name in ((0x4f45584543000005,'supervisor.elf'),(0x4f45584543000006,'busybox.elf')):
         if (build/name).is_file(): raw+=records(oid,frame_file(build/name,'application/x-elf'))
+    if (build/'gui/nuklear-demo.elf').is_file():
+        raw+=records(0x4f4558454300000c,frame_file(build/'gui/nuklear-demo.elf','application/x-elf'))
     raw+=records(TCC_OID,frame_file(build/'tcc.elf','application/x-elf'))
     raw+=records(BUNDLE_OID,pack(bundle(build/'sysroot')))
     # A repeated call would duplicate OIDs. Mark it before any future caller

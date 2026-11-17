@@ -17,11 +17,16 @@ python3 "$ROOT/tools/ci/build_tinycc.py" --kernel "$KERNEL" --tinycc "$TINYCC" \
 CONSOLE_MODE=toolchain
 if [ "$#" -eq 7 ]; then
   python3 "$ROOT/tools/ci/build_nuklear.py" --kernel "$KERNEL" --nuklear "$7" --reports "$REPORTS" --toolchain "$OUT/toolchain"
+  bash "$ROOT/tools/ci/guest_native_gui.sh" "$KERNEL" "$OUT/toolchain/gui/nuklear-demo.elf" "$OUT/native-only"
   CONSOLE_MODE=gui
 fi
 cp "$REPORTS/busybox-target/unix-supervisor-f5-plan2001.elf" "$OUT/toolchain/supervisor.elf"
 cp "$REPORTS/busybox-multicall/busybox.elf" "$OUT/toolchain/busybox.elf"
 bash "$ROOT/tools/ci/guest_tinycc.sh" "$KERNEL" "$OUT/toolchain" "$OUT/compile"
+if [ "$CONSOLE_MODE" = gui ]; then
+  mkdir -p "$OUT/development"
+  bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/compile/installed-o.img" "$OUT/development" toolchain
+fi
 mkdir -p "$OUT/console"
 bash "$ROOT/tools/ci/guest_busybox_f5.sh" "$KERNEL" "$OUT/compile/installed-o.img" "$OUT/console" "$CONSOLE_MODE"
 cp --sparse=always "$OUT/console/qemu-busybox-f5/disk.img" "$OUT/plan2001-toolchain-amd64.img"
@@ -39,6 +44,8 @@ from pathlib import Path
 out=Path(sys.argv[1]);result=json.loads((out/'compile/result.json').read_text())
 result['f6_shell_compilation']='PASS'
 if sys.argv[2]=='gui':
+    result['native_gui_boot']='PASS'
+    result['native_gui_without_unix']='PASS'
     result['nuklear_gui_approval']='PASS'
     result['surface_slot_isolation']='PASS'
 result['f5_toolchain_isolation']='PASS'

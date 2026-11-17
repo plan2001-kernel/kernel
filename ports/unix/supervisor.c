@@ -213,7 +213,7 @@ void uxsupervisor_release(UxSupervisor *s)
 }
 int uxsupervisor_run(unsigned long long child_oid,
                      unsigned long long manifest_oid,
-                     unsigned long long project_oid, int with_surface)
+                     unsigned long long project_oid)
 {
     const char *stage="console proxy";
     static UxSupervisor proxy;
@@ -221,7 +221,7 @@ int uxsupervisor_run(unsigned long long child_oid,
     launch.grant_count=0;
     char child_oid_arg[19], manifest_arg[19];
     char *argv[4]={"unix-child",child_oid_arg,0,0};
-    int surface=-1, project=-1, exec=-1, storage=-1, child=-1, exited_ok=0, status=-1;
+    int project=-1, exec=-1, storage=-1, child=-1, exited_ok=0, status=-1;
     unsigned int i, used=0;
     unsigned long long id;
     const char digits[]="0123456789abcdef";
@@ -280,14 +280,6 @@ int uxsupervisor_run(unsigned long long child_oid,
         if(project<=0)goto cleanup;
         launch.grant[7].handle=project;launch.grant[7].rights=req.rights;launch.grant_count=8;
     }
-    if(with_surface){
-        stage="session graphics surface";
-        surface=(int)obj_open(ObjOpenConsoleSurface,0,0,Vread|Vwrite|Vmeta|Vdelegate,0);
-        if(surface<=0)goto cleanup;
-        launch.grant[launch.grant_count].handle=surface;
-        launch.grant[launch.grant_count].rights=Vread|Vwrite|Vmeta|Vdelegate;
-        launch.grant_count++;
-    }
     stage="child SPAWN";
     child=uxspawn_start(&launch,argv,manifest_oid ? 3 : 2);
     if (child<=0) goto cleanup;
@@ -311,7 +303,6 @@ cleanup:
         p2001_session_write(2,"Unix supervisor failed at ",26);p2001_session_write(2,stage,n);
         p2001_session_write(2,": ",2);n=0;while(n<sizeof error && error[n])n++;p2001_session_write(2,error,n);p2001_session_write(2,"\n",1);
     }
-    if(surface>0)obj_close(surface);
     if(project>0)obj_close(project);
     if (child>0) {
         if (status!=0) (void)obj_process_terminate(child);

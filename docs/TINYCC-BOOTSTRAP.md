@@ -66,5 +66,9 @@ workflow continues to fetch kernel main. A manually selected integration SHA
 is recorded separately and establishes compatibility only with that pending
 kernel revision, not moving main. The process context ABI is version 5 and
 records the provider kind of each inherited executable capability; old
-context layouts are rejected. The optional graphical profile also propagates
-its explicitly delegated surface; see [native graphics](NATIVE-GRAPHICS.md).
+context layouts are rejected. The optional graphical profile uses
+its own native boot-session surface; see [native graphics](NATIVE-GRAPHICS.md).
+
+The graphical profile reserves F6 for the native boot GUI. The F6 shell
+commands above belong to the separate `toolchain` development/test profile,
+not to graphical boot. See [native graphics](NATIVE-GRAPHICS.md).

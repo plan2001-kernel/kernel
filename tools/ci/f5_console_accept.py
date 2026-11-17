@@ -167,31 +167,34 @@ try:
     for device in expected_devices[controller]:
         if device not in device_tree:
             raise AssertionError(f"{controller}: missing actual QEMU device {device}")
-    waitscreen("system-boot", "kernel>", 120)
-    focus(5)
     if mode in ("gui-initial", "gui-reboot"):
-        waitscreen("f5-ready", "ash$")
-        enter("tcc -v");waitscreen("f5-no-toolchain", "tcc: not found")
-        focus(6);waitscreen("f6-ready", "ash$")
-        enter("tcc -c /home/hello.c -o /home/gui.o && echo GUI-COMPILE")
-        waitscreen("gui-shell-compile", "\nGUI-COMPILE\n", 120)
-        enter("tcc /home/gui.o -o /home/gui-program && echo GUI-LINK")
-        waitscreen("gui-shell-link", "\nGUI-LINK\n", 180)
-        enter("tcc --register /home/gui-program && /home/gui-program")
-        waitscreen("gui-shell-program", "\nnative: 9\n", 120)
-        enter("tcc /usr/share/examples/nuklear_demo.c -o /home/nuklear && echo GUI-BUILD")
-        waitscreen("guest-nuklear-build", "\nGUI-BUILD\n", 240)
-        enter("tcc --register /home/nuklear && /home/nuklear")
-        wait_gui("gui-ready", (49,95,165))
-        focus(5);waitscreen("f5-gui-isolation", "ash$")
-        key("ret")
+        # No injected keys or shell commands before this first frame.
+        wait_gui("gui-autoboot", (49,95,165))
         focus(1);waitscreen("f1-gui-isolation", "kernel>")
+        enter("sessions")
+        sessions_text=waitscreen("native-gui-process", "name=guiF6")
+        records=re.findall(r'F(\d+) slot=(\d+) name=(\S+) pid=(\d+) live', sessions_text)
+        assert len(records)==5, sessions_text
+        assert len({row[3] for row in records})==5, sessions_text
+        assert any(row[0]=='6' and row[1]=='5' and row[2]=='guiF6' for row in records), sessions_text
+        assert "unixInitF6" not in sessions_text, sessions_text
+        if os.environ.get("UX_GUI_NATIVE_ONLY"):
+            assert "o: SPAWN" not in serial.read_text(errors="replace")
+        focus(5)
+        if os.environ.get("UX_GUI_NATIVE_ONLY"):
+            waitscreen("f5-native-peer", ">>>")
+        else:
+            waitscreen("f5-gui-isolation", "ash$")
+        key("ret")
         focus(6);wait_gui("gui-focus-restore", (49,95,165))
         key("ret");wait_gui("gui-approved", (20,150,70))
-        enter("q")
-        result=waitscreen("gui-exit", "GUI-EXIT", 60)
-        assert "GUI-APPROVED" in result and "ash$" in result,result
-        print("PASS: Nuklear GUI approval, surface capability denial and F1/F5/F6 isolation: " + mode)
+        key("q");key("ret");wait_gui("gui-stays-running", (20,150,70))
+        print("PASS: direct native Nuklear boot, persistent GUI and F1/F5/F6 isolation: " + mode)
+    else:
+        waitscreen("system-boot", "kernel>", 120)
+        focus(5)
+    if mode in ("gui-initial", "gui-reboot"):
+        pass
     elif mode in ("toolchain-initial", "toolchain-reboot"):
         waitscreen("f5-ready", "ash$")
         enter("tcc -v")

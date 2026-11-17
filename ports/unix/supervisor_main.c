@@ -3,11 +3,10 @@
  */
 #include "supervisor.h"
 extern void exits(char *);
-extern int strcmp(const char *,const char *);
 int main(int argc, char **argv)
 {
     unsigned long long child=0, manifest=0, project=0x4f45584543000007ULL;
-    if ((argc!=2 && argc!=3 && argc!=4 && argc!=5) || !argv ||
+    if ((argc!=2 && argc!=3 && argc!=4) || !argv ||
         uxsupervisor_parse_oid(argv[1],&child)!=0 ||
         (argc==3 && uxsupervisor_parse_oid(argv[2],&manifest)!=0))
         exits("unix-supervisor: invalid trusted manifest args");
@@ -20,8 +19,7 @@ int main(int argc, char **argv)
          argv[2][5]!='c' || argv[2][6]!='t' || argv[2][7]!=0 ||
          uxsupervisor_parse_oid(argv[3],&project)!=0))
         exits("unix-supervisor: invalid project selector");
-    if(argc==5 && strcmp(argv[4],"surface"))exits("unix-supervisor: invalid surface selector");
-    if (uxsupervisor_run(child,manifest,project,argc==5)<0)
+    if (uxsupervisor_run(child,manifest,project)<0)
         exits("unix-supervisor: no authorized child or child failed");
     exits("");
     return 1;

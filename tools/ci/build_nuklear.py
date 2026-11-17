@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-from build_tinycc import RUNTIME_UNITS
 from newlib_full_link import audit
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -29,14 +28,20 @@ def main():
             '-I'+str(nuklear),'-I'+str(out/'include'),'-I'+str(ROOT/'ports/newlib/full'),'-I'+str(ROOT/'ports/newlib/ash/include'),
             '-I'+str(kernel/'runtime/abi'),'-isystem',str(reports/'newlib-full/include'),'-isystem',gccinc]
         run(flags+['-c',ROOT/'ports/gui/nuklear_demo.c','-o',out/'demo.o'])
+        for unit in ('native_runtime','native_session'):
+            run(flags+['-c',ROOT/'ports/gui'/(unit+'.c'),'-o',out/(unit+'.o')])
         rt=reports/'newlib-target';elf=out/'nuklear-demo.elf'
-        run(['gcc-14','-m64','-nostdlib','-static','-no-pie','-Wl,--wrap=longjmp','-Wl,--gc-sections',
+        run(['gcc-14','-m64','-nostdlib','-static','-no-pie','-Wl,--gc-sections',
             '-Wl,--build-id=none','-Wl,-z,noexecstack','-Wl,-T,'+str(ROOT/'ports/newlib/full/user-newlib.ld'),
-            kernel/'build/gcc/mpy/mpyobj/rt_startup.o',rt/'startup.o',out/'demo.o',*[rt/(x+'.o') for x in RUNTIME_UNITS],
+            kernel/'build/gcc/mpy/mpyobj/rt_startup.o',out/'native_runtime.o',out/'native_session.o',out/'demo.o',rt/'rt_stubs-newlib.o',
             '-Wl,--start-group',reports/'newlib-full/libc.a',reports/'newlib-full/libm.a','-lgcc','-Wl,--end-group','-o',elf])
         result=audit(elf,out,['_start','main','p9_surface_map','p9_surface_present','nk_begin_titled','nk_button_label'])
+        symbols=subprocess.check_output(['nm','--defined-only',elf],text=True)
+        for forbidden in ('p9_process_startup','p9_full_auto_bind_uxpipe','uxpipe_bind','p9_file_attach'):
+            if any(line.split()[-1:]==[forbidden] for line in symbols.splitlines()):
+                raise SystemExit('Unix runtime unexpectedly linked: '+forbidden)
         sysroot=toolchain/'sysroot';shutil.copy(elf,sysroot/'usr/bin/nuklear-demo')
-        license_dir=sysroot/'usr/share/licenses/nuklear';license_dir.mkdir(parents=True)
+        license_dir=sysroot/'usr/share/licenses/nuklear';license_dir.mkdir(parents=True,exist_ok=True)
         shutil.copy(nuklear/'LICENSE',license_dir/'LICENSE')
         # Also make the toolkit and native graphics API available to guest C code.
         shutil.copy(nuklear/'nuklear.h',sysroot/'usr/include/nuklear.h')
