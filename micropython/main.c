@@ -7,6 +7,7 @@
  *	micropython -c source		run source
  *	micropython -O volume -N	native noninteractive server boot
  *	micropython -O volume -I	native boot followed by the REPL
+ *	micropython -O volume --repl-init=OID	REPL with explicit source initializer
  *	micropython -O volume -c source	run source with the GE/O graph
  *	micropython -E env -c source	use a standalone Environment
  * The O volume is specified by PARTUUID or device; objects are
@@ -30,6 +31,7 @@ extern int sleep(long);
 #include "p9space.h"
 #ifndef NO_QSTR
 #include "../../runtime/abi/obj.h"
+#include "objtail.h"
 #endif
 
 static uintptr_t heap[MICROPY_HEAP_SIZE / sizeof(uintptr_t)];
@@ -89,6 +91,48 @@ static int execstr(const char *source, qstr name) {
     return execute(mp_lexer_new_from_str_len(name, source, strlen(source), 0), name);
 }
 
+/* An explicitly configured boot REPL initializer. No filesystem, graph
+ * restore, implicit commit or automatic benchmark is involved. The existing
+ * boot-volume capability check authorizes reading the selected source OID. */
+static int repl_init(const char *selector) {
+    static unsigned char source[65536];
+    unsigned long long oid = 0;
+    unsigned base = 10, digit;
+    int volume = -1, handle = -1, result = 1;
+    const char *s = selector;
+    if (!s || !*s) goto done;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+    if (!*s) goto done;
+    for (; *s; s++) {
+        if (*s >= '0' && *s <= '9') digit = *s - '0';
+        else if (*s >= 'a' && *s <= 'f') digit = *s - 'a' + 10;
+        else if (*s >= 'A' && *s <= 'F') digit = *s - 'A' + 10;
+        else goto done;
+        if (digit >= base || oid > (~0ULL - digit) / base) goto done;
+        oid = oid * base + digit;
+    }
+    if (!oid) goto done;
+    volume = obj_open(ObjOpenVolume, NULL, 0, 0, NULL);
+    if (volume < 0) goto done;
+    ObjOpenGeOidReq request = {0}; request.volume = volume; request.oid = oid;
+    handle = obj_open(ObjOpenGeOid, &request, sizeof request, 0, NULL);
+    if (handle < 0) goto done;
+    long n = obj_read(handle, NULL, 0, 0);
+    if (n < ObjTailSize || (unsigned long)n > sizeof source) goto done;
+    if (obj_read(handle, source, n, 0) != n) goto done;
+    uint64_t raw, meta;
+    if (objtail_parse(source + n - ObjTailSize, n, &raw, &meta) < 0 || !raw) goto done;
+    obj_close(handle); handle = -1;
+    obj_close(volume); volume = -1;
+    result = execute(mp_lexer_new_from_str_len(MP_QSTR__lt_command_gt_,
+        (const char *)source, raw, 0), MP_QSTR__lt_command_gt_);
+done:
+    if (handle >= 0) obj_close(handle);
+    if (volume >= 0) obj_close(volume);
+    if (result) p9_dprintf("REPL init failed; interactive console remains available\n");
+    return result;
+}
+
 static void repl(void) {
     for (;;) {
         int result = pyexec_mode_kind == PYEXEC_MODE_RAW_REPL
@@ -120,7 +164,7 @@ static void bootfailed(const char *why) {
 int main(int argc, char **argv) {
     volatile uintptr_t stack_top;
     int fail = 0, nativeboot = 0, nativerepl = 0, replonly = 0, autorun = 0, bootfail = 0;
-    const char *source = NULL, *ovol = NULL, *env = NULL;
+    const char *source = NULL, *ovol = NULL, *env = NULL, *replinit = NULL;
     const char *booterror = "initialization or run() failed (see error above)";
     char useenv[128];
 
@@ -142,15 +186,17 @@ int main(int argc, char **argv) {
         nativeboot = 1;
     } else if (argc == 2 && strcmp(argv[1], "-I") == 0) {
         nativerepl = 1;
-    } else if (argc == 2 && strcmp(argv[1], "-R") == 0) {
+    } else if (argc == 2 && (strcmp(argv[1], "-R") == 0 ||
+               strncmp(argv[1], "--repl-init=", 12) == 0)) {
         /* Independent interactive boot session: no init.run or automatic
          * GE/O write transaction.  This requires kernel console grants. */
         nativerepl = 1;
         replonly = 1;
+        if (strncmp(argv[1], "--repl-init=", 12) == 0) replinit = argv[1] + 12;
     } else if (argc == 3 && strcmp(argv[1], "-c") == 0) {
         source = argv[2];
     } else if (argc != 1) {
-        p9_dprintf("usage: micropython [-O volume] [-E env] [-N | -I | -R | -c source]\n");
+        p9_dprintf("usage: micropython [-O volume] [-E env] [-N | -I | -R | --repl-init=OID | -c source]\n");
         exits("usage");
     }
     p9_space_native_mode(nativeboot || nativerepl);
@@ -194,6 +240,7 @@ int main(int argc, char **argv) {
             return 1;
         }
         atnotify(onnote, 1);
+        if (replinit) repl_init(replinit);
         p9_dprintf("PLAN2001-O: REPL READY\n");
         pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
         repl();
