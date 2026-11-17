@@ -32,7 +32,8 @@ QOB_CPUS=2
 QOB_INI_NCPU=2
 qob_prepare_outdir
 qob_preflight
-trap qob_cleanup EXIT
+monitor_dir=$(mktemp -d /tmp/plan2001-console.XXXXXX)
+trap 'qob_cleanup; rm -rf -- "$monitor_dir"' EXIT
 
 puuid=$(python3 -c 'import uuid; print(uuid.uuid4())')
 qob_write_ini "$OUT/plan9.ini" "$puuid" /9pc64.elf 0
@@ -65,12 +66,32 @@ owner=unixSupervisorF5
 args=0x4f45584543000006${UX_GEO_PERSIST:+ 0x4f45584543000007}
 required=true
 EOF
-if [ "$MODE" = f6 ] || [ "$MODE" = toolchain ] || [ "$MODE" = gui ]; then
+if [ "$MODE" = gui ]; then
+  if [ "${UX_GUI_NATIVE_ONLY:-0}" = 1 ]; then
+    python3 - "$OUT/processes.conf" "$puuid" <<'PYNATIVE'
+import sys
+from pathlib import Path
+p=Path(sys.argv[1]);s=p.read_text();s=s[:s.index('[process.unixInitF5]')]+f'''[process.nativePeerF5]
+source=geo:PARTUUID={sys.argv[2]}:OID=0x4f45584543000003
+owner=nativePeerF5
+args=-R
+required=true
+''';p.write_text(s)
+PYNATIVE
+  fi
+  printf 'bootview=F6\n' >> "$OUT/plan9.ini"
+  cat >> "$OUT/processes.conf" <<EOF
+[process.guiF6]
+source=geo:PARTUUID=$puuid:OID=0x4f4558454300000c
+owner=guiF6
+required=true
+EOF
+elif [ "$MODE" = f6 ] || [ "$MODE" = toolchain ]; then
   cat >> "$OUT/processes.conf" <<EOF
 [process.unixInitF6]
 source=geo:PARTUUID=$puuid:OID=0x4f45584543000005
 owner=unixSupervisorF6
-args=0x4f45584543000006 project 0x4f45584543000008$([ "$MODE" = gui ] && printf ' surface' || true)
+args=0x4f45584543000006 project 0x4f45584543000008
 required=true
 EOF
 fi
@@ -84,7 +105,7 @@ qob_make_disk "$IMAGE" "$OUT/disk.img" "$OUT/esp.img" "$puuid" "$OUT/disk.layout
 phases=(initial reboot)
 if [ "$MODE" = newlib-supervised ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then phases=(initial); fi
 for phase in "${phases[@]}"; do
-  mon="$OUT/monitor-$phase.sock"
+  mon="$monitor_dir/$phase.sock"
   serial="$OUT/serial-$phase.log"
   vars="$OUT/vars-$phase.fd"
   : > "$serial"
@@ -95,7 +116,7 @@ for phase in "${phases[@]}"; do
     ahci) disk_device=(-device ich9-ahci,id=ashsata -device ide-hd,drive=d0,bus=ashsata.0,bootindex=0) ;;
     *) echo 'Unsupported hardware controller' >&2; exit 2 ;;
   esac
-  "$QOB_QEMU" -name "plan2001-unix-init-$phase" -nodefaults \
+  "$QOB_QEMU" -name "plan2001-$MODE-$phase" -nodefaults \
     -m "$QOB_MEM" -smp "$QOB_CPUS" -machine "q35,accel=$QOB_ACCEL" -cpu max \
     -drive "if=pflash,format=raw,readonly=on,file=$QOB_OVMF_CODE" \
     -drive "if=pflash,format=raw,file=$vars" \
@@ -118,7 +139,7 @@ for phase in "${phases[@]}"; do
 done
 
 if [ "$MODE" = gui ] || [ "$MODE" = toolchain ] || [ "$MODE" = f6 ] || [ "$MODE" = project ] || [ "$MODE" = ash ] || [ "$MODE" = multicall ] || [ "$MODE" = multicall-eof ] || [ "$MODE" = multicall-essentials ] || [ "$MODE" = multicall-pipeline ]; then
-  echo "PASS: native ash $MODE acceptance; bootable disk at $OUT/disk.img"
+  echo "PASS: native $MODE acceptance; bootable disk at $OUT/disk.img"
   exit 0
 fi
 if [ "$MODE" = newlib-supervised ]; then

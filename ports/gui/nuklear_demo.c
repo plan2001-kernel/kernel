@@ -1,5 +1,4 @@
-/* Nuklear command renderer on an explicitly delegated slot-bound pixel region.
- * Enter activates the focused button; q + Enter returns to the shell. */
+/* Native boot application: Nuklear on its own console surface. */
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_STANDARD_IO
 #define NK_INCLUDE_STANDARD_VARARGS
@@ -87,8 +86,7 @@ static int render(struct nk_context *ctx)
 }
 static int deny_checks(int handle)
 {
-    /* A SPAWN child has no ambient session factory or slot selector. */
-    if(objopen(ObjOpenConsoleSurface,NULL,0,0,NULL)>=0)return -1;
+    /* Surface rights cannot select another session or publish through RO. */
     ObjCall c={0};c.version=OBJ_ABI_VERSION;c.op=ObjOpSurfacePresent;c.arg0=1;
     if(objinvoke(handle,&c,sizeof c)>=0)return -1;
     ObjOpenHandleReq request={handle,0};
@@ -134,7 +132,7 @@ int main(void)
                 message,(int)strlen(message),&font->handle,status_color,nk_rgb(255,255,255));
             nk_layout_row_dynamic(&ctx,64,1);button=nk_widget_bounds(&ctx);
             if(nk_button_label(&ctx,"[Enter] Approve")){approved=1;puts("GUI-APPROVED");fflush(stdout);}
-            nk_layout_row_dynamic(&ctx,40,1);nk_label(&ctx,"q + Enter: return to the shell",NK_TEXT_LEFT);
+            nk_layout_row_dynamic(&ctx,40,1);nk_label(&ctx,"Win+F1 / Win+F5 / Win+F6: switch view",NK_TEXT_LEFT);
         }
         nk_end(&ctx);
         if(render(&ctx)){quit=1;break;}
@@ -142,7 +140,7 @@ int main(void)
         if(click==2){click=0;continue;}
         char input[64];int n=read(0,input,sizeof input);
         if(n<0 && errno==EINTR)continue;if(n<=0)break;
-        for(int i=0;i<n;i++)if(input[i]=='q')quit=1;else if(input[i]=='\n')click=1;
+        for(int i=0;i<n;i++)if(input[i]=='\n' || input[i]=='\r')click=1;
     }
     nk_free(&ctx);nk_font_atlas_clear(&atlas);free(coverage);
     if(p9_surface_unmap())return 5;
