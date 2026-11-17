@@ -163,10 +163,19 @@ Although the visual evaluation is left to right, column intersection is mathemat
 | A and B together | one cell containing "A B" |
 | A or B, but not both | separate cells "A" and "B" in one column |
 | A or B, including both | cells "A", "B" and "A B" in one column |
-| A with B absent | cells "A" and "A B" define the vocabulary, but to **allow only A**, use only the "A" combination in a column that also knows B (see scope note below) |
+| A with B absent | first column: cells "A" and "B"; second column: cell "A" (see example below) |
 | Filter by condition X, then condition Y | X and Y in different columns |
 
-**Scope note for absence:** a term absent from every cell is *not* part of the vocabulary. Consequently, an otherwise isolated cell ["A"] cannot mean "A but not B" if B is never named in that column. The examples above establish relative exclusion only when all relevant terms occur in the column's vocabulary. A future UI needs a non-operator way to register a term as **constrained but not an accepted cell combination** (for example, a column term palette or a disabled/forbidden combination). This is **not** yet specified. The proposed UI must not silently claim to implement unrestricted NOT or a pure "not B" predicate.
+**Example: A but not B without a NOT symbol.** Two columns are sufficient:
+
+~~~text
+[A] [A]
+[B] [ ]
+~~~
+
+The first column permits only A or only B (but not both). The second column requires A. Their intersection therefore accepts **A with B absent**. This is exclusion by the arrangement of cells, not by typing a negation operator.
+
+**Scope note for absence:** a term absent from every cell is *not* part of the vocabulary. Consequently, an isolated cell ["A"] does not exclude some unlisted B. The two-column example explicitly names B to make its absence observable. A completely unrestricted **"not B" on all input blocks, including blocks matching none of the named terms**, cannot currently be represented because blank cells mean "no alternative", not "the empty hit set". That use case would need a distinct, operator-free UI representation of an allowed empty combination. It is a future extension, **not** part of this proposal.
 
 The ordinary mathematical XOR operation is a useful analogy for a column with two singleton alternatives. For three or more overlapping allowed patterns, the more exact term is **enumeration of allowed hit sets**, not repeatedly XOR-ing arbitrary cell predicates.
 
@@ -200,6 +209,7 @@ The design belongs entirely in **userland**. It does not require changes to the 
 7. Moving a cell to the same visual row as another column's cell does not correlate their matches.
 8. Empty cells do not match or reject anything.
 9. Each block is evaluated independently; matching words in adjacent lines cannot satisfy one cell.
-10. Output preserves byte/text content and input order, subject to a separately chosen decoding/framing contract.
+10. A two-column matrix with ["A"], ["B"] in the first column and ["A"] in the second passes A-only, not B-only or A+B.
+11. Output preserves byte/text content and input order, subject to a separately chosen decoding/framing contract.
 
 **Testing status:** NOT RUN. This is documentation of a proposed interface; no command, test fixture, QEMU run or hardware validation has been added.
