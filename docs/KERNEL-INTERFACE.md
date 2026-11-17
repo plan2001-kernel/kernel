@@ -412,3 +412,13 @@ text view while graphics is visible. Releasing the writer mapping restores
 text, and session exit makes the old surface unusable. Unbound children cannot
 open an ambient surface. This adds no physical framebuffer mapping or new IPC
 transport. Current full-system acceptance is AMD64; ARM64 remains unverified.
+
+### Initial graphical console selection
+
+Trusted boot configuration may set `bootview=F1` through `bootview=F9`.
+F1 is SystemConsole; F2 through F9 address defined manifest sessions.
+Absent, invalid or undefined selections retain SystemConsole. A graphical
+selection is applied once, after that session publishes its first frame.
+Any manual view selection cancels the pending boot selection. If the
+session exits before publishing, SystemConsole remains available. This
+configuration grants no application authority to select global focus.

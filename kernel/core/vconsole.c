@@ -37,6 +37,8 @@ static Vconsole sessions[Consoles+1];
 static int nsessions, current, consolemanagerready;
 /* Only the manager switches the framebuffer or mutates the history. */
 static volatile int requestedview = -1;
+/* Trusted boot preference; any manual selection takes precedence. */
+static int bootview = -1;
 /* SystemConsole command prompt: kernel-owned, independent of all processes. */
 static char cmdline[Cmdline];
 static int ncmdline;
@@ -357,6 +359,19 @@ vconsolemanager(void *arg)
         kproc("*consolekbd*", keyboardproc, nil);
     }else
         print("console: PS/2 unavailable; SystemConsole remains visible\n");
+    {
+        char *view = getconf("bootview");
+        if(view != nil){
+            if(view[0] == 'F' && view[1] >= '1' && view[1] <= '9' && view[2] == 0){
+                i = view[1] - '1';
+                if(i == 0 || (i <= nsessions && sessions[i].defined))
+                    bootview = i;
+                else
+                    print("console: undefined bootview %s; using F1\n", view);
+            }else
+                print("console: invalid bootview %s; using F1\n", view);
+        }
+    }
     coherence();
     consolemanagerready = 1;
     print("console: SystemConsole ready, %d independent sessions\n", nsessions);
@@ -364,10 +379,28 @@ vconsolemanager(void *arg)
     for(;;){
         if(requestedview >= 0){
             k = requestedview;
+            bootview = -1;
             selectview(k);
             coherence();
             requestedview = -1;
             lastkmesg = kmesg.n;
+        }
+        if(bootview >= 0){
+            k = bootview;
+            if(k == 0){
+                bootview = -1;
+            }else{
+                c = &sessions[k];
+                qlock(&c->surfacelock);
+                i = c->alive && c->hasframe;
+                qunlock(&c->surfacelock);
+                if(i){
+                    selectview(k);
+                    bootview = -1;
+                    lastkmesg = kmesg.n;
+                }else if(c->bound && !c->alive)
+                    bootview = -1;
+            }
         }
         if(current > 0 && !sessions[current].alive){
             selectview(0);
