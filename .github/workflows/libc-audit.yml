@@ -2,11 +2,6 @@ name: Plan2001 libc ABI audit
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/libc-audit.yml'
-      - 'config/sources.json'
-      - 'tools/ci/**'
-      - 'docs/libc-audit.md'
   push:
     branches: [main]
   workflow_dispatch:
@@ -17,6 +12,10 @@ permissions:
 concurrency:
   group: userland-libc-audit-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   libc-abi-symbols:

@@ -2,51 +2,16 @@
 
 This document describes the **source-fetching and host-control workflow**, not the entire native port. The separate [native multicall workflow](BUSYBOX-MULTICALL.md) builds 30 upstream BusyBox command names on Plan2001; full POSIX and full BusyBox support are still incomplete. The host-control workflow produces a **statically linked Linux-host reference BusyBox**. A separate [libc ABI audit](libc-audit.md) builds the native libc archive and links the upstream BusyBox `true.c` applet as a diagnostic, without claiming a multicall port.
 
-## Separation of repositories
+## Source layout and revisions
 
-The CI and local development directory layout is:
-
-```text
-workspace/
-  userland/   # writable: code, docs, CI; GitHub repo plan2001-kernel/userland
-  kernel/     # latest main resolved to a detached SHA for this run, INPUT ONLY
-  busybox/    # pinned upstream BusyBox checkout; host-control build writes here
-reports/      # generated diagnostics, outside all source Git trees
-```
-
-The GitHub Actions job implements the same layout using runner temp directories and a userland checkout:
-
-```text
-$GITHUB_WORKSPACE/             userland checkout (the PR under test)
-$RUNNER_TEMP/plan2001-sources/
-  kernel/                     freshly fetched main, detached for this run
-  busybox/                    pinned exact upstream BusyBox SHA
-$RUNNER_TEMP/plan2001-reports/  reports/artifacts
-```
-
-**No Git submodule or copy of the kernel sources is committed into userland.** The kernel remains its own canonical repo. The kernel checkout is logically read-only; Git does not enforce OS file permissions, but the audit and build scripts do not write to it. The BusyBox checkout may contain build output; discard/recreate it between runs.
-
-## Source policy: live kernel main, immutable BusyBox
-
-[`config/sources.json`](../config/sources.json) is the source policy:
-`kernel.repository=plan2001-kernel/kernel` with `kernel.ref=main`, and
-`busybox.repository=mirror/busybox` with one immutable 40-digit commit
-(BusyBox **1.36.1**, upstream tag `1_36_1`).
-
-Workflows that call `tools/ci/fetch_sources.py` fetch **kernel `main` at
-source-fetch time**, resolve its 40-character commit and check it out
-detached. The `ash-integration.yml` regression is an explicit exception:
-it checks out the fixed `INTEGRATION_KERNEL_SHA`. Do not infer that every
-workflow tested the same kernel revision. The SHA is written to the uploaded `reports/sources.json`
-alongside the fixed BusyBox SHA, so the run is auditable and repeatable
-*by manually checking out that recorded kernel SHA*. The next source-fetching job fetches
-`main` afresh; pinned integration jobs do not. No stale kernel revision lock is maintained.
-
-BusyBox stays pinned; changing its commit requires review and a license and
-compatibility check. The mirror is only a fetch location; original BusyBox
-is GPLv2. A floating kernel intentionally sacrifices identical CI inputs
-across different run dates in exchange for always testing current kernel
-development. It does not silently modify the user's working kernel tree.
+The kernel is at the repository root and userland is in `userland/`.
+Run userland build helpers from that directory. The source helper creates a
+`deps/kernel` symlink to the current checkout for build scripts that take a
+kernel path, and fetches the immutable BusyBox 1.36.1 commit declared in
+[`config/sources.json`](../config/sources.json). It records both source
+commits in `reports/sources.json`. Kernel builds via the symlink place build
+output in the current checkout. Use a clean checkout at the reported commit
+when reproducing CI results.
 
 ## Local Debian execution
 
@@ -58,14 +23,14 @@ sudo apt-get install -y git python3 build-essential binutils file
 
 mkdir -p ~/Src/Plan2001
 cd ~/Src/Plan2001
-git clone https://github.com/plan2001-kernel/userland.git
-cd userland
+git clone https://github.com/plan2001-kernel/kernel.git
+cd kernel/userland
 
 export PLAN2001_DEPS="$HOME/Src/Plan2001/deps"
 export PLAN2001_REPORTS="$HOME/Src/Plan2001/reports"
 
 # Fresh destination required; the scripts never overwrite a checkout.
-# Kernel is fetched from live main at this moment, BusyBox stays at its SHA.
+# The kernel comes from this checkout. BusyBox stays at its pinned SHA.
 python3 tools/ci/fetch_sources.py \
   --lock config/sources.json \
   --dest "$PLAN2001_DEPS" \
@@ -82,19 +47,17 @@ python3 tools/ci/host_control.py \
 
 For a fresh second run, remove/recreate **only the throwaway `deps` and `reports` paths you deliberately created**, never your kernel development checkout, O volume or userland working tree. The fetcher intentionally refuses to overwrite an existing checkout.
 
-The source trees will look like sibling `kernel` and `busybox` dependencies relative to the `userland` checkout, but there is no assumption that they live inside the userland repo. On a development host, inspect the **exact kernel SHA recorded in the run's `sources.json`** when reproducing a specific CI result. A fresh automated run uses the latest `main`, never the host's existing kernel checkout.
-
 ## GitHub Actions
 
-Workflow: [`.github/workflows/build.yml`](../.github/workflows/build.yml).
+Workflow: [`.github/workflows/build.yml`](../../.github/workflows/build.yml).
 
 Triggers: `pull_request`, pushes to `main`, and manual `workflow_dispatch`. Runner: `ubuntu-24.04`. Token permission: `contents: read` only.
 
 Steps:
 
-1. Check out the `userland` commit under test.
+1. Check out the combined repository revision under test.
 2. Install host build tools.
-3. Fetch the latest kernel `main` and immutable BusyBox SHA into separate sibling directories; detach both commits and record them in `sources.json`.
+3. Prepare the same-checkout kernel and the immutable BusyBox SHA, then record their revisions in `sources.json`.
 4. Audit `runtime/abi` and `runtime/libc`. Compile one native ObjectSpace ABI header as a **host syntax test**, and inventory the runtime source files.
 5. Configure BusyBox via `make allnoconfig`, enable exactly `CONFIG_STATIC`, `CONFIG_TRUE`, `CONFIG_FALSE` and `CONFIG_ECHO`, build with **Linux host libc**, check ELF dynamic dependencies, run `true`, `false`, `echo`.
 6. Upload logs, config, ELF inspection and source inventory as a 14-day diagnostic artifact. Summarize what was and was not run.

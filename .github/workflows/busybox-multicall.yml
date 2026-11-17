@@ -2,14 +2,19 @@ name: Native upstream BusyBox multicall
 
 on:
   pull_request:
-    paths: ['ports/**', 'tests/**', 'tools/ci/**', 'config/**', '.github/workflows/busybox-multicall.yml']
   push:
     branches: [main]
-    paths: ['ports/**', 'tests/**', 'tools/ci/**', 'config/**', '.github/workflows/busybox-multicall.yml']
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  PLAN2001_KERNEL: ${{ github.workspace }}
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   amd64:
@@ -23,7 +28,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential gcc-14 g++-14 \
             binutils clang lld make git autoconf automake libtool texinfo flex bison \
             python3 python3-pil curl file mtools ovmf qemu-system-x86
-      - name: Resolve current kernel main and pinned BusyBox
+      - name: Resolve the checked-out kernel revision and pinned BusyBox
         run: |
           python3 tools/ci/fetch_sources.py --lock config/sources.json \
             --dest "$RUNNER_TEMP/deps" --reports "$RUNNER_TEMP/reports"

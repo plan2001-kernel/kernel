@@ -16,8 +16,8 @@ Read `README.md`, `docs/ARCHITECTURE.md`, `docs/POSIX-PROFILE.md`, and `docs/POR
 8. Never silently reformat GE/O volumes.
 9. Use English for agent tasks and code-facing docs. Make bounded PRs and do not merge without explicit authorization.
 10. State exact tests run, their results and **NOT RUN** limitations. Compilation is not runtime evidence.
-11. Use [`config/sources.json`](config/sources.json) as the source policy: **always fetch the latest kernel `main`** per CI run, record its resolved SHA in `reports/sources.json`, and keep BusyBox immutable at its declared commit. Never vendor the kernel into userland.
+11. Test the kernel and userland from the same repository checkout. Record the checkout SHA in CI and keep BusyBox immutable at the commit in [`config/sources.json`](config/sources.json).
 12. The host-control workflow builds a Linux-host static BusyBox **control**, not a Plan2001 ELF. Distinct native target, SPAWN, legacy F5 builtin-shell and real upstream ash/QEMU workflows exist. Only actual passing guest runs establish runtime behavior; the legacy F5 evaluator is distinct from the genuine ash executable.
-13. Native process and asynchronous signal acceptance requires an AMD64 kernel with the alarm service started in ordinary boots (kernel PR #64). A separate integration gate may test an exact pending kernel SHA, but do not label that as passing compatibility with moving kernel main.
+13. Native process and asynchronous signal acceptance requires an AMD64 kernel with the alarm service started in ordinary boots (kernel PR #64).
 
 **First implementation task:** audit a deliberately minimal BusyBox compile/link on Debian against Plan2001's current ABI and C runtime.

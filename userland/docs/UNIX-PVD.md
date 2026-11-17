@@ -61,7 +61,7 @@ with host GCC and AddressSanitizer/UBSan. Tests cover root enumeration,
 relative and absolute paths, dot and dotdot, confinement, failed lookups,
 too-long labels, duplicate names, and the F5 builtin outputs.
 
-The [BusyBox F5 workflow](../.github/workflows/busybox-f5.yml) additionally
+The [BusyBox F5 workflow](../../.github/workflows/busybox-f5.yml) additionally
 builds the freestanding native AMD64 ELF against Plan2001's libc from the
 latest kernel main and executes the actual commands on the real kernel in
 QEMU, using injected PS/2 keyboard events and decoded VGA framebuffer text.

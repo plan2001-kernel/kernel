@@ -9,7 +9,7 @@ recorded as a concrete SHA on each source-fetching run.
 
 ## Run the audit
 
-Workflow: [../.github/workflows/libc-audit.yml](../.github/workflows/libc-audit.yml)
+Workflow: [../.github/workflows/libc-audit.yml](../../.github/workflows/libc-audit.yml)
 
 - Automatically on PRs that change the audit, CI scripts or source pins.
 - Automatically on pushes to `main`.

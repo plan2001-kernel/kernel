@@ -22,13 +22,13 @@ def main():
     ]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
-        raise SystemExit("Missing pinned-kernel inputs: " + ", ".join(missing))
+        raise SystemExit("Missing kernel inputs: " + ", ".join(missing))
 
     # This tests that one native ABI header can be included by a host C compiler.
     # It deliberately does NOT link a Plan2001 executable or exercise its syscalls.
     probe = """#include "objectspace.h"
-_Static_assert(ObjSpaceLabelMax == 48, "unexpected ObjectSpace label layout");
-_Static_assert(ObjSpaceBindingMax == 64, "unexpected binding limit");
+_Static_assert(ObjSpaceLabelMax == 256, "unexpected ObjectSpace label layout");
+_Static_assert(sizeof(((ObjSpaceEntry *)0)->label) == ObjSpaceLabelMax, "unexpected entry label size");
 _Static_assert(sizeof(ObjSpaceBindReq) > 0, "missing ObjectSpace binding ABI");
 int main(void) { return 0; }
 """

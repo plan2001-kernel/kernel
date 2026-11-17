@@ -1,34 +1,23 @@
-name: Unix GE/O persistence (real kernel / same-disk cold reboot)
+name: Unix init boots F5 at root (same-revision kernel / two QEMU boots)
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/busybox-f5.yml'
-      - 'config/sources.json'
-      - 'ports/busybox/**'
-      - 'ports/unix/**'
-      - 'tests/host/**'
-      - 'tools/ci/**'
-      - 'docs/BUSYBOX-F5.md'
-      - 'docs/UNIX-PVD.md'
-      - 'docs/UNIX-INIT.md'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/busybox-f5.yml'
-      - 'config/sources.json'
-      - 'ports/busybox/**'
-      - 'ports/unix/**'
-      - 'tests/host/**'
-      - 'tools/ci/**'
   workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: unix-geo-integration-${{ github.ref }}
+  group: busybox-f5-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   real-f5-console:
@@ -36,7 +25,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Test live kernel-main source resolution policy
+      - name: Test same-checkout source policy
         run: python3 -m unittest discover -s tools/ci -p 'test_fetch_sources.py' -v
 
       - name: Install native build tools and real VGA/QEMU acceptance dependencies
@@ -47,11 +36,9 @@ jobs:
             qemu-system-x86 python3 python3-pil
 
       - name: Host PVD and unix-init handoff/restart tests (ASan/UBSan)
-        run: |
-          bash tools/ci/test_pvd.sh
-          python3 -m unittest discover -s tools/ci -p "test_seed_unix_manifest.py" -v
+        run: bash tools/ci/test_pvd.sh
 
-      - name: Resolve latest kernel main once, and verify BusyBox source SHA
+      - name: Resolve the checked-out kernel revision, and verify BusyBox source SHA
         run: |
           python3 tools/ci/fetch_sources.py \
             --lock config/sources.json \
@@ -78,7 +65,6 @@ jobs:
       - name: Seed disposable GE/O with supervisor and independent Unix child ELFs
         run: |
           python3 tools/ci/seed_busybox_spawn.py \
-            --unix-manifest \
             --kernel "${{ runner.temp }}/plan2001-sources/kernel" \
             --elf "${{ runner.temp }}/plan2001-reports/busybox-target/unix-supervisor-f5-plan2001.elf" \
             --extra-elf "${{ runner.temp }}/plan2001-reports/busybox-target/unix-init-f5-plan2001.elf" \
@@ -86,9 +72,7 @@ jobs:
             --image "${{ runner.temp }}/plan2001-reports/busybox-f5-o.img" \
             --reports "${{ runner.temp }}/plan2001-reports"
 
-      - name: Verify delegated GE/O persistence across two real QEMU cold boots
-        env:
-          UX_GEO_PERSIST: "1"
+      - name: Verify init boot root, shell handoff and reboot reset in two real QEMU boots
         run: |
           bash tools/ci/guest_busybox_f5.sh \
             "${{ runner.temp }}/plan2001-sources/kernel" \
@@ -107,13 +91,13 @@ jobs:
             fi
           done
           echo 'QEMU F5: supervisor boots as manifest process, delegates six stream regions and restricted Vexecute to an independent Unix child.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'PASS only if guest script verifies same GE/O disk across boots. NOT RUN: BusyBox ash/sh, full POSIX tty, hardware.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'NOT RUN: writable F5 storage grant (requires pre-provisioned manifest), BusyBox ash/sh, full POSIX tty, hardware.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload native F5 guest proof (no disk images)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unix-geo-persistent-two-boots-qemu
+          name: unix-init-f5-two-boots-qemu
           path: |
             ${{ runner.temp }}/plan2001-reports/*.md
             ${{ runner.temp }}/plan2001-reports/*.json

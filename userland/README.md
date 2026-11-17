@@ -1,8 +1,8 @@
 # Plan2001 Userland
 
-A small Unix-like userspace built on the experimental [Plan2001 kernel](https://github.com/plan2001-kernel/kernel).
+A small Unix-like userspace built on the experimental [Plan2001 kernel](../README.md).
 
-**Status:** AMD64 has a reduced, genuine BusyBox 1.36.1 **ash** statically linked with upstream Newlib 4.6.0 and native Plan2001 POSIX adapters. An F5 supervisor can start ash with keyboard/VGA, a persistent ObjectSpace-backed Unix file view shared with MicroPython, redirection and forked pipes. The native userland also implements bounded fork/exec/wait, descriptor inheritance and asynchronous signals through capability-based kernel primitives. A separate three-applet BusyBox target and a legacy F5 builtin-shell fixture remain regression tests. The reduced native multicall contains the configured applets; this is not a full POSIX distribution. The required native alarm startup fix (kernel PR #64) is merged into kernel `main`. The ash-integration regression still pins its historical kernel SHA; the separate native multicall workflow resolves current kernel `main` and must be checked independently.
+**Status:** AMD64 has a reduced, genuine BusyBox 1.36.1 **ash** statically linked with upstream Newlib 4.6.0 and native Plan2001 POSIX adapters. An F5 supervisor can start ash with keyboard/VGA, a persistent ObjectSpace-backed Unix file view shared with MicroPython, redirection and forked pipes. The native userland also implements bounded fork/exec/wait, descriptor inheritance and asynchronous signals through capability-based kernel primitives. A separate three-applet BusyBox target and a legacy F5 builtin-shell fixture remain regression tests. The reduced native multicall contains the configured applets; this is not a full POSIX distribution. The required native alarm startup fix (kernel PR #64) is merged into kernel `main`.
 
 A separate [native upstream multicall profile](docs/BUSYBOX-MULTICALL.md) now builds 30 command names with generated executable aliases and a 434-name release inventory. It is an initial implementation of #17; the disabled-applet feasibility audit remains incomplete.
 
@@ -32,7 +32,7 @@ The familiar `/bin`, `/usr`, `/etc`, and `/tmp` directories are userland project
 
 ## Build and CI workspace
 
-The [source-fetching build mechanism](docs/BUILD.md) resolves kernel **`main` at fetch time** and records its commit alongside pinned BusyBox in [`config/sources.json`](config/sources.json). Not every workflow uses this policy: `ash-integration.yml` checks out a fixed kernel SHA for reproducible regressions, while `busybox-multicall.yml` fetches `main`. A PASS from either workflow applies only to the revisions it actually tested. Actions checks out both as **sibling source trees** outside the userland repo, audits the native ABI/libc, and builds a minimal **Linux-host static BusyBox control** (`true`, `false`, `echo`). That control is intentionally linked against the Linux runner's libc and is **not** a Plan2001 program.
+The [build workflow](docs/BUILD.md) tests kernel and userland from the same checkout and records that revision alongside the pinned BusyBox source. The Linux-host static BusyBox control is built separately from the native Plan2001 executables.
 
 The native diagnostic workflow links the upstream BusyBox `true.c` applet against Plan2001's runtime and runs separate guest checks. The [F5 console test](docs/BUSYBOX-F5.md) also builds a native BusyBox-bearing ELF, executes upstream `echo_main` on kernel manifest slot 4 and reads PS/2 keyboard input through kernel-granted console regions, with real QEMU VGA verification. The dedicated [libc ABI audit](docs/libc-audit.md) compares host-compiled BusyBox object references with native library exports. These checks are not evidence of complete POSIX compatibility.
 
@@ -53,14 +53,14 @@ The native diagnostic workflow links the upstream BusyBox `true.c` applet agains
 - [Userspace PVD and memory-only Unix directory tree (stage 2)](docs/UNIX-PVD.md)
 - [MicroPython native BusyBox child-process launch, QEMU and command example](docs/BUSYBOX-SPAWN.md)
 - [Native F5 console I/O adapter, capability rings and QEMU acceptance](docs/BUSYBOX-F5.md)
-- [GitHub Actions build workflow](.github/workflows/build.yml)
+- [GitHub Actions build workflow](../.github/workflows/build.yml)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Minimal POSIX profile](docs/POSIX-PROFILE.md)
 - [BusyBox porting plan](docs/PORTING.md)
 - [BusyBox ash compilation and Newlib POSIX integration](docs/ASH-NEWLIB.md)
 - [Native Unix process, file-descriptor and signal projection](docs/UNIX-PROCESS.md)
 - [UEFI ash boot image, hardware limitations and operator guide](docs/HARDWARE-BOOT.md)
-- [Native ash/Newlib QEMU integration gate](.github/workflows/ash-integration.yml)
+- [Native ash/Newlib QEMU integration gate](../.github/workflows/ash-integration.yml)
 - [Shared GE/O UXFS service over capability-only UXPIPE RPC](docs/UXFS-SHARED-GEO.md)
 - [Development instructions](AGENTS.md)
 

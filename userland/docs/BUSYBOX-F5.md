@@ -7,7 +7,7 @@
 > [ASH-NEWLIB.md](ASH-NEWLIB.md) and
 > [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md) for newer profiles.
 
-CI: [BusyBox F5](../.github/workflows/busybox-f5.yml).
+CI: [BusyBox F5](../../.github/workflows/busybox-f5.yml).
 The kernel and userland are separate repositories: CI **always fetches the
 current kernel `main` branch** at the time of each run, records that
 resolved commit in the uploaded `sources.json`, and uses that detached

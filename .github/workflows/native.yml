@@ -2,18 +2,8 @@ name: Native Plan2001 libc link and QEMU baseline
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/native.yml'
-      - 'config/sources.json'
-      - 'tools/ci/**'
-      - 'docs/BUILD.md'
-      - 'docs/PORTING.md'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/native.yml'
-      - 'config/sources.json'
-      - 'tools/ci/**'
   workflow_dispatch:
 
 permissions:
@@ -22,6 +12,10 @@ permissions:
 concurrency:
   group: native-userland-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   native-abi-and-qemu:
@@ -38,7 +32,7 @@ jobs:
             build-essential gcc-14 binutils clang lld file mtools ovmf \
             qemu-system-x86 python3
 
-      - name: Fetch exact kernel and BusyBox revisions
+      - name: Prepare same-checkout kernel and BusyBox revisions
         run: |
           python3 tools/ci/fetch_sources.py \
             --lock config/sources.json \

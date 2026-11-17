@@ -19,7 +19,7 @@ Discover whether a tiny BusyBox configuration can compile and statically link ag
 * BusyBox upstream: https://busybox.net/ . The initial mirror source revision (BusyBox 1.36.1) and exact SHA are pinned in [`config/sources.json`](../config/sources.json). Record origin and licensing for subsequent revisions.
 * Initial target: Plan2001 AMD64 userspace ELF. ARM64 target support must be verified separately.
 
-The automated baseline in [GitHub Actions](../.github/workflows/build.yml) builds **only a Linux-host BusyBox static control** with `CONFIG_STATIC`, `CONFIG_TRUE`, `CONFIG_FALSE`, and `CONFIG_ECHO` enabled. Its success does not imply a Plan2001 target ELF. At the time of this initial baseline, native compilation/link was future
+The automated baseline in [GitHub Actions](../../.github/workflows/build.yml) builds **only a Linux-host BusyBox static control** with `CONFIG_STATIC`, `CONFIG_TRUE`, `CONFIG_FALSE`, and `CONFIG_ECHO` enabled. Its success does not imply a Plan2001 target ELF. At the time of this initial baseline, native compilation/link was future
 work; it is now implemented in separate target workflows. This host-control
 job still does not by itself prove native guest execution.
 

@@ -1,20 +1,16 @@
 name: Unix userland stages 4-7 (independent evidence)
 on:
+  push:
+    branches: [main]
   pull_request:
-    paths:
-      - '.github/workflows/unix-stages-4-7.yml'
-      - 'ports/unix/**'
-      - 'ports/busybox/**'
-      - 'tests/host/**'
-      - 'tools/ci/test_unix_stages.sh'
-      - 'tools/ci/probe_busybox_ash_newlib.sh'
-      - 'tools/ci/build_newlib_libc.sh'
-      - 'ports/newlib/ash/**'
-      - 'ports/newlib/full/**'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   stage4-geo:
@@ -22,12 +18,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Get kernel interface without changing the external source pin
-        run: |
-          git clone --depth=1 https://github.com/plan2001-kernel/kernel.git "$RUNNER_TEMP/kernel"
-          git -C "$RUNNER_TEMP/kernel" rev-parse HEAD
       - name: Host filesystem / GE/O capability mock, reboot, corruption
-        run: bash tools/ci/test_unix_stages.sh 4 "$RUNNER_TEMP/kernel"
+        run: bash tools/ci/test_unix_stages.sh 4 "$GITHUB_WORKSPACE"
       - name: Limitations
         if: always()
         run: |
@@ -105,10 +97,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Get kernel headers
-        run: git clone --depth=1 https://github.com/plan2001-kernel/kernel.git "$RUNNER_TEMP/kernel"
       - name: Test ABI layout, validation, opaque wait and freestanding compilation
-        run: bash tools/ci/test_unix_stages.sh 6 "$RUNNER_TEMP/kernel"
+        run: bash tools/ci/test_unix_stages.sh 6 "$GITHUB_WORKSPACE"
       - name: Limitations
         if: always()
         run: |
@@ -120,10 +110,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Get kernel headers
-        run: git clone --depth=1 https://github.com/plan2001-kernel/kernel.git "$RUNNER_TEMP/kernel"
       - name: Test >, >>, |, cat, error paths, external ls invocation
-        run: bash tools/ci/test_unix_stages.sh 7 "$RUNNER_TEMP/kernel"
+        run: bash tools/ci/test_unix_stages.sh 7 "$GITHUB_WORKSPACE"
       - name: Limitations
         if: always()
         run: |

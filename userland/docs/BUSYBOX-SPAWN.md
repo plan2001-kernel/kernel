@@ -6,7 +6,7 @@
 > only to the child fixture; see [UNIX-PROCESS.md](UNIX-PROCESS.md) and
 > [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md) for current implementations.
 
-GitHub Actions: [busybox-spawn.yml](../.github/workflows/busybox-spawn.yml).
+GitHub Actions: [busybox-spawn.yml](../../.github/workflows/busybox-spawn.yml).
 
 The boot executable remains the **normal native MicroPython** process.
 MicroPython calls its existing **space.spawn(oid, argv=..., vhandles=...)**

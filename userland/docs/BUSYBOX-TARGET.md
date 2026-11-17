@@ -7,7 +7,7 @@
 > [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md).
 
 This is the **first executable stage** of the Plan2001 BusyBox port.
-The GitHub Actions workflow is [busybox-target.yml](../.github/workflows/busybox-target.yml).
+The GitHub Actions workflow is [busybox-target.yml](../../.github/workflows/busybox-target.yml).
 This stage **does not** claim a complete upstream BusyBox multicall build or
 POSIX libc implementation.
 

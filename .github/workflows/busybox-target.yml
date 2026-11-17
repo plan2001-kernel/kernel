@@ -2,22 +2,8 @@ name: BusyBox native target build and QEMU smoke
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/busybox-target.yml'
-      - 'config/sources.json'
-      - 'ports/busybox/**'
-      - 'tools/ci/build_busybox_target.py'
-      - 'tools/ci/guest_busybox.sh'
-      - 'docs/BUILD.md'
-      - 'docs/BUSYBOX-TARGET.md'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/busybox-target.yml'
-      - 'config/sources.json'
-      - 'ports/busybox/**'
-      - 'tools/ci/build_busybox_target.py'
-      - 'tools/ci/guest_busybox.sh'
   workflow_dispatch:
 
 permissions:
@@ -26,6 +12,10 @@ permissions:
 concurrency:
   group: busybox-target-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   native-busybox-qemu:
@@ -42,7 +32,7 @@ jobs:
             build-essential gcc-14 binutils clang lld file mtools ovmf \
             qemu-system-x86 python3
 
-      - name: Fetch pinned kernel and upstream BusyBox
+      - name: Prepare same-checkout kernel and upstream BusyBox
         run: |
           python3 tools/ci/fetch_sources.py \
             --lock config/sources.json \

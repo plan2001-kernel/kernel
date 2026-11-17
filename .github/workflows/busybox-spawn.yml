@@ -2,25 +2,8 @@ name: MicroPython spawns native BusyBox child in Plan2001 QEMU
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/busybox-spawn.yml'
-      - 'config/sources.json'
-      - 'ports/busybox/**'
-      - 'tests/guest/busybox_spawn_init.py'
-      - 'tools/ci/build_busybox_target.py'
-      - 'tools/ci/seed_busybox_spawn.py'
-      - 'tools/ci/guest_busybox_spawn.sh'
-      - 'docs/BUSYBOX-SPAWN.md'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/busybox-spawn.yml'
-      - 'config/sources.json'
-      - 'ports/busybox/**'
-      - 'tests/guest/busybox_spawn_init.py'
-      - 'tools/ci/build_busybox_target.py'
-      - 'tools/ci/seed_busybox_spawn.py'
-      - 'tools/ci/guest_busybox_spawn.sh'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +12,10 @@ permissions:
 concurrency:
   group: native-busybox-spawn-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   micropython-busybox-child:
@@ -45,7 +32,7 @@ jobs:
             build-essential gcc-14 binutils clang lld file mtools ovmf \
             qemu-system-x86 python3
 
-      - name: Fetch exact kernel and BusyBox source pins
+      - name: Prepare same-checkout kernel and BusyBox source pins
         run: |
           python3 tools/ci/fetch_sources.py \
             --lock config/sources.json \

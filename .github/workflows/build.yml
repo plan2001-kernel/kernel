@@ -13,6 +13,10 @@ concurrency:
   group: userland-build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    working-directory: userland
+
 jobs:
   source-and-host-control:
     runs-on: ubuntu-24.04
@@ -26,7 +30,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential binutils file
 
-      - name: Fetch pinned kernel and BusyBox as sibling trees
+      - name: Prepare same-checkout kernel and BusyBox as sibling trees
         run: |
           python3 tools/ci/fetch_sources.py \
             --lock config/sources.json \

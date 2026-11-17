@@ -2,28 +2,8 @@ name: Newlib real libc and native Plan2001 runtime
 
 on:
   push:
-    branches: [main, feature/ash-hardware-boot]
-    paths:
-      - '.github/workflows/newlib-libc.yml'
-      - 'ports/newlib/**'
-      - 'tests/host/test_newlib_fd.c'
-      - 'tools/ci/test_newlib_fd.sh'
-      - 'tools/ci/build_newlib_libc.sh'
-      - 'tools/ci/newlib_full_*.py'
-      - 'tools/ci/seed_busybox_spawn.py'
-      - 'tools/ci/guest_libgloss_exit.sh'
-      - 'tools/ci/newlib_full_*.sh'
-      - 'ports/unix/uxpipe.*'
+    branches: [main]
   pull_request:
-    paths:
-      - '.github/workflows/newlib-libc.yml'
-      - 'ports/newlib/**'
-      - 'tests/host/test_newlib_fd.c'
-      - 'tools/ci/test_newlib_fd.sh'
-      - 'tools/ci/build_newlib_libc.sh'
-      - 'tools/ci/newlib_full_*.py'
-      - 'tools/ci/newlib_full_*.sh'
-      - 'ports/unix/uxpipe.*'
   workflow_dispatch:
 
 permissions:
@@ -34,6 +14,10 @@ permissions:
 concurrency:
   group: newlib-${{ github.event_name }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: userland
 
 jobs:
   full-newlib:
