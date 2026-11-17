@@ -8,13 +8,9 @@
 > [BUSYBOX-MULTICALL.md](BUSYBOX-MULTICALL.md) for newer profiles.
 
 CI: [BusyBox F5](../../.github/workflows/busybox-f5.yml).
-The kernel and userland are separate repositories: CI **always fetches the
-current kernel `main` branch** at the time of each run, records that
-resolved commit in the uploaded `sources.json`, and uses that detached
-checkout for the entire job. BusyBox 1.36.1 remains immutable at the
+CI tests the kernel and userland from the same checkout and records that
+revision in `sources.json`. BusyBox 1.36.1 remains immutable at the
 upstream commit declared in [sources.json](../config/sources.json).
-Results are tied to a specific resolved kernel commit, not to an evergreen
-promise that the next `main` will work.
 
 ## Native session transport
 

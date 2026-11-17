@@ -3,8 +3,7 @@
 The AMD64 bootstrap builds TinyCC as a native static Plan2001 ELF using
 Newlib and the capability-backed Unix adapters. The immutable source
 revisions and TinyCC's LGPL license are recorded in
-`config/toolchain-sources.json`; kernel main is resolved per CI run under
-the existing source policy. Upstream compiler source is fetched externally,
+`config/toolchain-sources.json`; CI uses the kernel from the same checkout. Upstream compiler source is fetched externally,
 and the small target patch lives in `ports/tinycc/plan2001.patch`.
 
 The trusted bootstrap installs the compiler at `/usr/bin/tcc`, full Newlib
@@ -61,10 +60,7 @@ relinking recipes, runtime objects, license files and checksums. Passing this
 AMD64 fixture does not establish physical hardware or ARM64 support, general
 POSIX completeness, compiler self-hosting, or general execution compatibility beyond the tested native programs.
 
-Scoped execution requires the kernel's scoped-GE SPAWN support. The ordinary
-workflow continues to fetch kernel main. A manually selected integration SHA
-is recorded separately and establishes compatibility only with that pending
-kernel revision, not moving main. The process context ABI is version 5 and
+Scoped execution requires the kernel's scoped-GE SPAWN support. The process context ABI is version 5 and
 records the provider kind of each inherited executable capability; old
 context layouts are rejected. The optional graphical profile uses
 its own native boot-session surface; see [native graphics](NATIVE-GRAPHICS.md).

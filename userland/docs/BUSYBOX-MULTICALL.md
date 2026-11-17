@@ -29,7 +29,7 @@ bash tools/ci/build_multicall_image.sh ../deps/kernel ../deps/busybox ../newlib 
 (cd ../multicall-image && sha256sum -c SHA256SUMS)
 ```
 
-Every CI run resolves current kernel main. The resolved SHA, immutable BusyBox
+CI builds the kernel from the same checkout as userland. The resolved SHA, immutable BusyBox
 1.36.1 SHA, Newlib 4.6.0 SHA, config hash and target ELF hash are recorded. Native
 objects use `-nostdinc`, target Newlib headers, `-nostdlib`, explicit native startup
 and syscall stubs, and a static target linker script. No Linux libc or CRT is
