@@ -108,5 +108,25 @@ if ! grep -q '^PLAN2001-O: ARM64 timer: 3 ticks, interrupts working$' "$plain"; 
 	exit 1
 fi
 
+# EL0/SVC round-trip evidence.  These are guest-observed lines: a build or
+# link success alone does not satisfy them, and the expected permission
+# faults are required evidence, not tolerated noise.
+for marker in \
+	"PLAN2001-O: ARM64 EL0: entered at EL0" \
+	"PLAN2001-O: ARM64 EL0: probe 0 denied by permission fault" \
+	"PLAN2001-O: ARM64 EL0: probe 1 denied by permission fault" \
+	"PLAN2001-O: ARM64 EL0: probe 2 denied by permission fault" \
+	"PLAN2001-O: ARM64 EL0: SVC handled in EL1" \
+	"PLAN2001-O: ARM64 EL0: return value 0x2001 accepted in EL0" \
+	"PLAN2001-O: ARM64 EL0: smoke program completed" \
+	"PLAN2001-O: ARM64 EL0: returned to EL1"
+do
+	if ! grep -qxF "$marker" "$plain"; then
+		echo "qemu-arm64-boot: FAIL: expected EL0 marker missing: $marker" >&2
+		tail -n 40 "$plain" >&2 || true
+		exit 1
+	fi
+done
+
 echo "qemu-arm64-boot: PASS (log $log)"
 grep '^PLAN2001-O:' "$plain"

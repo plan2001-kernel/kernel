@@ -3,29 +3,22 @@
  * from the UEFI loader's BootInfo handoff to the architecture-independent
  * Plan2001-O early boot module (kernel/core/oplanboot.c).
  *
- * It owns a PL011 console, a 2 GiB boot map (entry.S), a GIC (v2 or v3 as
- * QEMU virt exposes) and the EL1 physical timer.  It does not yet contain
- * the AMD64 kernel's devices, scheduler, GE/O or userspace; the ARM64
- * marker is therefore printed only after the shared module has validated
- * the same BootInfo ABI the AMD64 kernel uses.
+ * It owns a PL011 console (console.c), a 2 GiB EL1-only boot map
+ * (entry.S), a GIC (v2 or v3 as QEMU virt exposes) and the EL1 physical
+ * timer.  After shared early boot it runs the bounded EL0/SVC smoke test
+ * (trap.c); that test is an architecture milestone, not a userspace port,
+ * scheduler or syscall ABI.
  */
 #include "u.h"
 #include <bootinfo.h>
 #include <oplanboot.h>
 #include "bootmem.h"
+#include "console.h"
+#include "trap.h"
 
-#define UART0		(KZERO + 0x09000000ULL)
 #define GICD		(KZERO + 0x08000000ULL)
 #define GICC		(KZERO + 0x08010000ULL)
 #define GICR		(KZERO + 0x080a0000ULL)
-
-#define UART_DR		0x000
-#define UART_FR		0x018
-#define UART_IBRD	0x024
-#define UART_FBRD	0x028
-#define UART_LCRH	0x02c
-#define UART_CR		0x030
-#define UART_ICR	0x044
 
 #define GICC_CTLR	0x000
 #define GICC_PMR	0x004
@@ -47,7 +40,6 @@
 static int gicver;
 static volatile int timerprints;
 
-extern void arm64_halt(void);
 extern char _efi64[], end[];
 
 static u32int
@@ -63,81 +55,10 @@ write32(u64int a, u32int v)
 }
 
 static void
-uartraw(int c)
-{
-	while(read32(UART0 + UART_FR) & (1 << 5))
-		;
-	write32(UART0 + UART_DR, (u32int)c);
-}
-
-static void
-uartputc(int c)
-{
-	if(c == '\n')
-		uartraw('\r');
-	uartraw(c);
-}
-
-static void
-uartputs(const char *s)
-{
-	while(*s != 0)
-		uartputc(*s++);
-}
-
-static void
-uarthex(u64int v)
-{
-	static char h[] = "0123456789abcdef";
-	int i;
-
-	uartputs("0x");
-	for(i = 60; i >= 0; i -= 4)
-		uartputc(h[(v >> i) & 0xf]);
-}
-
-static char*
-putu64(char *p, u64int v)
-{
-	char t[24];
-	int n;
-
-	n = 0;
-	do{
-		t[n++] = '0' + v%10;
-		v /= 10;
-	}while(v != 0);
-	while(n > 0)
-		*p++ = t[--n];
-	return p;
-}
-
-static void
-uartdec(u64int v)
-{
-	char buf[24], *p;
-
-	p = putu64(buf, v);
-	*p = 0;
-	uartputs(buf);
-}
-
-static void
 announceout(void *arg, const char *s)
 {
 	(void)arg;
 	uartputs(s);
-}
-
-static void
-uartinit(void)
-{
-	write32(UART0 + UART_ICR, 0x7ff);
-	/* QEMU virt PL011 reference clock is 24 MHz; 115200 8N1 */
-	write32(UART0 + UART_IBRD, 13);
-	write32(UART0 + UART_FBRD, 1);
-	write32(UART0 + UART_LCRH, (3 << 5) | (1 << 4));
-	write32(UART0 + UART_CR, (1 << 0) | (1 << 8) | (1 << 9));
 }
 
 static void
@@ -251,17 +172,6 @@ arm64_irq_handler(void)
 }
 
 void
-arm64_fault(u64int esr, u64int elr, u64int far, u64int spsr)
-{
-	uartputs("\nPLAN2001-O: ARM64 FAULT\n");
-	uartputs("  esr="), uarthex(esr), uartputc('\n');
-	uartputs("  elr="), uarthex(elr), uartputc('\n');
-	uartputs("  far="), uarthex(far), uartputc('\n');
-	uartputs("  spsr="), uarthex(spsr), uartputc('\n');
-	arm64_halt();
-}
-
-void
 arm64_main(u64int bootpa)
 {
 	BootInfo *b;
@@ -331,6 +241,14 @@ arm64_main(u64int bootpa)
 	__asm__ volatile("msr daifclr, #2" : : : "memory");
 
 	uartputs("PLAN2001-O: ARM64 BOOT: shared kernel initialization reached\n");
+
+	/*
+	 * First controlled EL0 execution on ARM64.  It returns here with the
+	 * kernel high map still EL1-only and the EL0 mappings removed; only
+	 * the boot kernel's idle loop follows.
+	 */
+	arm64_el0run();
+	uartputs("PLAN2001-O: ARM64 BOOT: idle after EL0 test\n");
 	for(;;)
 		__asm__ volatile("wfi");
 }

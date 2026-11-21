@@ -145,9 +145,10 @@ the name/program registry is volatile and is reconstructed by trusted boot
 for symbolic program identity. Handle rights authorize cross-owner operations
 when explicitly delegated, independently of immutable provenance.
 ARM64 has an early UEFI/QEMU boot
-foundation with BootInfo handoff, mappings, console, timer interrupts and
-physical-page allocation, not a full-system scheduler, GE/O, syscalls,
-userspace or device parity. MicroPython is the proof-of-concept userspace.
+foundation with BootInfo handoff, mappings, console, timer interrupts,
+physical-page allocation and a first controlled EL0/SVC exception
+round-trip test, not a full-system scheduler, GE/O, syscall ABI, userspace
+or device parity. MicroPython is the proof-of-concept userspace.
 Source and tests govern exact current behavior.
 
 ## Completed six-stage implementation roadmap (historical)

@@ -12,6 +12,13 @@
  * 0x08000000..0x0A000000 (GIC, PL011, RTC) which are Device-nGnRnE.  QEMU
  * virt's RAM starts at 0x40000000, so the kernel at 0x40100000 and the
  * BootInfo blob are inside it.
+ *
+ * Every block is AP=00 (read/write at EL1, no access at EL0) and UXN=1.
+ * The high map is therefore the kernel's private address space: once
+ * trap.c installs the EL0 smoke program in TTBR0, EL0 can reach only the
+ * pages trap.c maps there, never kernel text, page tables or the device
+ * MMIO window.  The short-lived low identity map uses the same L2 tables
+ * and is disabled (TCR_EL1.EPD0) before arm64_main runs.
  */
 	.section .text.entry,"ax",%progbits
 	.global _efi64

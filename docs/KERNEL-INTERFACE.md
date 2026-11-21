@@ -268,7 +268,8 @@ Current `SYSCTL(144)` covers system/own-process inspection and configuration;
 `IOCTL(145)` covers authorized device control/status. Device payload uses
 object operations. Their exact records and rights remain in current headers.
 Low-level device and scheduler mechanisms remain necessary. ARM64 currently
-has early boot only; this AMD64 interface is not ARM64 feature parity.
+has early boot plus a bounded EL0/SVC exception round-trip test only; this
+AMD64 interface is not ARM64 feature parity.
 
 
 ## Boot process manifest (v1)
