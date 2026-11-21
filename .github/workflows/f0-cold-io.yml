@@ -1,0 +1,67 @@
+name: F0 cold-storage comparison (experimental)
+on:
+  push:
+    branches: [experiment/f0-cold-disk-io]
+    paths:
+      - 'tools/host/f0/**'
+      - '.github/workflows/f0-cold-io.yml'
+  pull_request:
+    paths:
+      - 'tools/host/f0/**'
+      - '.github/workflows/f0-cold-io.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-f0-disk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show runner and backing storage
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uname -a
+          cc --version | head -n 1
+          make --version | head -n 1
+          df -T "${RUNNER_TEMP}"
+          lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS || true
+
+      - name: Build and run actual disk-image F0 correctness and comparison
+        shell: bash
+        env:
+          F0_WORK: ${{ runner.temp }}/f0-cold-io
+        run: |
+          set -euo pipefail
+          python3 tools/host/f0/ci.py | tee "${RUNNER_TEMP}/f0-results.txt"
+
+      - name: Summarize measured scope
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## F0 experiment'
+            echo 'The runner is a VM. Cold data is reported as verified only if cache eviction succeeds and measured process read_bytes is nonzero.'
+            echo 'F0 is a file-backed image and the replay is synthetic, not an end-to-end make execution on F0.'
+            echo '```text'
+            if [ -f "${RUNNER_TEMP}/f0-results.txt" ]; then
+              tail -n 45 "${RUNNER_TEMP}/f0-results.txt"
+            else
+              echo 'NOT RUN'
+            fi
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload F0 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f0-cold-io-results
+          path: ${{ runner.temp }}/f0-results.txt
+          if-no-files-found: warn
+          retention-days: 7

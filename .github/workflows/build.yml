@@ -68,3 +68,29 @@ jobs:
           path: ${{ runner.temp }}/plan2001-reports/
           if-no-files-found: warn
           retention-days: 14
+
+  f0-cold-storage-experiment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run standalone F0 on-disk benchmark
+        shell: bash
+        env:
+          F0_WORK: ${{ runner.temp }}/f0-cold-io
+        run: |
+          set -euo pipefail
+          python3 tools/host/f0/ci.py | tee "${RUNNER_TEMP}/f0-results.txt"
+      - name: Publish F0 result
+        if: always()
+        shell: bash
+        run: |
+          echo "## F0 benchmark (experimental)" >> "${GITHUB_STEP_SUMMARY}"
+          if [ -f "${RUNNER_TEMP}/f0-results.txt" ]; then
+            tail -n 45 "${RUNNER_TEMP}/f0-results.txt" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "NOT RUN" >> "${GITHUB_STEP_SUMMARY}"
+          fi
