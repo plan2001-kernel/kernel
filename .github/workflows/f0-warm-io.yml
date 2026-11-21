@@ -1,0 +1,65 @@
+name: F0 warm-cache comparison (experimental)
+
+on:
+  push:
+    branches: [experiment/f0-cold-disk-io]
+    paths:
+      - 'tools/host/f0/warm.py'
+      - 'tools/host/f0/ci.py'
+      - 'tools/host/f0/f0bench.c'
+      - '.github/workflows/f0-warm-io.yml'
+  pull_request:
+    paths:
+      - 'tools/host/f0/**'
+      - '.github/workflows/f0-warm-io.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-f0-warm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          cc --version | head -1
+          df -T "${RUNNER_TEMP}"
+          lsblk -o NAME,TYPE,SIZE,FSTYPE,MOUNTPOINTS || true
+      - name: Warm cache comparison and repeated real Make runs
+        shell: bash
+        env:
+          F0_WORK: ${{ runner.temp }}/f0-warm-io
+        run: |
+          set -euo pipefail
+          python3 tools/host/f0/warm.py | tee "${RUNNER_TEMP}/f0-warm-results.txt"
+      - name: Report findings and limitations
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## F0 warm-cache experiment'
+            echo 'Filesystem replay is synthetic and is not an actual Make build on F0.'
+            echo 'F0 is a Linux-hosted disk image, not a Plan2001 kernel filesystem.'
+            echo 'The benchmark never intentionally evicts the page cache.'
+            echo '```text'
+            if [ -f "${RUNNER_TEMP}/f0-warm-results.txt" ]; then
+              grep -E '^READ_ONLY |^MIXED_IO |^REAL_MAKE_WARM_.*MEDIAN|^REAL_MAKE_F0:|^NOTE |^TEST PASS:|^LIMITATION:' "${RUNNER_TEMP}/f0-warm-results.txt" || true
+            else
+              echo 'NOT RUN'
+            fi
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Archive warm-cache measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f0-warm-cache-results
+          path: ${{ runner.temp }}/f0-warm-results.txt
+          if-no-files-found: warn
+          retention-days: 7
