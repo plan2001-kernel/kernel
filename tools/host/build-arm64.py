@@ -28,7 +28,11 @@ LDSCRIPT = ROOT / "tools/host/kernel-arm64.ld"
 SOURCES = {
     "entry": "kernel/arm64/gcc/entry.S",
     "vectors": "kernel/arm64/gcc/vectors.S",
+    "el0entry": "kernel/arm64/gcc/el0entry.S",
+    "el0prog": "kernel/arm64/gcc/el0prog.S",
     "main": "kernel/arm64/gcc/main.c",
+    "console": "kernel/arm64/gcc/console.c",
+    "trap": "kernel/arm64/gcc/trap.c",
     "bootmem": "kernel/arm64/gcc/bootmem.c",
     "oplanboot": "kernel/core/oplanboot.c",
 }

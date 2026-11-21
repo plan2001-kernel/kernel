@@ -26,8 +26,9 @@ MicroPython is the userspace proof of concept.
 
 The current **AMD64** kernel has a working full-system path, including GE/O
 and MicroPython. The **ARM64** implementation has an early UEFI/QEMU boot
-foundation, shared BootInfo handoff, console, memory initialization and timer
-interrupts, but is not yet a full-system port. Neither architecture is an
+foundation, shared BootInfo handoff, console, memory initialization, timer
+interrupts and a first controlled EL0/SVC exception round-trip test, but is
+not yet a full-system port. Neither architecture is an
 exclusive long-term target.
 
 ## Repository layout
