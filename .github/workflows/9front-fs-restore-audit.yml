@@ -1,0 +1,115 @@
+name: 9front filesystem restore feasibility audit
+on:
+  push:
+    branches:
+      - audit/9front-fs-restore
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare current kernel with pinned 9front namespace sources
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from urllib.request import urlopen
+          from hashlib import sha256
+          import os, re, sys
+
+          upstream_sha = "cb9e5e7e9cde2c76bc44e719dda337abd8b7048b"
+          pairs = [
+              ("chan.c", "kernel/core/chan.c"),
+              ("dev.c", "kernel/core/dev.c"),
+              ("devmnt.c", "kernel/core/devmnt.c"),
+              ("devroot.c", "kernel/core/devroot.c"),
+              ("devcons.c", "kernel/core/devcons.c"),
+              ("devproc.c", "kernel/core/devproc.c"),
+              ("devsrv.c", "kernel/core/devsrv.c"),
+              ("devpipe.c", "kernel/core/devpipe.c"),
+              ("sysfile.c", "kernel/core/sysfile.c"),
+              ("sysproc.c", "kernel/core/sysproc.c"),
+              ("pgrp.c", "kernel/core/pgrp.c"),
+              ("portdat.h", "kernel/core/portdat.h"),
+              ("portfns.h", "kernel/core/portfns.h"),
+              ("userinit.c", "kernel/core/userinit.c"),
+          ]
+          rows = []
+          failures = []
+          for filename, local_path in pairs:
+              url = f"https://raw.githubusercontent.com/9front/9front/{upstream_sha}/sys/src/9/port/{filename}"
+              try:
+                  with urlopen(url, timeout=25) as response:
+                      upstream = response.read()
+                  if not upstream:
+                      raise RuntimeError("upstream file is empty")
+              except Exception as e:
+                  failures.append(f"{filename}: {e}")
+                  continue
+              p = Path(local_path)
+              local = p.read_bytes() if p.exists() else None
+              status = "present (requires semantic review)" if local is not None else "MISSING"
+              rows.append((filename, str(len(upstream)), str(len(local)) if local is not None else "0", status, sha256(upstream).hexdigest()[:12]))
+
+          def without_comments(s):
+              return re.sub(r"/\*.*?\*/|//[^\n]*", "", s, flags=re.S)
+          chan = without_comments(Path("kernel/core/chan.c").read_text())
+          sysfile = without_comments(Path("kernel/core/sysfile.c").read_text())
+          portdat = without_comments(Path("kernel/core/portdat.h").read_text())
+          probes = [
+              ("kernel namespace resolver namec", bool(re.search(r"\bnamec\s*\(", chan))),
+              ("kernel open syscall sysopen", bool(re.search(r"\bsysopen\s*\(", sysfile))),
+              ("native Chan structure", bool(re.search(r"\bstruct\s+Chan\s*\{", portdat))),
+              ("native Dev structure", bool(re.search(r"\bstruct\s+Dev\s*\{", portdat))),
+              ("existing GE/O boot dependency", "obootoid.i" in Path("kernel/amd64/ouser.c").read_text()),
+              ("GE/O sources in GCC manifest", '"g_obj"' in Path("tools/host/build-kernel.py").read_text()),
+          ]
+          lines = [
+              "# 9front restore: SOURCE-ONLY feasibility inventory",
+              "",
+              f"Current repository commit: `{os.environ.get('GITHUB_SHA', 'unknown')}`",
+              f"Pinned 9front reference commit: `{upstream_sha}`",
+              "",
+              "| 9front component | upstream bytes | current bytes | current state | upstream SHA256 prefix |",
+              "| --- | ---: | ---: | --- | --- |",
+          ]
+          lines += [f"| {a} | {b} | {c} | {d} | `{e}` |" for a,b,c,d,e in rows]
+          lines += [
+              "", "## Kernel integration probes", "",
+              "| Probe | Observed |", "| --- | --- |",
+          ]
+          lines += [f"| {name} | {'YES' if yes else 'NO'} |" for name,yes in probes]
+          lines += [
+              "", "## Interpretation",
+              "This is an inventory, NOT a port or proof that sources can be copied unmodified.",
+              "Compile, link, QEMU boot, 9P mount, directory traversal and userland: **NOT RUN**.",
+              "The port will require restoring channel/device types, syscall interfaces,",
+              "mount/namespace semantics, runtime boot sequence and a real 9P file server.",
+              "No current source was modified or deleted by this audit.",
+              "",
+          ]
+          if failures:
+              lines += ["## Upstream retrieval failures", ""]
+              lines += [f"- {x}" for x in failures]
+          out = Path("/tmp/9front-fs-audit.md")
+          out.write_text("\n".join(lines), encoding="utf-8")
+          print(out.read_text())
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(out.read_text())
+          if failures:
+              sys.exit(1)
+          PY
+      - name: Save source inventory report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 9front-fs-restore-inventory
+          path: /tmp/9front-fs-audit.md
+          if-no-files-found: warn
+          retention-days: 7
