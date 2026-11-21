@@ -56,3 +56,12 @@ jobs:
             fi
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload F0 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f0-cold-io-results
+          path: ${{ runner.temp }}/f0-results.txt
+          if-no-files-found: warn
+          retention-days: 7
