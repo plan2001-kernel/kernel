@@ -1,5 +1,10 @@
 name: F0 cold-storage comparison (experimental)
 on:
+  push:
+    branches: [experiment/f0-cold-disk-io]
+    paths:
+      - 'tools/host/f0/**'
+      - '.github/workflows/f0-cold-io.yml'
   pull_request:
     paths:
       - 'tools/host/f0/**'
@@ -43,11 +48,11 @@ jobs:
             echo '## F0 experiment'
             echo 'The runner is a VM. Cold data is reported as verified only if cache eviction succeeds and measured process read_bytes is nonzero.'
             echo 'F0 is a file-backed image and the replay is synthetic, not an end-to-end make execution on F0.'
-            echo '\`\`\`text'
+            echo '```text'
             if [ -f "${RUNNER_TEMP}/f0-results.txt" ]; then
               tail -n 45 "${RUNNER_TEMP}/f0-results.txt"
             else
               echo 'NOT RUN'
             fi
-            echo '\`\`\`'
+            echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
