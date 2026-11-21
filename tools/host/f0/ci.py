@@ -94,14 +94,36 @@ def make_data():
     print(f"dataset: 513 source files, 64 headers, 464 synthetic blobs; {len(imports)} unique records", flush=True)
 
 
-def drop_caches():
+def drop_caches(backend=None, image=None):
+    """Return GLOBAL, FILE_DATA_ONLY or UNAVAILABLE.
+
+    FILE_DATA_ONLY is not a cold-boot approximation: it cannot evict VFS
+    dentries, inodes, program binaries or shared libraries.
+    """
     run(["sync"])
     cmd = ["sudo", "-n", "sh", "-c", "echo 3 > /proc/sys/vm/drop_caches"]
     proc = run(cmd, capture=True, check=False)
-    if proc.returncode:
-        print("COLD CACHE UNAVAILABLE:", proc.stderr.strip()[:200])
-        return False
-    return True
+    if proc.returncode == 0:
+        return "GLOBAL"
+    if not hasattr(os, "posix_fadvise"):
+        return "UNAVAILABLE"
+    paths = []
+    if backend == "f0" and image:
+        paths = [Path(image)]
+    elif backend in ("ext4", "make"):
+        paths = [ROOT / line.split()[1] for line in IMPORT.read_text().splitlines()
+                 if line.startswith("R ")]
+    else:
+        return "UNAVAILABLE"
+    ok = 0
+    for path in paths:
+        try:
+            with path.open("rb") as f:
+                os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+                ok += 1
+        except OSError:
+            return "UNAVAILABLE"
+    return "FILE_DATA_ONLY" if ok else "UNAVAILABLE"
 
 
 def parse(text):
@@ -132,7 +154,7 @@ def verify_recovery():
 
 def make_baseline(cold):
     run(["make", "clean"],cwd=ROOT,capture=True)
-    if cold: cold=drop_caches()
+    if cold: cold=drop_caches("make")
     t=time.monotonic()
     proc=run(["make", "-j4"],cwd=ROOT,capture=True)
     sec=time.monotonic()-t
@@ -149,7 +171,7 @@ def measure(cold):
             trial=BASE / "trial.f0"
             if trial.exists(): trial.unlink()
             if backend=="f0":shutil.copyfile(BASE_IMG,trial)
-            evicted=drop_caches() if cold else False
+            evicted=drop_caches(backend, trial if backend=="f0" else None) if cold else "UNAVAILABLE"
             res=run([F0,"replay",backend,ROOT,trial,MANIFEST],capture=True)
             m=parse(res.stdout);m["round"]=round;m["cold_eviction"]=evicted
             print("REPLAY:",m,flush=True)
@@ -170,8 +192,9 @@ def measure(cold):
     f0=statistics.median(r["ms"] for r in rows if r["backend"]=="f0")
     ext=statistics.median(r["ms"] for r in rows if r["backend"]=="ext4")
     print(f"F0 speedup ratio ext4/F0={ext/f0:.3f}x")
-    has_cold=all(r["cold_eviction"] and r["read_bytes"]>0 for r in rows)
+    has_cold=all(r["cold_eviction"]=="GLOBAL" and r["read_bytes"]>0 for r in rows)
     print("COLD_STORAGE_VERIFIED="+("YES" if has_cold else "NO"))
+    print("FILE_DATA_READ_VERIFIED="+("YES" if all(r["read_bytes"]>0 for r in rows) else "NO"))
     if not has_cold: print("WARNING: Do not present the replay as verified cold physical disk I/O.")
     print("IMPORTANT: synthetic replay is NOT a real make execution on F0.")
     print("IMPORTANT: F0 uses a file-backed image on the host filesystem; not a raw partition.")
@@ -181,10 +204,10 @@ def main():
     build();make_data();create_image();verify_recovery()
     filesystem=run(["findmnt","-T",ROOT,"-n","-o","FSTYPE,SOURCE"],capture=True,check=False)
     print("BACKING FILESYSTEM:",filesystem.stdout.strip() if filesystem.returncode==0 else "unknown")
-    cold=drop_caches()
-    print("DROP_CACHES_AVAILABLE=",cold)
-    make_baseline(cold)
-    measure(cold)
+    cache_mode=drop_caches("make")
+    print("CACHE_EVICTION_MODE=",cache_mode)
+    make_baseline(cache_mode!="UNAVAILABLE")
+    measure(cache_mode!="UNAVAILABLE")
 
 
 if __name__=="__main__":main()
